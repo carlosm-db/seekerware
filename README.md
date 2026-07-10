@@ -6,16 +6,17 @@ perfil configurado, descarta el ruido y notifica por Telegram **solo** cuando
 algo encaja de verdad — con nota de posicionamiento y CV sugerido. El humano
 siempre es quien aplica.
 
-> **Estado**: diseno cerrado 2026-07-07 · en construccion (paso 0: documentacion).
-> Los .md documentan intencion; **el codigo es la fuente de verdad**
-> (ver [`CLAUDE.md`](CLAUDE.md)).
+> **Estado**: diseno v2 cerrado 2026-07-09 (reframe a Cloudflare; el diseno v1
+> all-GAS del 2026-07-07 quedo en el historial de git) · en construccion
+> (paso 0: documentacion). Los .md documentan intencion; **el codigo es la
+> fuente de verdad** (ver [`CLAUDE.md`](CLAUDE.md)).
 
 ---
 
 ## Como funciona (3 capas + paso humano)
 
 ```
-[trigger 30-60 min]
+[cron 30-60 min]
       |
       v
 1. DISCOVERY   — poll de APIs publicas ATS (Greenhouse / Lever / Ashby, sin login)
@@ -26,7 +27,7 @@ siempre es quien aplica.
       |            (la IA nunca decide verdicts; solo enriquece survivors)
       v
 3. NOTIFY &    — dedup (hash de URL), freshness (<= 3 dias), verify-on-notify,
-   TRACK          push a Telegram, tracking en el Sheet, CV factory -> Doc en Drive
+   TRACK          push a Telegram, tracking en D1, CV factory -> Doc en Drive
       |
       v
    HUMANO      — revisa y aplica manualmente
@@ -42,30 +43,39 @@ siempre es quien aplica.
 
 ## Plataforma
 
-**Google Apps Script** (patron del ecosistema DiversoLAB-GAS), gestionado con
-clasp desde este repo:
+**Cloudflare Worker** en TypeScript, gestionado con wrangler desde este repo y
+desplegado via GitHub Actions. Todo en free tiers ($0/mes):
 
-- **Store / config / tracking**: un Google Sheet (tabs `Companies`, `Jobs`,
-  `Blocks`, `Config`).
+- **Runtime**: un worker con `scheduled()` (pipeline, Cron Trigger 30-60 min) y
+  `fetch()` (dashboard + API, siempre detras de login).
+- **Store / config / tracking**: D1 (SQLite) con tablas `companies`, `jobs`,
+  `blocks`, `config` y migrations versionadas.
+- **Consola**: dashboard web servido por el mismo worker (login via Cloudflare
+  Access) — tracking de jobs, empresas, tuning del perfil y banco de blocks.
 - **IA**: Gemini API free tier, solo sobre survivors; salida JSON forzada por
   `responseSchema`. En CV, la IA **selecciona frases pre-aprobadas, nunca
   redacta**.
+- **CV**: Docs generados en Drive via service account (render determinista
+  sobre plantilla; unica dependencia Google).
 - **Notificacion**: Telegram Bot API.
-- **Dos cuentas Google**: una de datos (Sheet + Drive) y una de ejecucion
-  (proyecto GAS, trigger, API keys, llamadas salientes).
 
 ## Setup
 
 1. **Tokens ATS** — sin cuenta: el token es el slug de la URL publica del board
    (`boards.greenhouse.io/{token}`, `jobs.lever.co/{token}`,
-   `jobs.ashbyhq.com/{token}`). Se registran como filas del tab `Companies`.
-2. **Bot de Telegram** — crear con @BotFather, copiar el token; obtener el
+   `jobs.ashbyhq.com/{token}`). Se registran en la tabla `companies`.
+2. **Cloudflare** — cuenta con Workers + D1; API token para el deploy (secrets
+   de GitHub Actions: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`).
+3. **Bot de Telegram** — crear con @BotFather, copiar el token; obtener el
    `chat_id` via `https://api.telegram.org/bot<token>/getUpdates` tras enviarle
    un mensaje al bot.
-3. **Gemini API key** — de la cuenta de ejecucion (free tier).
-4. **Script Properties** (nunca secretos en codigo): `TELEGRAM_BOT_TOKEN`,
-   `TELEGRAM_CHAT_ID`, `GEMINI_API_KEY`, `FRESHNESS_MAX_DAYS`, `SHEET_ID`,
-   `DRIVE_FOLDER_ID`, `CV_TEMPLATE_DOC_ID`.
+4. **Gemini API key** — free tier (AI Studio).
+5. **Google Docs (CV factory)** — service account GCP; la cuenta de datos
+   comparte carpeta Drive y plantilla de CV como editor al service account.
+6. **Worker secrets** (via `wrangler secret put`, nunca en el repo):
+   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GEMINI_API_KEY`,
+   `GOOGLE_SA_KEY`, `DRIVE_FOLDER_ID`, `CV_TEMPLATE_DOC_ID`. El tuning
+   (incluido `FRESHNESS_MAX_DAYS`) vive en la tabla `config`.
 
 ## Estructura del repo
 
@@ -73,17 +83,21 @@ clasp desde este repo:
 seekerware/
 ├── README.md / CLAUDE.md / .mcp.json
 ├── docs/                      # documentacion (ver indice abajo)
-├── .clasp.json                # (paso 1) proyecto GAS
-├── appsscript.json            # (paso 1)
-├── codigo.js                  # (paso 1) entrypoint, api_*, helpers
-├── connectors.js              # (pasos 1 y 4) Greenhouse -> Lever + Ashby
-├── scoring.js                 # (paso 2) motor de reglas + tracks
-├── freshness.js               # (paso 3) freshness + verify-on-notify + auto-expire
-├── store.js                   # (paso 3) Sheet
-├── notify.js                  # (paso 3) Telegram
-├── pipeline.js                # (paso 3) orquestacion del trigger
-├── ia_agents.js               # (paso 5) wrapper Gemini + agentes
-└── ia_pipeline.js             # (paso 5) CV factory
+├── wrangler.jsonc             # (paso 1) config del worker + bindings
+├── package.json / tsconfig.json
+├── migrations/                # (paso 1) schema D1 versionado
+├── src/
+│   ├── index.ts               # (paso 1) entrypoint: scheduled() + fetch()
+│   ├── connectors/            # (pasos 1 y 5) greenhouse.ts -> lever.ts + ashby.ts
+│   ├── scoring.ts             # (paso 2) motor de reglas + tracks
+│   ├── pipeline.ts            # (paso 3) orquestacion del run
+│   ├── freshness.ts           # (paso 3) freshness + verify-on-notify + auto-expire
+│   ├── store.ts               # (pasos 1-3) acceso a D1
+│   ├── notify.ts              # (paso 3) Telegram
+│   ├── dashboard/             # (pasos 4 y 7) consola web
+│   ├── ia/                    # (paso 6) gemini.ts + agents.ts + cv_factory.ts
+│   └── gdocs.ts               # (paso 6) service account + Docs/Drive REST
+└── test/                      # vitest + fixtures de feeds
 ```
 
 ## Documentacion
@@ -93,7 +107,7 @@ seekerware/
 | [`CLAUDE.md`](CLAUDE.md) | Reglas de trabajo para agentes; codigo = fuente de verdad |
 | [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) | Glosario canonico y convenciones de codigo/docs/commits |
 | [`docs/PRD.md`](docs/PRD.md) | Producto: modelo funcional, tracks, requerimientos, no-goals |
-| [`docs/TRD.md`](docs/TRD.md) | Tecnico: connectors, scoring, IA, store, errores |
-| [`docs/DATABASE.md`](docs/DATABASE.md) | El Sheet como base de datos: tabs, columnas, estados |
-| [`docs/UI.md`](docs/UI.md) | Telegram, el Sheet como consola, Doc de CV, dashboard futuro |
+| [`docs/TRD.md`](docs/TRD.md) | Tecnico: connectors, scoring, IA, store, dashboard, errores |
+| [`docs/DATABASE.md`](docs/DATABASE.md) | D1 como base de datos: tablas, columnas, estados |
+| [`docs/UI.md`](docs/UI.md) | Telegram, dashboard, Doc de CV |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | Pasos, criterios de aceptacion, inputs, decisiones |

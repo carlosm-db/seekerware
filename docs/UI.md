@@ -1,9 +1,8 @@
 # UI — Seekerware
 
-Diseno de interfaz. La UI primaria NO es una app: es **Telegram (push)** para
-enterarse y **el Sheet (pull)** para configurar y hacer tracking. El Doc de CV
-en Drive es el artefacto entregable. Dashboard HtmlService: fase opcional 6.
-Terminologia en [`CONVENTIONS.md`](CONVENTIONS.md).
+Diseno de interfaz. Dos canales: **Telegram (push)** para enterarse y el
+**dashboard (pull)** para configurar y hacer tracking. El Doc de CV en Drive es
+el artefacto entregable. Terminologia en [`CONVENTIONS.md`](CONVENTIONS.md).
 
 ---
 
@@ -35,24 +34,44 @@ Reglas:
 - Fallos repetidos del feed de una empresa generan un mensaje al mismo chat con
   prefijo `⚠️ MANTENIMIENTO`.
 
-## 2. El Sheet — consola de configuracion y tracking
+## 2. Dashboard — consola de configuracion y tracking
 
-Que edita el usuario vs que escribe el sistema, por tab (detalle de columnas en
-[`DATABASE.md`](DATABASE.md)):
+Webapp servida por el worker, SIEMPRE detras de login (TRD §8). Es la unica
+consola del sistema: reemplaza al Sheet del diseno v1.
 
-| Tab | Edita el usuario | Escribe el sistema |
-|-----|------------------|--------------------|
-| `Companies` | name, ats, token, active, notes | last_ok_fetch, fail_count |
-| `Jobs` | solo status -> `skipped` (opcional) | todo lo demas |
-| `Blocks` | todas las columnas del banco + approved | suggested (propuestas IA) |
-| `Config` | pesos, keywords, tracks, umbrales | — |
+Rutas y proposito (que edita el usuario vs que escribe el sistema; detalle de
+columnas en [`DATABASE.md`](DATABASE.md)):
 
-Formato condicional en `Jobs.status` para lectura rapida:
+| Ruta | Entidad | Edita el usuario | Escribe el sistema |
+|------|---------|------------------|--------------------|
+| `/companies` | `companies` | name, ats, token, active, notes | last_ok_fetch, fail_count |
+| `/` (jobs) | `jobs` | solo status -> `skipped` (opcional) | todo lo demas |
+| `/blocks` | `blocks` | todas las columnas del banco + approved | suggested (propuestas IA) |
+| `/config` | `config` | pesos, keywords, tracks, umbrales, FRESHNESS_MAX_DAYS | — |
 
-- `new` = azul · `notified` = verde · `closed` = gris · `skipped` = sin color.
+### Consola minima (build 4)
 
-Vistas filtradas recomendadas: "Notificados esta semana", "Apply pendientes",
-"Cerrados sin aplicar".
+- Tabla de jobs con filtros por track/verdict/status y busqueda; badges de
+  color por status: `new` = azul · `notified` = verde · `closed` = gris ·
+  `skipped` = neutro.
+- CRUD de `companies` y editor de `config` (formularios simples).
+- Vistas filtradas: "Notificados esta semana", "Apply pendientes", "Cerrados
+  sin aplicar".
+
+### Consola completa (build 7)
+
+- Detalle por job: desglose del score por categoria (transparencia del motor de
+  reglas), historial de estados.
+- Flujo de aprobacion del banco: revisar `suggested`, editar y aprobar blocks
+  en la misma vista.
+- Acciones: marcar aplicado/descartado, regenerar CV, dry-run por empresa desde
+  la UI.
+- Pulido visual: **layout ancho obligatorio** (aprovechar todo el ancho
+  disponible), tema claro/oscuro, estados vacios y de error cuidados.
+
+Principios: HTML server-rendered por el worker, sin build pesado; interaccion
+progresiva (formularios que funcionan sin JS; JS solo donde suma). El dashboard
+es una herramienta diaria del propietario: se disena para lectura rapida.
 
 ## 3. Doc de CV sugerido (Drive)
 
@@ -74,17 +93,3 @@ Estructura (desde plantilla `CV_TEMPLATE_DOC_ID`, placeholders `{{...}}`):
    Y/Z").
 
 Idioma del Doc = idioma del job (blocks `text_en` o `text_es`).
-
-## 4. Dashboard HtmlService (fase opcional 6)
-
-Webapp GAS al estilo de los modulos DiversoLAB (`index.html` + parciales +
-`google.script.run`):
-
-- Tabla de jobs con filtros por track/verdict/status y busqueda.
-- Detalle por job: desglose del score por categoria (transparencia del motor de
-  reglas).
-- Acciones: marcar aplicado/descartado, regenerar CV.
-- **Layout ancho obligatorio**: aprovechar todo el ancho disponible; auditar el
-  patron de layout de los modulos DiversoLAB antes de construir.
-- Si alguna accion es lenta, progreso via polling de `PropertiesService`
-  (patron DiversoLAB).

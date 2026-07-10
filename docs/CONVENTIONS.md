@@ -22,25 +22,41 @@ actualiza en el mismo commit que introduce el termino nuevo.
 | survivor | job con verdict Apply o Stretch-worth-it que paso gates y freshness | finalista, candidato, seleccionado |
 | freshness | edad de publicacion <= `FRESHNESS_MAX_DAYS` (3 dias) | vigencia, antiguedad |
 | verify-on-notify | re-consulta del job en la API del ATS inmediatamente antes de notificar | liveness check, verificacion de vida |
-| store | persistencia en el Sheet (tab `Jobs`) | base de datos, DB, registro, historico |
-| block | frase pre-aprobada del banco (tab `Blocks`), anclada a un rol real | frase, snippet, bullet, oracion |
-| run | una ejecucion completa del pipeline disparada por el trigger | corrida, ciclo, iteracion |
-| dry-run | run sin escrituras al store ni notificaciones; imprime al log | simulacion, test run |
+| store | persistencia del sistema en D1 (tabla `jobs`), accedida solo via `src/store.ts` | base de datos, DB, registro, historico |
+| block | frase pre-aprobada del banco (tabla `blocks`), anclada a un rol real | frase, snippet, bullet, oracion |
+| run | una ejecucion completa del pipeline disparada por el cron | corrida, ciclo, iteracion |
+| dry-run | run sin escrituras al store ni notificaciones; via `GET /api/dry-run` o `wrangler dev` local | simulacion, test run |
 | pipeline | orquestacion poll -> score -> gates -> dedup -> notify | flujo, proceso |
+| worker | el servicio Cloudflare que ejecuta el pipeline (handler `scheduled`) y el dashboard (handler `fetch`) | funcion, lambda, script |
+| dashboard | consola web servida por el worker (config, tracking, banco de blocks), detras de login | panel, admin, webapp, consola |
+| migration | cambio versionado del schema D1, archivo en `migrations/` | script SQL, patch de schema |
 | enricher | agente IA que mejora los textos de un survivor | analyst, mejorador |
 | cv_selector | agente IA que selecciona IDs de blocks por seccion (JSON con enum de IDs) | selector de frases |
 | cv_verifier | agente IA a temperatura 0 que verifica el Doc renderizado y sugiere tweaks | verifier, validador |
 
-## 2. Codigo (GAS)
+## 2. Codigo (TypeScript / Cloudflare Workers)
 
-- Estilo del ecosistema DiversoLAB-GAS: `var`, `function` declarations, sin
-  modulos/imports/npm; ambito global compartido entre archivos.
-- Prefijos: `api_*` = superficie publica invocable; `_*` = funcion privada.
-- Secretos y configuracion sensible SOLO en Script Properties, leidos via el
-  helper cacheado `_p()`. Nunca credenciales en codigo, comentarios o logs.
-- Nombres de archivos, funciones y variables usan el termino canonico del
-  glosario (p. ej. `connectors.js`, `_scoreJob()`, `_isFresh()`).
-- HTTP saliente solo con `UrlFetchApp.fetch` y `muteHttpExceptions: true`.
+- TypeScript estricto (`strict: true`), modulos ES, imports explicitos. Sin
+  `any`: usar `unknown` + narrowing y tipos por concepto canonico (`Job`,
+  `Company`, `Verdict`, `Block`).
+- Un modulo por concepto del glosario: `src/connectors/greenhouse.ts`,
+  `src/scoring.ts`, `src/freshness.ts`, `src/store.ts`, `src/notify.ts`.
+  Funciones exportadas usan el termino canonico (`scoreJob()`, `isFresh()`);
+  privado = no exportado (el ambito de modulo reemplaza el prefijo `_` de GAS).
+- Superficie publica invocable = rutas `/api/*` del worker (protegidas por el
+  mismo login del dashboard).
+- Secretos SOLO como Worker secrets, leidos del binding `env`. Jamas en codigo,
+  comentarios, logs, commits ni en `wrangler.jsonc` (alli solo vars no
+  sensibles).
+- HTTP saliente con `fetch` y manejo explicito de errores: verificar `res.ok`,
+  capturar por empresa; un fallo externo nunca tumba el run (equivalente al
+  `muteHttpExceptions` de GAS).
+- Acceso a D1 SOLO desde `src/store.ts`: statements preparados con bindings
+  (nunca interpolacion de strings en SQL); `db.batch()` para escrituras
+  multiples por run.
+- Tests con vitest en `test/`, con fixtures de respuestas reales de los ATS
+  (anonimizadas). Todo connector y el motor de scoring tienen tests; el
+  pipeline se prueba localmente con `wrangler dev --test-scheduled`.
 
 ## 3. Documentacion
 
@@ -53,7 +69,7 @@ actualiza en el mismo commit que introduce el termino nuevo.
 ## 4. Commits
 
 - Mensajes en ingles, convencionales, en presente ("add lever connector").
-- Nunca secretos, tokens ni IDs privados (Sheet, carpeta Drive, chat de
-  Telegram) en mensajes ni en contenido commiteado.
+- Nunca secretos, tokens ni IDs privados (carpeta Drive, plantilla de Doc, chat
+  de Telegram, account id de Cloudflare) en mensajes ni en contenido commiteado.
 - Un cambio de terminologia = commit propio que toca codigo + docs + glosario
   a la vez.

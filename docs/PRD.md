@@ -17,8 +17,8 @@ imprecisiones.
 
 | Actor | Ve | Hace | NO hace |
 |-------|----|------|---------|
-| **Usuario** (propietario) | Mensajes de Telegram (fits nuevos), el Sheet (tracker/config/banco de blocks), Docs de CV en Drive | Configura empresas y perfil, aprueba blocks, revisa fits, **aplica manualmente** | Nada automatico hacia empresas |
-| **Sistema** | Feeds publicos de ATS, el Sheet, el banco de blocks | Poll, normaliza, puntua, deduplica, verifica freshness y vida, notifica, ensambla CV sugerido | Nunca aplica, nunca contacta empresas, nunca redacta contenido de CV |
+| **Usuario** (propietario) | Mensajes de Telegram (fits nuevos), el dashboard (tracker/config/banco de blocks), Docs de CV en Drive | Configura empresas y perfil, aprueba blocks, revisa fits, **aplica manualmente** | Nada automatico hacia empresas |
+| **Sistema** | Feeds publicos de ATS, el store, el banco de blocks | Poll, normaliza, puntua, deduplica, verifica freshness y vida, notifica, ensambla CV sugerido | Nunca aplica, nunca contacta empresas, nunca redacta contenido de CV |
 | **Empresas / ATS** | Trafico de lectura anonimo a sus APIs publicas | Publican jobs | No reciben datos del usuario |
 
 Flujo funcional: el sistema descubre -> puntua -> filtra -> notifica con
@@ -54,7 +54,7 @@ freshness_ok       true | unknown (false nunca se notifica)
 ## 5. Requerimientos funcionales
 
 - **RF1 — Descubrimiento same-day**: job publicado hoy -> notificado dentro del
-  siguiente run del trigger (30-60 min).
+  siguiente run del cron (30-60 min).
 - **RF2 — Freshness**: nada con mas de `FRESHNESS_MAX_DAYS` (3) dias de
   publicado. El primer run de una empresa siembra el historico sin notificar.
 - **RF3 — Verify-on-notify**: antes de notificar se re-consulta el job en la API
@@ -71,15 +71,19 @@ freshness_ok       true | unknown (false nunca se notifica)
   Docs, cv_verifier senala tweaks como sugerencias.
 - **RF8 — Tracking**: todo job visto queda en el store con score, verdict,
   estado y fechas; los que salen del feed se auto-marcan `closed`.
-- **RF9 — Configuracion sin deploy**: agregar empresa = fila en el Sheet; tunear
-  keywords/pesos/umbrales = editar Config; aprobar un block = marcar su fila.
+- **RF9 — Configuracion sin deploy**: agregar empresa, tunear
+  keywords/pesos/umbrales y aprobar blocks se hace desde el dashboard (tablas
+  `companies`/`config`/`blocks`); ningun cambio de perfil requiere deploy.
+- **RF10 — Consola con login**: el dashboard es privado, siempre detras de
+  autenticacion; nada del sistema queda expuesto publicamente.
 
 ## 6. No-goals (explicitos)
 
 - **No auto-apply** ni contacto automatico con empresas o reclutadores.
 - **No scraping** detras de login ni de portales sin API publica.
 - **No generacion libre de CV**: la IA no redacta; selecciona blocks aprobados.
-- **No multi-usuario**: herramienta personal.
+- **No multi-usuario**: herramienta personal (el login existe para privacidad,
+  no para cuentas).
 - **No costear ni temporalizar** en textos generados por IA.
 
 ## 7. Metricas de exito
@@ -89,9 +93,12 @@ freshness_ok       true | unknown (false nunca se notifica)
 - Volumen de notificaciones bajo (fits reales; si molesta, se sube el umbral).
 - 0 afirmaciones en CVs sugeridos que no provengan de blocks aprobados.
 - El propietario puede mantener y extender el sistema por su cuenta.
+- Costo de operacion: $0/mes (free tiers estrictos).
 
 ## 8. Evolucion futura (fuera del alcance inicial)
 
-- Comandos del bot (`/pending`, `/applied <id>`, `/cv <id>` on-demand).
-- Dashboard HtmlService (layout ancho).
-- Tracking de estado de aplicaciones (aplicado / entrevista / oferta).
+- Comandos del bot (`/pending`, `/applied <id>`, `/cv <id>` on-demand) via
+  webhook de Telegram en el mismo worker.
+- Tracking de estado de aplicaciones (aplicado / entrevista / oferta) en el
+  dashboard.
+- Re-score manual de jobs existentes tras cambios de config.
