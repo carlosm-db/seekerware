@@ -100,7 +100,7 @@ output_key}`, runner secuencial, wrapper con:
 | Agente | Modelo | Temp | Rol |
 |--------|--------|------|-----|
 | `enricher` | 3.1-flash-lite | 0.4 | Mejora why_it_fits / gap_to_address / positioning_lead del survivor |
-| `cv_selector` | 3.1-flash-lite | 0.3 | Selecciona IDs de blocks por seccion + orden + enfasis (JSON, enum de IDs) |
+| `cv_selector` | 3.1-flash-lite | 0.3 | Selecciona IDs de blocks por seccion + orden + enfasis (JSON, enum de IDs); enum construido SOLO de blocks `approved`; seleccion guiada por `tags` (vocabulario compartido con `config`) y `angle` |
 | `cv_verifier` | 2.5-flash | 0 | Verifica el Doc renderizado contra job y banco; apendice "Suggested tweaks" (sugerencias, nunca ediciones) |
 
 ## 5. Store, freshness y notificacion
@@ -124,7 +124,8 @@ output_key}`, runner secuencial, wrapper con:
 
 ```
 survivor Apply
-  -> cv_selector (IDs por seccion, idioma segun el job)
+  -> cv_selector (IDs por seccion/angle segun tags matcheados del job;
+     idioma segun el job — render ES exige es_status approved)
   -> render determinista via APIs REST de Google:
        Drive files.copy de CV_TEMPLATE_DOC_ID hacia DRIVE_FOLDER_ID,
        Docs documents.batchUpdate (replaceAllText) con el texto EXACTO

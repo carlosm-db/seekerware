@@ -23,7 +23,10 @@ actualiza en el mismo commit que introduce el termino nuevo.
 | freshness | edad de publicacion <= `FRESHNESS_MAX_DAYS` (3 dias) | vigencia, antiguedad |
 | verify-on-notify | re-consulta del job en la API del ATS inmediatamente antes de notificar | liveness check, verificacion de vida |
 | store | persistencia del sistema en D1 (tabla `jobs`), accedida solo via `src/store.ts` | base de datos, DB, registro, historico |
-| block | frase pre-aprobada del banco (tabla `blocks`), anclada a un rol real | frase, snippet, bullet, oracion |
+| block | fraseo aprobado de un fact en el banco (tabla `blocks`), anclado a un anchor y diferenciado por angle e idioma | frase, snippet, bullet, oracion |
+| fact | hecho profesional verificable del registro canonico, con metrica exacta unica; los blocks son sus fraseos | logro, claim, afirmacion, dato |
+| anchor | rol o proyecto real al que se ancla un block (tabla `anchors`); neutro — los titulos mostrados son proyecciones por mercado | role_anchor, puesto, cargo |
+| angle | proyeccion de un fact para un tipo de rol: `data`, `compliance`, `operations`, `leadership` | enfoque, variante, version |
 | run | una ejecucion completa del pipeline disparada por el cron | corrida, ciclo, iteracion |
 | dry-run | run sin escrituras al store ni notificaciones; via `GET /api/dry-run` o `wrangler dev` local | simulacion, test run |
 | pipeline | orquestacion poll -> score -> gates -> dedup -> notify | flujo, proceso |
@@ -33,6 +36,11 @@ actualiza en el mismo commit que introduce el termino nuevo.
 | enricher | agente IA que mejora los textos de un survivor | analyst, mejorador |
 | cv_selector | agente IA que selecciona IDs de blocks por seccion (JSON con enum de IDs) | selector de frases |
 | cv_verifier | agente IA a temperatura 0 que verifica el Doc renderizado y sugiere tweaks | verifier, validador |
+
+Regla de vocabulario compartido: los `tags` del banco de blocks y las
+keywords de la tabla `config` usan los MISMOS terminos canonicos (familias
+domain / tool / signal). Un termino nuevo se agrega en ambos lados en el
+mismo cambio — son la superficie de matching job <-> contenido.
 
 ## 2. Codigo (TypeScript / Cloudflare Workers)
 

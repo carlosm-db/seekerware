@@ -87,22 +87,30 @@ plataforma (§10).
 - **Aceptacion**: mismas garantias del paso 3 con empresas reales de cada ATS,
   incluyendo verify-on-notify especifico (Ashby: nunca contra HTML).
 
-## 8. Paso 6 — Banco de blocks + CV factory
+## 8. Paso 6 — Integracion del banco de blocks + CV factory
 
-- **Entregables**: tabla `blocks` poblada y aprobada; `src/ia/gemini.ts`
-  (wrapper), `src/ia/agents.ts` (enricher + cv_selector + cv_verifier),
-  `src/ia/cv_factory.ts`, `src/gdocs.ts` (JWT de service account + Docs/Drive
-  REST); plantilla de Doc y carpeta en Drive compartidas al service account.
+El CONTENIDO del banco se construye desacoplado del pipeline (iniciado
+2026-07-09): fact harvest desde el material del propietario -> documento
+maestro privado (fuera del repo) -> revision y aprobacion por lotes -> pase
+ES -> validacion de cobertura contra postings reales. El paso 6 es la
+INTEGRACION de ese banco ya aprobado.
+
+- **Entregables**: seed del banco aprobado a `anchors` + `blocks` en D1;
+  `src/ia/gemini.ts` (wrapper), `src/ia/agents.ts` (enricher + cv_selector +
+  cv_verifier), `src/ia/cv_factory.ts`, `src/gdocs.ts` (JWT de service
+  account + Docs/Drive REST); plantilla de Doc y carpeta en Drive compartidas
+  al service account.
 - **Aceptacion**: un job con verdict Apply genera un Doc cuyo cuerpo contiene
-  SOLO texto de blocks aprobados (verificable por diff), con apendice
-  "Suggested tweaks"; el enricher mejora textos sin cambiar verdicts.
-- **Inputs requeridos**: todas las versiones de CV del propietario (EN/ES) por
-  canal privado -> se decomponen en blocks que el aprueba en el dashboard;
-  plantilla de Doc; carpeta Drive; service account GCP (JSON en Worker secret);
-  `GEMINI_API_KEY`.
-- **Riesgos**: cobertura inicial del banco insuficiente (el flujo `suggested`
-  la alimenta con el tiempo); free tier de Gemini entrena con datos (solo
-  material aprobado para terceros sale hacia la API).
+  SOLO texto de blocks `approved` (verificable por diff), con apendice
+  "Suggested tweaks"; el enricher mejora textos sin cambiar verdicts; render
+  ES bloqueado si algun block seleccionado tiene `es_status != approved`.
+- **Inputs requeridos**: banco aprobado (fases C-E del build de contenido);
+  plantilla de Doc; carpeta Drive; service account GCP (JSON en Worker
+  secret); `GEMINI_API_KEY`. CVs EN recibidos 2026-07-09; ES via drafts
+  propios aprobados por el propietario (sus CVs ES los reemplazan si llegan).
+- **Riesgos**: cobertura inicial del banco insuficiente (mitigada por la
+  fase E de validacion y el flujo `suggested`); free tier de Gemini entrena
+  con datos (solo material aprobado para terceros sale hacia la API).
 
 ## 9. Paso 7 — Dashboard v2 (consola completa)
 
@@ -150,3 +158,11 @@ plataforma (§10).
   un limite real lo exige.
 - **2026-07-09** — El dashboard pasa de opcional a first-class (v1 minima paso
   4, v2 completa paso 7): al desaparecer el Sheet, es la unica consola.
+- **2026-07-09** — Banco de blocks disenado como subsistema nucleo (schema
+  v2): tabla `anchors` (roles/proyectos neutros, titulos por mercado),
+  `fact_key` (fact != fraseo; metricas single-source), `angle`
+  (data/compliance/operations/leadership), ciclo de vida
+  draft/review/approved/retired, paridad ES (`es_status`), tags con
+  vocabulario compartido con `config`. El contenido se construye desde ya en
+  documento maestro privado del propietario (fuera del repo); D1 pasa a ser
+  master al sembrarse en el paso 6.

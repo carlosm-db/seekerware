@@ -117,5 +117,5 @@ de tiempo y nunca en el repo.
 | 3 | Pipeline + freshness + Telegram + cron | Pendiente |
 | 4 | Dashboard v1 (consola minima + login) | Pendiente |
 | 5 | Connectors Lever + Ashby | Pendiente |
-| 6 | Banco de blocks + CV factory (Gemini + Google Docs) | Pendiente (requiere CVs EN/ES + service account) |
+| 6 | Integracion banco de blocks + CV factory (Gemini + Google Docs) | Contenido del banco en curso desde 2026-07-09 (doc maestro privado); integracion pendiente (requiere service account) |
 | 7 | Dashboard v2 (consola completa) | Pendiente |

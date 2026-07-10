@@ -8,7 +8,8 @@ en [`CONVENTIONS.md`](CONVENTIONS.md).
 
 ## 1. Principios
 
-- Una sola base con 4 tablas: `companies`, `jobs`, `blocks`, `config`.
+- Una sola base con 5 tablas: `companies`, `jobs`, `anchors`, `blocks`,
+  `config`.
 - Todo cambio de schema es una migration versionada (`wrangler d1 migrations`);
   nunca DDL manual contra produccion.
 - Acceso SOLO via `src/store.ts`: statements preparados con bindings;
@@ -121,32 +122,77 @@ CREATE INDEX idx_jobs_company ON jobs (company_id, last_seen);
 - Los verdicts se calculan al descubrir el job; cambios de config aplican a
   jobs futuros (re-score manual: evolucion futura).
 
-## 5. Tabla `blocks` — banco de frases del CV
+## 5. Tablas `anchors` y `blocks` — el banco de blocks
+
+El banco es el activo nucleo de la capa de CV: el registro canonico,
+gobernado y con evidencia de las afirmaciones profesionales del propietario.
+Modelo: un **fact** (hecho verificable, con metrica exacta unica) puede tener
+varios **blocks** (fraseos aprobados), diferenciados por **angle** (la
+proyeccion que sirven) e idioma. La garantia select-only vale lo que valga la
+completitud y exactitud de este banco.
+
+### `anchors` — registro de roles y proyectos reales
 
 | Columna | Tipo | Escribe | Descripcion |
 |---------|------|---------|-------------|
-| id | TEXT PK | usuario | p. ej. `sum-payments-01` |
-| section | TEXT enum `summary\|skills\|experience` | usuario | Seccion del CV |
-| role_anchor | TEXT | usuario | Rol real al que pertenece el block (vacio en summary/skills) |
-| text_en / text_es | TEXT | usuario | El mismo hecho en cada idioma |
-| tags | TEXT csv | usuario | Para matching con el job |
-| evidence | TEXT | usuario | A que hecho real corresponde la afirmacion |
-| approved | INTEGER 0/1 | usuario | Solo blocks con 1 entran al enum del cv_selector |
+| id | TEXT PK | usuario | p. ej. `scotiatech-2021`, `prj-chequeguardai` |
+| kind | TEXT enum `role\|project` | usuario | Tipo de anchor |
+| company / dates | TEXT | usuario | Metadata de render |
+| titles | TEXT JSON | usuario | Titulos mostrados por mercado: `{internal, market_canada, market_colombia, contractor}` — el anchor es neutro; el titulo es proyeccion |
+
+```sql
+CREATE TABLE anchors (
+  id      TEXT PRIMARY KEY,
+  kind    TEXT NOT NULL CHECK (kind IN ('role','project')),
+  company TEXT,
+  dates   TEXT,
+  titles  TEXT  -- JSON {internal, market_canada, market_colombia, contractor}
+);
+```
+
+### `blocks` — fraseos aprobados de facts
+
+| Columna | Tipo | Escribe | Descripcion |
+|---------|------|---------|-------------|
+| id | TEXT PK | usuario | `{sec}-{anchor\|topic}-{nn}[-{angle}]`, p. ej. `exp-scotiatech-01-data` |
+| section | TEXT enum `summary\|skills\|experience\|projects` | usuario | Seccion del CV |
+| anchor_id | TEXT FK -> anchors | usuario | Null en summary/skills |
+| fact_key | TEXT | usuario | Agrupa todos los fraseos/idiomas de un mismo fact |
+| angle | TEXT enum `data\|compliance\|operations\|leadership` o NULL | usuario | Proyeccion que sirve este fraseo |
+| text_en / text_es | TEXT | usuario | Fraseos del MISMO fact en cada idioma (paridad obligatoria) |
+| es_status | TEXT enum `missing\|draft\|approved` | usuario | Estado de paridad ES |
+| tags | TEXT csv | usuario | Vocabulario controlado COMPARTIDO con `config` (familias domain/tool/signal + track-fit) |
+| evidence | TEXT | usuario | Hecho real verificable que respalda la afirmacion |
+| source | TEXT | usuario | Procedencia (CV variante, caso del portfolio, proyecto) |
+| status | TEXT enum `draft\|review\|approved\|retired` | usuario | Ciclo de vida; solo `approved` entra al enum del cv_selector; `retired` nunca se borra (audit trail) |
 | suggested | TEXT | sistema | Propuesta de la IA (tweak o block nuevo) pendiente de revision; NUNCA se usa en render |
+| updated_at | TEXT ISO | sistema | Ultima modificacion |
 
 ```sql
 CREATE TABLE blocks (
-  id          TEXT PRIMARY KEY,
-  section     TEXT NOT NULL CHECK (section IN ('summary','skills','experience')),
-  role_anchor TEXT,
-  text_en     TEXT,
-  text_es     TEXT,
-  tags        TEXT,
-  evidence    TEXT,
-  approved    INTEGER NOT NULL DEFAULT 0,
-  suggested   TEXT
+  id         TEXT PRIMARY KEY,
+  section    TEXT NOT NULL
+               CHECK (section IN ('summary','skills','experience','projects')),
+  anchor_id  TEXT REFERENCES anchors(id),
+  fact_key   TEXT NOT NULL,
+  angle      TEXT CHECK (angle IN ('data','compliance','operations','leadership')),
+  text_en    TEXT,
+  text_es    TEXT,
+  es_status  TEXT NOT NULL DEFAULT 'missing'
+               CHECK (es_status IN ('missing','draft','approved')),
+  tags       TEXT,
+  evidence   TEXT,
+  source     TEXT,
+  status     TEXT NOT NULL DEFAULT 'draft'
+               CHECK (status IN ('draft','review','approved','retired')),
+  suggested  TEXT,
+  updated_at TEXT
 );
 ```
+
+El registro de facts (fact_key -> hecho + metrica exacta + evidencia +
+fuente) vive en el documento maestro del banco (recurso privado del
+propietario, fuera del repo); `fact_key` lo referencia desde D1.
 
 ## 6. Tabla `config` — tuning del motor de reglas y operacion
 
@@ -172,7 +218,11 @@ las claves y sub-formatos JSON **se decide en build 2** con jobs reales.
 - Auto-expire SOLO sobre empresas con fetch exitoso en el run.
 - Primer run de una empresa: seeding con `status = 'skipped'`, sin notificar.
 - `closed` no se reabre ni re-notifica.
-- El cv_selector solo ve blocks con `approved = 1`.
+- El cv_selector solo ve blocks con `status = 'approved'`.
+- Un block `approved` DEBE tener `evidence`, `fact_key` y >= 1 tag.
+- Render en ES exige `es_status = 'approved'` en todos los blocks
+  seleccionados (reporte de paridad antes de renderizar colombia_perm).
+- `retired` nunca se borra (audit trail del banco).
 - Escrituras del run en `db.batch()` (atomicidad por lote).
 
 ## 8. Limites y escala
