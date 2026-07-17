@@ -36,6 +36,19 @@ actualiza en el mismo commit que introduce el termino nuevo.
 | enricher | agente IA que mejora los textos de un survivor | analyst, mejorador |
 | cv_selector | agente IA que selecciona IDs de blocks por seccion (JSON con enum de IDs) | selector de frases |
 | cv_verifier | agente IA a temperatura 0 que verifica el Doc renderizado y sugiere tweaks | verifier, validador |
+| consola | la webapp multipagina servida por el worker (10 paginas, UI.md §2) | dashboard (obsoleto), panel, admin |
+| triage | revision diaria de survivors notificados hasta decision (preparar/aplicado/descartar/posponer) | inbox, revision, bandeja |
+| application | ciclo de vida de postulacion de un job, propiedad del usuario (tabla `applications`) | postulacion, candidatura, proceso |
+| stage | etapa de una application: `prepared\|applied\|interview\|offer\|rejected\|dismissed` | fase, estado (reservado a jobs.status) |
+| snooze | posponer un item de triage hasta una fecha (`snoozed_until`) | recordatorio, aplazar |
+| replay | re-score simulado de jobs almacenados contra una config borrador; NUNCA escribe en `jobs` | simulacion, preview, what-if |
+| event | suceso tipado del log de observabilidad (tabla `events`) | error log, suceso, incidencia |
+| notification | registro de un intento de entrega push (tabla `notifications`) | alerta, aviso, mensaje |
+| meter | medidor de cuota consumida vs limite free tier (derivado de `runs`) | quota gauge, indicador |
+| digest | resumen semanal del funnel (pagina Semana + mensaje Telegram del lunes) | reporte, resumen semanal |
+| cluster | agrupacion soft de jobs por `title_norm` + tags (radar de similares) | grupo, familia de roles |
+| answer | respuesta estandar aprobada para formularios de aplicacion (tabla `answers`, gobernanza tipo blocks) | respuesta enlatada, plantilla, profile_answer |
+| kit | vista por job con CV en PDF, answers y links para aplicar en minutos; el humano SIEMPRE envia | paquete, bundle, auto-apply |
 
 Regla de vocabulario compartido: los `tags` del banco de blocks y las
 keywords de la tabla `config` usan los MISMOS terminos canonicos (familias

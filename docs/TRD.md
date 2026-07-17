@@ -80,7 +80,12 @@ codigo.
    plantillas por categoria disparada; el enricher los mejora solo en survivors.
 
 El motor es una funcion pura `scoreJob(job, config)` -> testeable con vitest
-sin red ni D1.
+sin red ni D1. Devuelve un `ScoreResult` completo (matches por categoria,
+gates por track, verdicts, near-miss) que el pipeline PERSISTE en
+`jobs.score_breakdown` — la transparencia de la consola y el **replay** de
+calibracion (re-score simulado de los ultimos N jobs contra una config
+borrador, en lotes de 50 por request para respetar el limite de CPU; nunca
+escribe en `jobs`) dependen de ese JSON y de `jobs.description_text`.
 
 ## 4. Capa IA — Gemini (solo survivors)
 
@@ -147,6 +152,17 @@ y llama las APIs REST con `fetch`. Sin SDKs de Google (no corren en Workers).
 
 Nombre del Doc: `CV — {company} — {title} — {yyyy-mm-dd}`.
 
+**Export PDF + archivo R2** (paso 6): tras el cv_verifier se renderiza una
+copia LIMPIA (sin apendice "Suggested tweaks") y se exporta via Drive
+`files/{id}/export?mimeType=application/pdf` (+1 subrequest). El PDF se
+archiva inmutable en R2 (binding `CV_ARCHIVE`; bucket creado por el
+propietario — infra no-code; JAMAS publico, solo lectura via worker tras el
+login). Dos snapshots: `generated` (al renderizar) y `submitted` (al marcar
+aplicado — el CV exacto enviado, post-ediciones del propietario; el diff
+entre ambos alimenta el banco de blocks). Key:
+`cv/{url_hash}/{yyyymmdd-hhmm}-{generated|submitted}.pdf`. Fallo de R2 =
+evento `r2_fail`; nunca bloquea notificacion ni CV.
+
 ## 7. Orquestacion (src/pipeline.ts)
 
 ```
@@ -165,29 +181,58 @@ sin escribir al store ni notificar; responde jobs normalizados y scores en
 JSON. Localmente: `wrangler dev` + `curl` al endpoint, o
 `--test-scheduled` para el pipeline completo contra una D1 local.
 
-## 8. Dashboard y API
+**Instrumentacion del run** (DATABASE.md §9): cero escrituras intermedias —
+objeto `RunStats` en memoria, `trackedFetch()` envuelve todo fetch saliente
+(cuenta subrequests), la contabilidad D1 es exacta y gratis
+(`meta.rows_read/rows_written` de cada resultado), y todo se vuelca en UN
+flush dentro del `db.batch()` final. La fila de `runs` se inserta al inicio
+(status `running`) y se completa en `finally`; el run siguiente estampa
+`crashed` a huerfanos (> 10 min en `running`). Presupuesto tipico de
+subrequests con pagina round-robin de 25 empresas: ~39 de 50 (margen 22%);
+los meters de la consola son SUMs de `runs` del dia contra
+`config['quota_limits']`. Acciones de la consola (dry-run, regenerar CV) son
+invocaciones propias con SU presupuesto de 50 — nunca compiten con el cron.
 
-Servidos por el handler `fetch()` del mismo worker. Detalle funcional en
-[`UI.md`](UI.md).
+## 8. Consola y API
 
-- Rutas UI: `/` (jobs), `/companies`, `/config`, `/blocks`. Rutas API:
-  `/api/*` (mismas entidades + `dry-run`).
-- HTML server-rendered por el worker, sin framework de build pesado; libreria
-  de routing minima si hace falta (decision en build 4). Layout ancho
-  obligatorio (UI.md §4).
-- **Login**: Cloudflare Access (Zero Trust free, <= 50 usuarios) delante del
-  hostname del worker; el worker ademas valida el header
-  `Cf-Access-Jwt-Assertion` en `/api/*` (defensa en profundidad). Access
-  requiere un hostname en una zona propia de Cloudflare; si no hay dominio
-  disponible, fallback: auth propia minima con cookie firmada (secreto en
-  worker). Decision en build 4.
+Servidas por el handler `fetch()` del mismo worker. Arquitectura funcional
+completa (10 paginas, rutas, split v1/v2) en [`UI.md`](UI.md) §2; diseño
+extendido en `docs/audits/2026-07-17-diseno-consola-ux.md`.
+
+- **Stack** (decidido 2026-07-17): **Hono** (~20 KB, cero deps transitivas) +
+  `hono/jsx` server-rendered (JSX a string con auto-escape — el texto de
+  jobs es contenido de terceros) + **htmx vendorizado** (toda mutacion es un
+  `<form>` real que funciona sin JS; htmx lo mejora a swaps parciales) +
+  islas de JS vanilla (~200 lineas: teclado, tema, drag del kanban). CERO
+  pipeline de build adicional (wrangler ya bundlea; tsconfig `jsx:
+  "react-jsx"`, `jsxImportSource: "hono/jsx"`). CSS unico con custom
+  properties (tema claro/oscuro por cookie, sin flash). Assets estaticos
+  detras de `run_worker_first: true` — "nada publico" se mantiene literal.
+- **Login** (decidido 2026-07-17 — el propietario no tiene dominio, Access
+  descartado): cookie de sesion firmada. `/login` (unica ruta sin auth):
+  password verificado contra el secret `LOGIN_PASSWORD_HASH` (SHA-256,
+  comparacion constante) -> cookie `session = expiry.nonce.HMAC(...,
+  SESSION_SECRET)`, `HttpOnly; Secure; SameSite=Lax; Max-Age=30d`. Middleware
+  en todas las rutas; `/api/*` acepta ademas el Bearer `API_TOKEN` (scripts).
+  CSRF: SameSite=Lax + verificacion de `Origin` en metodos mutantes. Fuerza
+  bruta: contador en D1 (10/hora) + sleep fijo. Rotacion = rotar los dos
+  secrets.
+- **Replay** (Calibracion, paso 7): lotes de 50 jobs por request encadenados
+  por cursor htmx; D1 no cuenta como subrequest; cero llamadas externas.
+- **Webhook Telegram** (paso 8): `POST /telegram/<TELEGRAM_WEBHOOK_TOKEN>`
+  (token de ruta secreto, distinto del login) para botones (Ver kit / Marcar
+  aplicado) y respuestas conversacionales del banco `answers`.
 
 ## 9. Secretos y configuracion
 
-- **Worker secrets** (via `wrangler secret put`, nunca en el repo):
-  `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GEMINI_API_KEY`,
-  `GOOGLE_SA_KEY` (JSON del service account), `DRIVE_FOLDER_ID`,
-  `CV_TEMPLATE_DOC_ID`.
+- **Worker secrets** (via `wrangler secret put` o panel, tipo Secret, nunca
+  en el repo): `API_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+  `GEMINI_API_KEY`, `GOOGLE_SA_KEY` (JSON del service account),
+  `DRIVE_FOLDER_ID`, `CV_TEMPLATE_DOC_ID`; en paso 4: `LOGIN_PASSWORD_HASH`,
+  `SESSION_SECRET`; en paso 8: `TELEGRAM_WEBHOOK_TOKEN`. Los datos de
+  contacto del propietario para el kit (nombre, email, telefono, links)
+  viven como clave privada de `config` en D1 (decision 2026-07-17: dato
+  operativo de runtime, permitido por CLAUDE.md §4; JAMAS en el repo).
 - **Tabla `config`** (editable sin deploy): tuning del motor +
   `FRESHNESS_MAX_DAYS`.
 - **GitHub Actions secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
@@ -203,6 +248,10 @@ propietario.
 
 ## 11. Manejo de errores y observabilidad
 
+- Fuente primaria: las tablas `runs`/`events`/`notifications` (DATABASE.md
+  §9), consultables en la pagina Salud de la consola. `console.log` +
+  `wrangler tail` + metricas del dashboard de Cloudflare quedan para
+  debugging en vivo — nunca se duplican en D1.
 - Aislamiento por empresa; resumen del run al log (`console.log` estructurado;
   visible con `wrangler tail` y en el dashboard de Cloudflare).
 - Fallos repetidos de una empresa (mas de N runs, `companies.fail_count`) ->
@@ -224,5 +273,8 @@ propietario.
 - El service account solo tiene acceso a la carpeta Drive y plantilla
   compartidas — no al resto del Drive de la cuenta de datos.
 - GitHub via MCP scoped; identidad git pinneada por-repo (CLAUDE.md §8).
-- Trafico saliente: solo APIs publicas de ATS, Telegram, Gemini y Google
-  (Docs/Drive/OAuth).
+- Trafico saliente: solo APIs publicas de ATS (incl. `?questions=true` de
+  Greenhouse y, por decision 2026-07-17, el HTML publico de la pagina de
+  apply de Lever para deteccion de preguntas — nunca tras login), Telegram,
+  Gemini y Google (Docs/Drive/OAuth). El sistema JAMAS envia aplicaciones ni
+  contacta empresas (CLAUDE.md §7.8).

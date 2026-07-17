@@ -2,167 +2,182 @@
 
 Plan de ejecucion por pasos, con criterios de aceptacion e inputs requeridos.
 Estado vivo en `CLAUDE.md` §9 (y en ultima instancia, en el codigo — que es la
-fuente de verdad).
+fuente de verdad). Diseno extendido de consola/observabilidad/kit en
+`docs/audits/2026-07-17-*.md`.
 
 ---
 
 ## 1. Fases y dependencias
 
 ```
-0 docs ──> 1 scaffold + Greenhouse ──> 2 scoring ──> 3 pipeline + notify + cron ──> 4 dashboard v1 ──> 5 Lever + Ashby ──> 6 blocks + CV factory ──> 7 dashboard v2
-                                          ^                                                                                     ^
-                                          requiere perfil                                                                       requiere CVs EN/ES + service account
+0 docs ──> 1 scaffold+Greenhouse ──> 2 scoring+deltas ──> 3 pipeline+cron+instrumentacion ──> 4 consola v1 ──> 5 Lever+Ashby ──> 6 CV factory+PDF+R2 ──> 7 consola v2 ──> 8 kit+bot bidireccional
+                                        ^                                                                                            ^
+                                        requiere perfil (recibido 2026-07-09)                                                        requiere banco aprobado + service account (listo)
 ```
 
-Los pasos 4 y 5 pueden intercambiarse; el 6 requiere el 3 operando; el 7
-requiere el 4. Hasta el paso 4, `companies` y `config` se editan via
-migrations/`wrangler d1 execute` (sin dashboard).
+Los pasos 4 y 5 pueden intercambiarse; el 6 requiere el 3; el 7 requiere el 4
+(y /blocks, /cvs del 7 requieren el 6); el 8 requiere 6 y 7 parciales. Hasta el
+paso 4, `companies` y `config` se editan via seeds/`wrangler d1 execute`.
 
-## 2. Paso 0 — Documentacion · HECHO 2026-07-07 · REESCRITO 2026-07-09
+## 2. Paso 0 — Documentacion · HECHO 2026-07-07 · reescrito 2026-07-09 · enriquecido 2026-07-17
 
-Entregables: `README.md`, `CLAUDE.md`, `docs/` (PRD, TRD, UI, DATABASE,
-IMPLEMENTATION_PLAN, CONVENTIONS). Reescritos 2026-07-09 tras el reframe de
-plataforma (§10).
+## 3. Paso 1 — Scaffold + Greenhouse + dry-run + CI · HECHO 2026-07-17
 
-## 3. Paso 1 — Scaffold + connector Greenhouse + dry-run
+Worker vivo (workers.dev), D1 migrada (0001), connector Greenhouse con
+canonical URL corregida (identity params), auth Bearer, CI deploy. Bug real
+encontrado y corregido: colapso de url_hash en boards con pagina propia.
 
-- **Objetivo**: ver jobs reales normalizados, sin efectos, con CI/CD operando.
-- **Entregables**: repo TypeScript (wrangler config, `package.json`,
-  `tsconfig.json`, vitest); D1 creada + migration inicial con las 4 tablas;
-  `src/index.ts`, `src/connectors/greenhouse.ts`, `src/store.ts` (lectura);
-  ruta `GET /api/dry-run?company=<token>`; workflow de GitHub Actions
-  (typecheck + tests + migrations + deploy).
-- **Aceptacion**: `wrangler dev` local y el worker desplegado responden al
-  dry-run con jobs normalizados de un board real, `posted_at` correcto y URL
-  canonica; tests de connector en verde; deploy automatico en push a `main`.
-- **Inputs requeridos**: cuenta Cloudflare + API token; secrets de Actions
-  (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`); 1 empresa Greenhouse de
-  prueba.
-- **Riesgos**: boards sin `first_published` (usar fallback y marcar
-  `freshness_ok = 'unknown'`).
+## 4. Paso 2 — Scoring + deltas de schema urgentes
 
-## 4. Paso 2 — Scoring + tracks
+- **Objetivo**: score y verdict confiables sobre jobs reales, con
+  transparencia total persistible.
+- **Entregables**: migration `0002` (`jobs.description_text`,
+  `jobs.score_breakdown`, `jobs.title_norm` — IMPOSIBLES de reconstruir
+  despues; deben nacer antes de acumular datos); `src/scoring.ts` (funcion
+  pura, `ScoreResult` completo con matches por categoria, gates por track,
+  near-miss); `src/config-store.ts`; dry-run extendido con scoring; seeds
+  LOCALES (gitignored) de `config` y empresas ★ aplicados a D1 local y
+  remota; tests del motor.
+- **Aceptacion**: sobre lotes de jobs reales de las ★, los verdicts coinciden
+  con la revision del propietario (sesion de calibracion iterativa por chat:
+  el reacciona a resultados, no revisa configs); el desglose por categoria es
+  explicable en cada caso.
+- **Inputs**: ninguno nuevo (perfil recibido 2026-07-09; ★ verificadas).
+- **Riesgos**: sobre/sub-filtrado inicial -> replay (paso 7) lo hara sistematico;
+  mientras tanto iteraciones cortas de seeds.
 
-- **Objetivo**: score y verdict confiables sobre jobs reales.
-- **Entregables**: `src/scoring.ts` (funcion pura + tests); tabla `config`
-  poblada (formato de claves decidido aqui); dry-run extendido con score,
-  gates y verdict por track.
-- **Aceptacion**: sobre un batch de jobs reales, los verdicts coinciden con la
-  revision manual del propietario; el desglose por categoria es explicable.
-- **Inputs requeridos**: material de perfil del propietario (crudo, cualquier
-  formato) para derivar config. Se recibe por canal privado; al repo solo llega
-  configuracion neutral en D1 (nada personal en el repo).
-- **Riesgos**: sobre/sub-filtrado inicial -> se tunean umbrales en iteraciones
-  cortas; keywords bilingues EN/ES.
+## 5. Paso 3 — Pipeline + cron + Telegram + instrumentacion
 
-## 5. Paso 3 — Pipeline + freshness + Telegram + cron
-
-- **Objetivo**: operacion real de punta a punta.
 - **Entregables**: `src/pipeline.ts`, `src/freshness.ts`, `src/notify.ts`,
-  escrituras en `src/store.ts`; handler `scheduled()` + Cron Trigger 30-60 min.
-- **Aceptacion**: un run real (1) siembra el primer feed sin notificar,
-  (2) deduplica en runs siguientes, (3) notifica a Telegram un job nuevo,
-  fresco y verificado vivo, (4) auto-marca `closed` los que salen del feed,
-  (5) sobrevive el fallo de una empresa sin afectar las demas.
-- **Inputs requeridos**: bot de Telegram (token + chat_id); Worker secrets
-  poblados.
-- **Riesgos**: limite de 50 subrequests/invocacion (mitigacion: round-robin de
-  empresas por run con cursor en `config`).
+  escrituras en `src/store.ts`; handler `scheduled()` + Cron Trigger 30 min
+  con round-robin (~25 empresas/run); migration `0003` (runs, events,
+  notifications, ALTERs de companies); instrumentacion RunStats/trackedFetch
+  (TRD §7); alertas MANTENIMIENTO con guardas anti-spam.
+- **Aceptacion**: las 5 garantias originales (siembra sin notificar, dedup,
+  notificacion de job nuevo+fresco+vivo, auto-expire, aislamiento por
+  empresa) + cada run deja su fila en `runs` con embudo y cuotas exactas +
+  un run crashed queda estampado por el siguiente.
+- **Inputs**: ninguno (Telegram configurado 2026-07-17).
 
-## 6. Paso 4 — Dashboard v1 (consola minima)
+## 6. Paso 4 — Consola v1 (operacion diaria)
 
-- **Objetivo**: operar el sistema sin tocar SQL: la consola reemplaza al Sheet
-  del diseno v1.
-- **Entregables**: handler `fetch()` con rutas `/`, `/companies`, `/config`
-  (UI.md §2 consola minima); login operando (Access o fallback, TRD §8).
-- **Aceptacion**: agregar una empresa, tunear un umbral y marcar un job
-  `skipped` desde el navegador, sin deploy ni SQL; ninguna ruta responde sin
-  autenticacion.
-- **Inputs requeridos**: decision de hostname (zona propia en Cloudflare para
-  Access, o fallback con cookie firmada).
-- **Riesgos**: scope creep visual — el pulido va en el paso 7, no aqui.
+- **Entregables**: stack Hono/jsx+htmx (TRD §8); login cookie firmada
+  (secrets `LOGIN_PASSWORD_HASH`, `SESSION_SECRET`); migration `0004`
+  (applications, job_events, config_history); paginas: Hoy (tira de estado +
+  triage con 5 acciones), /jobs (tabla+filtros+vistas guardadas+chip
+  por-que-NO; detalle con desglose y gates), /companies (CRUD+salud+ROI+
+  probar token), /config (editores estructurados, sin replay), /salud
+  (runs); footer omnipresente.
+- **Aceptacion**: agregar empresa, tunear umbral, hacer triage de un survivor
+  hasta "aplicado" y ver la salud del ultimo run — todo desde el navegador,
+  sin SQL; ninguna ruta sin autenticacion (assets incluidos).
+- **Inputs**: el propietario define su password de login (hash via comando
+  guiado).
+- **Riesgos**: scope creep visual — el pulido es del paso 7.
 
 ## 7. Paso 5 — Connectors Lever + Ashby
 
-- **Aceptacion**: mismas garantias del paso 3 con empresas reales de cada ATS,
-  incluyendo verify-on-notify especifico (Ashby: nunca contra HTML).
+- **Aceptacion**: mismas garantias del paso 3 con empresas reales de cada
+  ATS; verify-on-notify especifico (Ashby: NUNCA contra HTML); identity
+  params propios en canonical URL si aplican.
 
-## 8. Paso 6 — Integracion del banco de blocks + CV factory
+## 8. Paso 6 — Integracion del banco + CV factory + PDF + R2
 
-El CONTENIDO del banco se construye desacoplado del pipeline (iniciado
-2026-07-09): fact harvest desde el material del propietario -> documento
-maestro privado (fuera del repo) -> revision y aprobacion por lotes -> pase
-ES -> validacion de cobertura contra postings reales. El paso 6 es la
-INTEGRACION de ese banco ya aprobado.
+Contenido del banco: construido desde 2026-07-09 (doc maestro privado);
+Fase C de revision aparcada por decision del propietario — al llegar aqui se
+retoma con mecanismo ligero (aprobar CVs de muestra renderizados o
+bulk-approve desde /blocks, no revision fila-a-fila).
 
-- **Entregables**: seed del banco aprobado a `anchors` + `blocks` en D1;
-  `src/ia/gemini.ts` (wrapper), `src/ia/agents.ts` (enricher + cv_selector +
-  cv_verifier), `src/ia/cv_factory.ts`, `src/gdocs.ts` (JWT de service
-  account + Docs/Drive REST); plantilla de Doc y carpeta en Drive compartidas
-  al service account.
-- **Aceptacion**: un job con verdict Apply genera un Doc cuyo cuerpo contiene
-  SOLO texto de blocks `approved` (verificable por diff), con apendice
-  "Suggested tweaks"; el enricher mejora textos sin cambiar verdicts; render
-  ES bloqueado si algun block seleccionado tiene `es_status != approved`.
-- **Inputs requeridos**: banco aprobado (fases C-E del build de contenido);
-  plantilla de Doc; carpeta Drive; service account GCP (JSON en Worker
-  secret); `GEMINI_API_KEY`. CVs EN recibidos 2026-07-09; ES via drafts
-  propios aprobados por el propietario (sus CVs ES los reemplazan si llegan).
-- **Riesgos**: cobertura inicial del banco insuficiente (mitigada por la
-  fase E de validacion y el flujo `suggested`); free tier de Gemini entrena
-  con datos (solo material aprobado para terceros sale hacia la API).
+- **Entregables**: seed del banco aprobado a `anchors`+`blocks`;
+  `src/ia/gemini.ts` + `src/ia/agents.ts` + `src/ia/cv_factory.ts` +
+  `src/gdocs.ts`; export PDF (copia limpia sin apendice); bucket R2
+  `CV_ARCHIVE` (creado por el propietario — 1 clic) + snapshots
+  generated/submitted; migration `0005` (tabla cvs, jobs.cv_pdf_key).
+- **Aceptacion**: un Apply genera Doc cuyo cuerpo contiene SOLO texto de
+  blocks approved (diff verificable), PDF limpio archivado en R2, notas del
+  verifier persistidas en `cvs`; render ES bloqueado sin paridad aprobada.
+- **Inputs**: bucket R2 (propietario); revision ligera del banco.
 
-## 9. Paso 7 — Dashboard v2 (consola completa)
+## 9. Paso 7 — Consola v2 (el instrumento completo)
 
-- **Entregables**: UI.md §2 consola completa — desglose de score por job,
-  flujo de aprobacion de blocks/suggested, acciones (aplicado/descartado,
-  regenerar CV, dry-run desde la UI), layout ancho, tema claro/oscuro.
-- **Aceptacion**: la operacion diaria completa (revisar fits, aprobar blocks,
-  tunear config) se hace comoda desde el dashboard; el propietario lo valida
-  en uso real.
+- **Entregables**: Tracker kanban + seguimientos; detalle de job completo
+  (historial, panel CV, similares, prep de entrevista rule-based); **Replay**
+  por lotes de 50 + config_history con revert; /blocks completo (cola
+  suggested, cobertura, paridad); /cvs; /semana + digest de lunes + momentum
+  (`weekly_goal` inicial 5); radar de similares; busqueda global; pulido
+  (tema, estados vacios, teclado completo).
+- **Aceptacion**: la operacion semanal completa (calibrar con replay, revisar
+  funnel, gobernar el banco) se hace comoda desde la consola; el propietario
+  la valida en uso real.
 
-## 10. Inputs pendientes consolidados
+## 10. Paso 8 — Kit de aplicacion + bot bidireccional
 
-| Input | Bloquea |
-|-------|---------|
-| Cuenta Cloudflare + API token + secrets de Actions | Paso 1 |
-| Lista inicial de empresas (con investigacion asistida) | Paso 1-2 |
-| Material de perfil (privado) | Paso 2 |
-| Bot de Telegram + chat_id | Paso 3 |
-| Hostname para Access (o decision de fallback) | Paso 4 |
-| CVs EN/ES + plantilla Doc + carpeta Drive | Paso 6 |
-| Service account GCP (JSON) con carpeta/plantilla compartidas | Paso 6 |
-| GEMINI_API_KEY | Paso 6 |
+- **Entregables**: migration `0006` (tabla answers + kit); webhook Telegram
+  (`TELEGRAM_WEBHOOK_TOKEN`) con botones (Ver kit / Marcar aplicado) y flujo
+  conversacional de preguntas (respuestas del propietario -> kit -> opcional
+  guardar al banco `answers`); deteccion de preguntas (Greenhouse
+  `?questions=true`; Lever HTML publico — excepcion aprobada); /aplicaciones;
+  censo semanal de preguntas; datos de contacto del propietario como clave
+  privada de `config`.
+- **Aceptacion**: del visto bueno en Telegram al formulario listo-para-enviar
+  en < 5 minutos, con toda respuesta proveniente del banco aprobado o del
+  chat del propietario; CERO envios del sistema (auditable).
 
-## 11. Registro de decisiones
+## 11. Backlog (post paso 8, con gate de datos)
 
-- **2026-07-07** — Plataforma: all-GAS estilo DiversoLAB (descartados
-  Python+GitHub Actions+Cloudflare, Termux en telefono dedicado, app nativa).
-  **Revertida 2026-07-09.**
+- **L2c userscript companion**: auto-llenado del form en el navegador del
+  propietario (patron Simplify; el clic sigue humano). Gate: telemetria
+  time-to-apply + censo de preguntas tras 2-3 meses de operacion.
+- **Buzon de captura**: Gmail dedicado de alertas de empleo leido via API
+  oficial como connector adicional (college co-op digest, newsletters).
+- Bot: `/pending`, `/cv <id>`; re-score materializado.
+
+## 12. Inputs pendientes consolidados
+
+| Input | Bloquea | Estado |
+|-------|---------|--------|
+| Cloudflare + API token + secrets Actions | Paso 1 | ✓ 2026-07-17 |
+| Telegram bot + chat_id | Paso 3 | ✓ 2026-07-17 |
+| GEMINI_API_KEY, GOOGLE_SA_KEY, DRIVE_FOLDER_ID, CV_TEMPLATE_DOC_ID | Paso 6 | ✓ 2026-07-17 |
+| Password de login (hash) | Paso 4 | pendiente (comando guiado) |
+| Bucket R2 `CV_ARCHIVE` | Paso 6 | pendiente (1 clic) |
+| Revision ligera del banco de blocks | Paso 6 | aparcada por decision |
+| Datos de contacto para el kit (a `config` privada) | Paso 8 | pendiente |
+
+## 13. Registro de decisiones
+
+- **2026-07-07** — Plataforma all-GAS. **Revertida 2026-07-09.**
 - **2026-07-07** — Dos cuentas Google: datos vs ejecucion. **Obsoleta
-  2026-07-09** (ver CLAUDE.md §6: identidades y accesos).
-- **2026-07-07** — Banco de blocks con seleccion-only (la IA nunca redacta CV);
-  render determinista + cv_verifier temp 0. **Vigente.**
-- **2026-07-07** — Gemini free tier `gemini-3.1-flash-lite` con fallback
-  `gemini-2.5-flash-lite`; `responseSchema` JSON forzado. **Vigente.**
-- **2026-07-07** — GitHub via MCP scoped con PAT fine-grained en env var;
-  identidad git pinneada por-repo. **Vigente.**
-- **2026-07-09** — **Reframe de plataforma**: Cloudflare Worker (TypeScript) +
-  D1 + dashboard con login, deploy via GitHub Actions + wrangler. Razones:
-  testabilidad real (vitest + wrangler dev), store SQL, consola web propia con
-  login, DX moderna. Revierte la decision all-GAS del 2026-07-07.
-- **2026-07-09** — Se mantienen del diseno v1: Gemini free tier (mismo patron
-  de agentes) y Google Docs como salida del CV (unica dependencia Google
-  restante, via service account).
-- **2026-07-09** — Presupuesto: free tiers estrictos ($0/mes); upgrade solo si
-  un limite real lo exige.
-- **2026-07-09** — El dashboard pasa de opcional a first-class (v1 minima paso
-  4, v2 completa paso 7): al desaparecer el Sheet, es la unica consola.
-- **2026-07-09** — Banco de blocks disenado como subsistema nucleo (schema
-  v2): tabla `anchors` (roles/proyectos neutros, titulos por mercado),
-  `fact_key` (fact != fraseo; metricas single-source), `angle`
-  (data/compliance/operations/leadership), ciclo de vida
-  draft/review/approved/retired, paridad ES (`es_status`), tags con
-  vocabulario compartido con `config`. El contenido se construye desde ya en
-  documento maestro privado del propietario (fuera del repo); D1 pasa a ser
-  master al sembrarse en el paso 6.
+  2026-07-09** (CLAUDE.md §6).
+- **2026-07-07** — Banco de blocks seleccion-only; render determinista +
+  cv_verifier temp 0. **Vigente.**
+- **2026-07-07** — Gemini free tier con fallback; responseSchema. **Vigente.**
+- **2026-07-07** — GitHub via MCP scoped; git pinneado por-repo. **Vigente.**
+- **2026-07-09** — Reframe: Cloudflare Worker + D1 + consola; free tiers
+  estrictos; dashboard first-class; Gemini y Google Docs se mantienen.
+- **2026-07-09** — Banco de blocks como subsistema nucleo (schema v2).
+- **2026-07-17** — Dedup: URL canonica preserva identity params del ATS
+  (`gh_jid`); bug real encontrado contra Thinkific.
+- **2026-07-17** — **Consola de 10 paginas** (Hoy/Tracker/Jobs/Empresas/
+  Calibracion+Replay/Banco/CVs/Aplicaciones/Salud/Semana); stack Hono+jsx+
+  htmx sin build; login por cookie firmada (el propietario no tiene dominio
+  → Access descartado).
+- **2026-07-17** — **Observabilidad D1-first**: runs/events/notifications
+  escritas por el propio pipeline (RunStats, un flush); Cloudflare-nativo
+  solo para debugging; retenciones 400/90/180; digest lunes ~06:00 Bogota;
+  weekly_goal inicial 5.
+- **2026-07-17** — **Aplicacion asistida**: kit L1 con visto bueno y
+  respuestas por chat de Telegram; el clic de enviar es SIEMPRE humano.
+  L2b (envio server-side) y L3 (desatendido) RECHAZADOS con evidencia (APIs
+  company-key-only; anti-bot; fallo silencioso que quema empresas; LazyApply
+  2.4/5; Greenhouse Real Talent). L2c (userscript local) aparcado con gate
+  de telemetria. Fuentes: docs/audits/2026-07-17-diseno-auto-apply.md.
+- **2026-07-17** — Excepcion al no-scraping: HTML publico de la pagina de
+  apply de Lever, solo deteccion de preguntas.
+- **2026-07-17** — Datos de contacto del propietario como dato operativo en
+  D1 privada (clave de `config`); jamas en el repo.
+- **2026-07-17** — R2 como archivo inmutable de PDFs (snapshots generated/
+  submitted); Drive sigue siendo master editable.
+- **2026-07-17** — Tabla `applications` = tracker del usuario (stages);
+  maquinaria de envio approved/submitted NO se construye (coherente con el
+  rechazo de L2b/L3).

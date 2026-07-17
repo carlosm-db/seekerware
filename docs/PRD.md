@@ -17,8 +17,8 @@ imprecisiones.
 
 | Actor | Ve | Hace | NO hace |
 |-------|----|------|---------|
-| **Usuario** (propietario) | Mensajes de Telegram (fits nuevos), el dashboard (tracker/config/banco de blocks), Docs de CV en Drive | Configura empresas y perfil, aprueba blocks, revisa fits, **aplica manualmente** | Nada automatico hacia empresas |
-| **Sistema** | Feeds publicos de ATS, el store, el banco de blocks | Poll, normaliza, puntua, deduplica, verifica freshness y vida, notifica, ensambla CV sugerido | Nunca aplica, nunca contacta empresas, nunca redacta contenido de CV |
+| **Usuario** (propietario) | Mensajes de Telegram (fits nuevos, con botones), la consola (triage/tracker/calibracion/banco/salud), Docs de CV en Drive | Configura empresas y perfil, aprueba blocks y answers, hace triage, da el visto bueno, **aplica manualmente (el clic de enviar es SIEMPRE suyo)** | Nada automatico hacia empresas |
+| **Sistema** | Feeds publicos de ATS, el store, el banco de blocks, el banco de answers | Poll, normaliza, puntua, deduplica, verifica freshness y vida, notifica, ensambla CV sugerido, **prepara el kit de aplicacion**, se auto-monitorea | Nunca envia aplicaciones, nunca contacta empresas, nunca redacta contenido de CV ni respuestas de formularios |
 | **Empresas / ATS** | Trafico de lectura anonimo a sus APIs publicas | Publican jobs | No reciben datos del usuario |
 
 Flujo funcional: el sistema descubre -> puntua -> filtra -> notifica con
@@ -74,13 +74,32 @@ freshness_ok       true | unknown (false nunca se notifica)
 - **RF9 — Configuracion sin deploy**: agregar empresa, tunear
   keywords/pesos/umbrales y aprobar blocks se hace desde el dashboard (tablas
   `companies`/`config`/`blocks`); ningun cambio de perfil requiere deploy.
-- **RF10 — Consola con login**: el dashboard es privado, siempre detras de
+- **RF10 — Consola con login**: la consola es privada, siempre detras de
   autenticacion; nada del sistema queda expuesto publicamente.
+- **RF11 — Kit de aplicacion** (paso 8): para cada Apply con visto bueno del
+  propietario (boton en Telegram o consola), el sistema prepara TODO — CV en
+  PDF (copia limpia), respuestas estandar desde el banco `answers`
+  (gobernanza tipo blocks: autoria del propietario, seleccion-only),
+  deteccion de preguntas del formulario (Greenhouse `?questions=true`; Lever
+  HTML publico), y las preguntas sin respuesta aprobada se le preguntan AL
+  PROPIETARIO por el chat de Telegram (sus respuestas pueden guardarse al
+  banco). El envio final es humano, siempre.
+- **RF12 — Auto-monitoreo**: cada run se registra (embudo, cuotas, errores);
+  la consola muestra salud, meters de free tier y ROI por empresa; alertas
+  MANTENIMIENTO por Telegram y digest semanal del funnel (lunes).
 
 ## 6. No-goals (explicitos)
 
-- **No auto-apply** ni contacto automatico con empresas o reclutadores.
-- **No scraping** detras de login ni de portales sin API publica.
+- **No auto-apply**: el sistema JAMAS envia una aplicacion — prepara el kit y
+  el humano envia. Ratificado 2026-07-17 con evidencia
+  (`docs/audits/2026-07-17-diseno-auto-apply.md`): las APIs de envio de los 3
+  ATS son company-key-only; la emulacion de formularios es anti-bot activo
+  con fallo silencioso (spam queue) que quemaria empresas curadas de forma
+  permanente e invisible.
+- **No scraping** detras de login ni de portales sin API publica. Excepcion
+  explicita (2026-07-17): lectura del HTML PUBLICO de la pagina de apply de
+  Lever, solo para detectar preguntas del formulario (Lever no las expone en
+  su API); nunca tras login, nunca para enviar.
 - **No generacion libre de CV**: la IA no redacta; selecciona blocks aprobados.
 - **No multi-usuario**: herramienta personal (el login existe para privacidad,
   no para cuentas).
@@ -95,10 +114,18 @@ freshness_ok       true | unknown (false nunca se notifica)
 - El propietario puede mantener y extender el sistema por su cuenta.
 - Costo de operacion: $0/mes (free tiers estrictos).
 
-## 8. Evolucion futura (fuera del alcance inicial)
+## 8. Evolucion futura (fuera del alcance de los pasos 2-8)
 
-- Comandos del bot (`/pending`, `/applied <id>`, `/cv <id>` on-demand) via
-  webhook de Telegram en el mismo worker.
-- Tracking de estado de aplicaciones (aplicado / entrevista / oferta) en el
-  dashboard.
-- Re-score manual de jobs existentes tras cambios de config.
+- **Userscript companion (L2c)**: extension/userscript local que auto-llena
+  el formulario en el navegador del propietario desde el kit (patron
+  Simplify: navegador real, humano presente, clic humano). APARCADO con gate
+  de datos: se reabre solo si la telemetria time-to-apply + el censo de
+  preguntas (2-3 meses) demuestran que el envio manual con kit es el cuello
+  de botella real.
+- **Buzon de captura**: Gmail dedicado que recibe alertas de empleo
+  (newsletters, digest del portal co-op del college); el sistema LEE ese
+  buzon propio via API oficial — nunca inicia sesion en portales — y
+  normaliza esos correos como jobs del pipeline.
+- Comandos del bot (`/pending`, `/cv <id>` on-demand).
+- Re-score manual de jobs existentes tras cambios de config (el replay ya da
+  el preview; esto seria materializarlo).
