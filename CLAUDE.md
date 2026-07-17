@@ -125,7 +125,7 @@ de tiempo y nunca en el repo.
 | 2 | Scoring + deltas de schema (description_text, score_breakdown, title_norm) + seeds ★ + calibracion | Hecho 2026-07-17 (calibracion inicial v1.5 con el propietario; afinado continuo en operacion y con Replay en paso 7) |
 | 3 | Pipeline + cron + Telegram + instrumentacion (runs/events/notifications) | Hecho 2026-07-17 (cron */30 activo, siembra completa sin notificar, canal Telegram probado; primera notificacion organica pendiente de que aparezca un job nuevo) |
 | 4 | Consola v1 (login cookie, Hoy, Jobs, Empresas, Calibracion, Salud) | Hecho 2026-07-17 |
-| 5 | Connectors Lever + Ashby | Pendiente |
+| 5 | Connectors Lever + Ashby | Hecho 2026-07-17 (25 empresas activas; primeras notificaciones organicas el mismo dia) |
 | 6 | Banco de blocks + CV factory + PDF + archivo R2 | Contenido del banco desde 2026-07-09; revision aparcada; integracion pendiente |
 | 7 | Consola v2 (Tracker, Replay, Banco, CVs, Semana) | Pendiente |
 | 8 | Kit de aplicacion + bot bidireccional + banco answers | Pendiente |
