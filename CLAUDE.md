@@ -123,7 +123,7 @@ de tiempo y nunca en el repo.
 | 0 | Documentacion | Hecho 2026-07-07; reescrito 2026-07-09; enriquecido 2026-07-17 (consola + kit) |
 | 1 | Scaffold TS/wrangler + D1 + connector Greenhouse + dry-run + CI | Hecho 2026-07-17 |
 | 2 | Scoring + deltas de schema (description_text, score_breakdown, title_norm) + seeds ★ + calibracion | Hecho 2026-07-17 (calibracion inicial v1.5 con el propietario; afinado continuo en operacion y con Replay en paso 7) |
-| 3 | Pipeline + cron + Telegram + instrumentacion (runs/events/notifications) | Pendiente |
+| 3 | Pipeline + cron + Telegram + instrumentacion (runs/events/notifications) | Hecho 2026-07-17 (cron */30 activo, siembra completa sin notificar, canal Telegram probado; primera notificacion organica pendiente de que aparezca un job nuevo) |
 | 4 | Consola v1 (login cookie, Hoy, Jobs, Empresas, Calibracion, Salud) | Pendiente |
 | 5 | Connectors Lever + Ashby | Pendiente |
 | 6 | Banco de blocks + CV factory + PDF + archivo R2 | Contenido del banco desde 2026-07-09; revision aparcada; integracion pendiente |
