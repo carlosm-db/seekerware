@@ -4,6 +4,8 @@ import type { Company, Env, Job } from './types';
 import * as greenhouse from './connectors/greenhouse';
 import { urlHash } from './connectors/common';
 import { counts } from './store';
+import { loadScoringConfig } from './config-store';
+import { scoreJob, type ScoreResult, type ScoringConfig } from './scoring';
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -37,7 +39,10 @@ async function health(env: Env): Promise<Response> {
   return json({ ok: true, tables: await counts(env) });
 }
 
-/** Dry-run (glosario): corre el flujo sin escrituras al store ni notificaciones; responde jobs normalizados. */
+/**
+ * Dry-run (glosario): corre el flujo sin escrituras al store ni notificaciones;
+ * responde jobs normalizados y, si hay config de scoring sembrada, puntuados.
+ */
 async function dryRun(url: URL, env: Env): Promise<Response> {
   const token = url.searchParams.get('company');
   const ats = url.searchParams.get('ats') ?? 'greenhouse';
@@ -47,16 +52,43 @@ async function dryRun(url: URL, env: Env): Promise<Response> {
   // Empresa efimera: el dry-run no toca el store.
   const company: Company = { id: 0, name: token, ats: 'greenhouse', token, active: true };
   const jobs = await greenhouse.fetchJobs(company);
-  return json({
-    company: token,
-    ats,
-    count: jobs.length,
-    jobs: await Promise.all(jobs.map(preview)),
-  });
+
+  let config: ScoringConfig | null = null;
+  let scoringNote: string | undefined;
+  try {
+    config = await loadScoringConfig(env);
+  } catch (err) {
+    scoringNote = err instanceof Error ? err.message : 'config de scoring no disponible';
+  }
+
+  const rows = await Promise.all(jobs.map((j) => preview(j, config)));
+  if (config) {
+    rows.sort((a, b) => (b.scoring?.adjusted_score ?? 0) - (a.scoring?.adjusted_score ?? 0));
+  }
+  return json({ company: token, ats, count: jobs.length, scoring_note: scoringNote, jobs: rows });
 }
 
-async function preview(job: Job) {
-  return {
+interface PreviewRow {
+  id: string;
+  title: string;
+  location: string;
+  url: string;
+  url_hash: string;
+  posted_at: string | null;
+  description_preview: string;
+  scoring?: {
+    score: number;
+    track: string | null;
+    verdict: string;
+    adjusted_score: number;
+    top_matches: string[];
+    gate_fails: string[];
+    near_miss?: string;
+  };
+}
+
+async function preview(job: Job, config: ScoringConfig | null): Promise<PreviewRow> {
+  const row: PreviewRow = {
     id: job.id,
     title: job.title,
     location: job.location,
@@ -66,6 +98,27 @@ async function preview(job: Job) {
     description_preview:
       job.description.length > 280 ? `${job.description.slice(0, 280)}…` : job.description,
   };
+  if (config) {
+    const r: ScoreResult = scoreJob(job, config);
+    const topMatches = Object.values(r.breakdown)
+      .flatMap((b) => b.matches.filter((m) => m.weight > 0))
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 6)
+      .map((m) => m.term);
+    const gateFails = r.best.track
+      ? r.tracks[r.best.track]!.gates.filter((g) => !g.passed).map((g) => `${g.id}: ${g.evidence}`)
+      : [];
+    row.scoring = {
+      score: r.score,
+      track: r.best.track,
+      verdict: r.best.verdict,
+      adjusted_score: r.best.adjusted_score,
+      top_matches: topMatches,
+      gate_fails: gateFails,
+      near_miss: r.near_miss_reason,
+    };
+  }
+  return row;
 }
 
 function json(body: unknown, status = 200): Response {
