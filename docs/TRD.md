@@ -47,8 +47,11 @@ Interfaz comun: cada connector expone `fetchJobs(company) -> Promise<Job[]>` y
 
 Reglas comunes:
 
-- URL canonica = URL sin query params (los ATS agregan parametros de tracking
-  que romperian el dedup). `url_hash` = SHA-256 de la URL canonica via
+- URL canonica = URL sin query params de tracking, PRESERVANDO los parametros
+  de identidad del ATS (p. ej. `gh_jid` en boards Greenhouse con pagina de
+  carreras propia): eliminarlos colapsaria todos los jobs de esa empresa en
+  un mismo hash y romperia el dedup (bug encontrado con datos reales,
+  2026-07-17). `url_hash` = SHA-256 de la URL canonica via
   `crypto.subtle.digest('SHA-256', ...)`.
 - `posted_at` ausente o invalido -> fallback a `first_seen` del store y
   `freshness_ok = 'unknown'`.
