@@ -1,0 +1,16 @@
+// Config del worker. Secretos NUNCA aqui (van en Worker secrets, ver TRD §9).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "seekerware",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "observability": { "enabled": true },
+  // Cron Trigger se agrega en el paso 3 (pipeline).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "seekerware",
+      "database_id": "f9e94936-ecac-4d34-b2e1-eb038f0995ea"
+    }
+  ]
+}
