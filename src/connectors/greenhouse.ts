@@ -22,9 +22,11 @@ interface GreenhouseFeed {
   jobs?: GreenhouseJob[];
 }
 
+type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
 /** Lee el feed publico del board y devuelve jobs normalizados. Lanza si el fetch falla (el caller aisla por empresa). */
-export async function fetchJobs(company: Company): Promise<Job[]> {
-  const res = await fetch(`${BASE}/${company.token}/jobs?content=true`);
+export async function fetchJobs(company: Company, doFetch: Fetcher = fetch): Promise<Job[]> {
+  const res = await doFetch(`${BASE}/${company.token}/jobs?content=true`);
   if (!res.ok) {
     throw new Error(`greenhouse feed ${company.token}: HTTP ${res.status}`);
   }
@@ -33,8 +35,8 @@ export async function fetchJobs(company: Company): Promise<Job[]> {
 }
 
 /** verify-on-notify: re-consulta el job individual en la API. 404 = muerto. Otros errores lanzan (indeterminado). */
-export async function isLive(company: Company, job: Job): Promise<boolean> {
-  const res = await fetch(`${BASE}/${company.token}/jobs/${job.id}`);
+export async function isLive(company: Company, job: Job, doFetch: Fetcher = fetch): Promise<boolean> {
+  const res = await doFetch(`${BASE}/${company.token}/jobs/${job.id}`);
   if (res.status === 404) return false;
   if (!res.ok) {
     throw new Error(`greenhouse verify ${company.token}/${job.id}: HTTP ${res.status}`);

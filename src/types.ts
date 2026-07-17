@@ -31,6 +31,8 @@ export interface Job {
 /** Bindings y secretos del worker. */
 export interface Env {
   DB: D1Database;
-  /** Worker secret: protege fetch() completo hasta que llegue Access (paso 4). */
+  /** Worker secret: protege fetch() completo hasta el login por cookie (paso 4). */
   API_TOKEN?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_CHAT_ID?: string;
 }

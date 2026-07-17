@@ -74,7 +74,7 @@ columnas las escribe el sistema; unica edicion del usuario (via dashboard):
 | score | INTEGER 0-100 | Del motor de reglas |
 | verdict | TEXT enum | Apply / Stretch-worth-it / Skip |
 | status | TEXT enum | Ver maquina de estados (§4) |
-| first_seen / last_seen | TEXT (ISO) | Ciclo de vida en el feed |
+| first_seen / last_seen | TEXT (ISO) | Ciclo de vida en el feed. `last_seen` se estampa AL CERRAR (ultima presencia confirmada, error max. de un intervalo); para jobs abiertos la presencia la garantiza el auto-expire — escribirla en cada run costaria >100k filas/dia (decision 2026-07-17, cuota D1) |
 | notified_at | TEXT (ISO) | Cuando se envio a Telegram |
 | cv_doc_url | TEXT | Doc generado (solo Apply); cache del ultimo — historial en `cvs` (paso 6) |
 | cv_pending | INTEGER 0/1 | 1 = CV quedo pendiente (Gemini caido); se reintenta el run siguiente |

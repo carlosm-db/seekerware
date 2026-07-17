@@ -115,7 +115,9 @@ output_key}`, runner secuencial, wrapper con:
 
 - **Store**: D1 segun [`DATABASE.md`](DATABASE.md), accedido solo desde
   `src/store.ts`; escrituras del run agrupadas en `db.batch()`.
-- **Dedup**: `url_hash` es PK; si existe -> actualizar `last_seen` y continuar.
+- **Dedup**: `url_hash` es PK; si existe -> continuar sin escribir (la
+  presencia de un job abierto la garantiza el auto-expire; `last_seen` se
+  estampa al cerrar — cuota D1, decision 2026-07-17).
 - **Freshness**: edad = hoy - `posted_at` <= `FRESHNESS_MAX_DAYS` (clave de
   `config`, inicial 3). El primer run de una empresa siembra con
   `status = 'skipped'`, sin notificar.

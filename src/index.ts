@@ -6,6 +6,8 @@ import { urlHash } from './connectors/common';
 import { counts } from './store';
 import { loadScoringConfig } from './config-store';
 import { scoreJob, type ScoreResult, type ScoringConfig } from './scoring';
+import { runPipeline } from './pipeline';
+import { sendTelegram } from './notify';
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -18,15 +20,36 @@ export default {
     try {
       if (url.pathname === '/api/health') return await health(env);
       if (url.pathname === '/api/dry-run') return await dryRun(url, env);
+      if (url.pathname === '/api/run' && request.method === 'POST') {
+        const stats = await runPipeline(env, 'manual');
+        return json({
+          ok: true,
+          companies: { total: stats.companiesTotal, ok: stats.companiesOk, fail: stats.companiesFail },
+          jobs: { seen: stats.jobsSeen, new: stats.jobsNew, survivors: stats.survivors, notified: stats.notified, closed: stats.closed },
+          subrequests: stats.subrequests,
+          errors: stats.errors,
+        });
+      }
+      if (url.pathname === '/api/notify-test' && request.method === 'POST') {
+        const sent = await sendTelegram(env, '✅ Seekerware operativo — prueba de canal');
+        return json(sent, sent.ok ? 200 : 502);
+      }
       return json({ error: 'not found' }, 404);
     } catch (err) {
       return json({ error: err instanceof Error ? err.message : 'internal error' }, 502);
     }
   },
 
-  async scheduled(_controller: ScheduledController, _env: Env): Promise<void> {
-    // Pipeline llega en el paso 3; el cron trigger aun no esta configurado.
-    console.log('scheduled(): pipeline pendiente (paso 3)');
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      runPipeline(env, 'cron').then((stats) => {
+        console.log(
+          `run: ${stats.companiesOk}/${stats.companiesTotal} empresas OK · ${stats.jobsNew} nuevos · ` +
+            `${stats.survivors} survivors · ${stats.notified} notificados · ${stats.closed} cerrados · ` +
+            `${stats.subrequests} subrequests · ${stats.errors} errores`,
+        );
+      }),
+    );
   },
 } satisfies ExportedHandler<Env>;
 
