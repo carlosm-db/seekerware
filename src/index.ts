@@ -1,7 +1,7 @@
 // Entrypoint del worker: scheduled() = pipeline · fetch() = consola + /api/* (todo tras auth).
 
-import type { Company, Job } from './types';
-import * as greenhouse from './connectors/greenhouse';
+import type { Ats, Company, Job } from './types';
+import { connectors } from './connectors/index';
 import { urlHash } from './connectors/common';
 import { counts } from './store';
 import { loadScoringConfig } from './config-store';
@@ -35,12 +35,12 @@ app.post('/api/notify-test', async (c) => {
 
 app.get('/api/dry-run', async (c) => {
   const token = c.req.query('company');
-  const ats = c.req.query('ats') ?? 'greenhouse';
+  const ats = (c.req.query('ats') ?? 'greenhouse') as Ats;
   if (!token) return c.json({ error: 'falta ?company=<token>' }, 400);
-  if (ats !== 'greenhouse') return c.json({ error: `connector ${ats} pendiente (paso 5)` }, 400);
+  if (!connectors[ats]) return c.json({ error: `ats desconocido: ${ats}` }, 400);
 
-  const company: Company = { id: 0, name: token, ats: 'greenhouse', token, active: true };
-  const jobs = await greenhouse.fetchJobs(company);
+  const company: Company = { id: 0, name: token, ats, token, active: true };
+  const jobs = await connectors[ats].fetchJobs(company);
 
   let config: ScoringConfig | null = null;
   let scoringNote: string | undefined;

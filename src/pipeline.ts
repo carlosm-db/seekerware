@@ -2,7 +2,7 @@
 // freshness, verify-on-notify, notificacion, auto-expire, instrumentacion.
 
 import type { Env, Job } from './types';
-import * as greenhouse from './connectors/greenhouse';
+import { connectors } from './connectors/index';
 import { urlHash } from './connectors/common';
 import { loadScoringConfig } from './config-store';
 import { normalizeTitle, scoreJob, type ScoringConfig } from './scoring';
@@ -86,13 +86,11 @@ async function processCompany(
   batch: RunBatch,
   doFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
 ): Promise<void> {
-  if (company.ats !== 'greenhouse') {
-    throw new Error(`connector ${company.ats} pendiente (paso 5)`);
-  }
+  const connector = connectors[company.ats];
   // Primer run de la empresa = seeding: se siembra el historico SIN notificar (regla 4).
   const seeding = company.last_ok_fetch === null;
 
-  const jobs = await greenhouse.fetchJobs(company, doFetch);
+  const jobs = await connector.fetchJobs(company, doFetch);
   stats.jobsSeen += jobs.length;
 
   const existing = await getCompanyJobs(env, stats, company.id);
@@ -130,7 +128,7 @@ async function processCompany(
         // verify-on-notify inmediatamente antes del push
         let alive: boolean | null = null;
         try {
-          alive = await greenhouse.isLive(company, job, doFetch);
+          alive = await connector.isLive(company, job, doFetch);
         } catch (err) {
           stats.event({
             type: 'verify_fail', severity: 'warn', company_id: company.id, url_hash: hash,
