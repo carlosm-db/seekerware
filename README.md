@@ -7,9 +7,10 @@ algo encaja de verdad — con nota de posicionamiento y CV sugerido. El humano
 siempre es quien aplica.
 
 > **Estado**: diseno v2 cerrado 2026-07-09 (reframe a Cloudflare; el diseno v1
-> all-GAS del 2026-07-07 quedo en el historial de git) · en construccion
-> (paso 0: documentacion). Los .md documentan intencion; **el codigo es la
-> fuente de verdad** (ver [`CLAUDE.md`](CLAUDE.md)).
+> all-GAS del 2026-07-07 quedo en el historial de git) · en construccion —
+> paso 1 (scaffold + Greenhouse + dry-run + CI) completado 2026-07-17;
+> siguiente: paso 2 (scoring). Los .md documentan intencion; **el codigo es
+> la fuente de verdad** (ver [`CLAUDE.md`](CLAUDE.md)).
 
 ---
 

@@ -112,7 +112,7 @@ de tiempo y nunca en el repo.
 | Paso | Contenido | Estado |
 |------|-----------|--------|
 | 0 | Documentacion (README, CLAUDE.md, docs/) | Hecho 2026-07-07; reescrito 2026-07-09 (reframe a Cloudflare) |
-| 1 | Scaffold TS/wrangler + D1 + connector Greenhouse + dry-run + CI | Pendiente |
+| 1 | Scaffold TS/wrangler + D1 + connector Greenhouse + dry-run + CI | Hecho 2026-07-17 |
 | 2 | Scoring + tracks + tuning con jobs reales | Pendiente (requiere perfil) |
 | 3 | Pipeline + freshness + Telegram + cron | Pendiente |
 | 4 | Dashboard v1 (consola minima + login) | Pendiente |
