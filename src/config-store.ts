@@ -20,6 +20,10 @@ export async function loadScoringConfig(env: Env): Promise<ScoringConfig> {
   return validate(parsed);
 }
 
+export function validateScoringConfig(raw: unknown): ScoringConfig {
+  return validate(raw);
+}
+
 function validate(raw: unknown): ScoringConfig {
   const c = raw as ScoringConfig;
   if (!c || typeof c !== 'object') throw new Error("config 'scoring': objeto esperado");

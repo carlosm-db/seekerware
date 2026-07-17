@@ -1,6 +1,6 @@
-// Entrypoint del worker: scheduled() = pipeline (paso 3) · fetch() = dashboard + /api/* (siempre tras auth).
+// Entrypoint del worker: scheduled() = pipeline · fetch() = consola + /api/* (todo tras auth).
 
-import type { Company, Env, Job } from './types';
+import type { Company, Job } from './types';
 import * as greenhouse from './connectors/greenhouse';
 import { urlHash } from './connectors/common';
 import { counts } from './store';
@@ -8,88 +8,51 @@ import { loadScoringConfig } from './config-store';
 import { scoreJob, type ScoreResult, type ScoringConfig } from './scoring';
 import { runPipeline } from './pipeline';
 import { sendTelegram } from './notify';
+import { consoleApp } from './console/app';
+import type { ConsoleEnv } from './console/auth';
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    // Regla 7: nada publico. Todo exige el Worker secret API_TOKEN hasta que llegue Access (paso 4).
-    if (!authorized(request, env)) {
-      return json({ error: 'unauthorized' }, 401);
-    }
+const app = consoleApp();
 
-    const url = new URL(request.url);
-    try {
-      if (url.pathname === '/api/health') return await health(env);
-      if (url.pathname === '/api/dry-run') return await dryRun(url, env);
-      if (url.pathname === '/api/run' && request.method === 'POST') {
-        const stats = await runPipeline(env, 'manual');
-        return json({
-          ok: true,
-          companies: { total: stats.companiesTotal, ok: stats.companiesOk, fail: stats.companiesFail },
-          jobs: { seen: stats.jobsSeen, new: stats.jobsNew, survivors: stats.survivors, notified: stats.notified, closed: stats.closed },
-          subrequests: stats.subrequests,
-          errors: stats.errors,
-        });
-      }
-      if (url.pathname === '/api/notify-test' && request.method === 'POST') {
-        const sent = await sendTelegram(env, '✅ Seekerware operativo — prueba de canal');
-        return json(sent, sent.ok ? 200 : 502);
-      }
-      return json({ error: 'not found' }, 404);
-    } catch (err) {
-      return json({ error: err instanceof Error ? err.message : 'internal error' }, 502);
-    }
-  },
+// ---------- API JSON (auth: cookie o Bearer, via middleware de la consola) ----------
 
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(
-      runPipeline(env, 'cron').then((stats) => {
-        console.log(
-          `run: ${stats.companiesOk}/${stats.companiesTotal} empresas OK · ${stats.jobsNew} nuevos · ` +
-            `${stats.survivors} survivors · ${stats.notified} notificados · ${stats.closed} cerrados · ` +
-            `${stats.subrequests} subrequests · ${stats.errors} errores`,
-        );
-      }),
-    );
-  },
-} satisfies ExportedHandler<Env>;
+app.get('/api/health', async (c) => c.json({ ok: true, tables: await counts(c.env) }));
 
-function authorized(request: Request, env: Env): boolean {
-  if (!env.API_TOKEN) return false; // sin secret configurado -> cerrado por defecto
-  return request.headers.get('authorization') === `Bearer ${env.API_TOKEN}`;
-}
+app.post('/api/run', async (c) => {
+  const stats = await runPipeline(c.env, 'manual');
+  return c.json({
+    ok: true,
+    companies: { total: stats.companiesTotal, ok: stats.companiesOk, fail: stats.companiesFail },
+    jobs: { seen: stats.jobsSeen, new: stats.jobsNew, survivors: stats.survivors, notified: stats.notified, closed: stats.closed },
+    subrequests: stats.subrequests,
+    errors: stats.errors,
+  });
+});
 
-async function health(env: Env): Promise<Response> {
-  return json({ ok: true, tables: await counts(env) });
-}
+app.post('/api/notify-test', async (c) => {
+  const sent = await sendTelegram(c.env, '✅ Seekerware operativo — prueba de canal');
+  return c.json(sent, sent.ok ? 200 : 502);
+});
 
-/**
- * Dry-run (glosario): corre el flujo sin escrituras al store ni notificaciones;
- * responde jobs normalizados y, si hay config de scoring sembrada, puntuados.
- */
-async function dryRun(url: URL, env: Env): Promise<Response> {
-  const token = url.searchParams.get('company');
-  const ats = url.searchParams.get('ats') ?? 'greenhouse';
-  if (!token) return json({ error: 'falta ?company=<token>' }, 400);
-  if (ats !== 'greenhouse') return json({ error: `connector ${ats} pendiente (paso 5)` }, 400);
+app.get('/api/dry-run', async (c) => {
+  const token = c.req.query('company');
+  const ats = c.req.query('ats') ?? 'greenhouse';
+  if (!token) return c.json({ error: 'falta ?company=<token>' }, 400);
+  if (ats !== 'greenhouse') return c.json({ error: `connector ${ats} pendiente (paso 5)` }, 400);
 
-  // Empresa efimera: el dry-run no toca el store.
   const company: Company = { id: 0, name: token, ats: 'greenhouse', token, active: true };
   const jobs = await greenhouse.fetchJobs(company);
 
   let config: ScoringConfig | null = null;
   let scoringNote: string | undefined;
   try {
-    config = await loadScoringConfig(env);
+    config = await loadScoringConfig(c.env);
   } catch (err) {
     scoringNote = err instanceof Error ? err.message : 'config de scoring no disponible';
   }
-
   const rows = await Promise.all(jobs.map((j) => preview(j, config)));
-  if (config) {
-    rows.sort((a, b) => (b.scoring?.adjusted_score ?? 0) - (a.scoring?.adjusted_score ?? 0));
-  }
-  return json({ company: token, ats, count: jobs.length, scoring_note: scoringNote, jobs: rows });
-}
+  if (config) rows.sort((a, b) => (b.scoring?.adjusted_score ?? 0) - (a.scoring?.adjusted_score ?? 0));
+  return c.json({ company: token, ats, count: jobs.length, scoring_note: scoringNote, jobs: rows });
+});
 
 interface PreviewRow {
   id: string;
@@ -123,30 +86,37 @@ async function preview(job: Job, config: ScoringConfig | null): Promise<PreviewR
   };
   if (config) {
     const r: ScoreResult = scoreJob(job, config);
-    const topMatches = Object.values(r.breakdown)
-      .flatMap((b) => b.matches.filter((m) => m.weight > 0))
-      .sort((a, b) => b.weight - a.weight)
-      .slice(0, 6)
-      .map((m) => m.term);
-    const gateFails = r.best.track
-      ? r.tracks[r.best.track]!.gates.filter((g) => !g.passed).map((g) => `${g.id}: ${g.evidence}`)
-      : [];
     row.scoring = {
       score: r.score,
       track: r.best.track,
       verdict: r.best.verdict,
       adjusted_score: r.best.adjusted_score,
-      top_matches: topMatches,
-      gate_fails: gateFails,
+      top_matches: Object.values(r.breakdown)
+        .flatMap((b) => b.matches.filter((m) => m.weight > 0))
+        .sort((a, b) => b.weight - a.weight)
+        .slice(0, 6)
+        .map((m) => m.term),
+      gate_fails: r.best.track
+        ? r.tracks[r.best.track]!.gates.filter((g) => !g.passed).map((g) => `${g.id}: ${g.evidence}`)
+        : [],
       near_miss: r.near_miss_reason,
     };
   }
   return row;
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body, null, 2), {
-    status,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
-  });
-}
+export default {
+  fetch: app.fetch,
+
+  async scheduled(_controller: ScheduledController, env: ConsoleEnv, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      runPipeline(env, 'cron').then((stats) => {
+        console.log(
+          `run: ${stats.companiesOk}/${stats.companiesTotal} empresas OK · ${stats.jobsNew} nuevos · ` +
+            `${stats.survivors} survivors · ${stats.notified} notificados · ${stats.closed} cerrados · ` +
+            `${stats.subrequests} subrequests · ${stats.errors} errores`,
+        );
+      }),
+    );
+  },
+} satisfies ExportedHandler<ConsoleEnv>;
