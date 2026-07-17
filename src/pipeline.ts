@@ -23,6 +23,10 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
   try {
     const config = await loadScoringConfig(env);
     const maxDays = Number((await getConfigValue(env, 'FRESHNESS_MAX_DAYS')) ?? '3');
+    // Tope de jobs NUEVOS puntuados por run: protege el limite de CPU del free
+    // tier (error 1102 comprobado sembrando 1,336 de una vez). La siembra se
+    // completa en tandas por runs sucesivos; el regimen permanente ni lo roza.
+    const maxNewPerRun = Number((await getConfigValue(env, 'max_new_jobs_per_run')) ?? '100');
     const observability = JSON.parse((await getConfigValue(env, 'observability')) ?? '{}') as {
       maintenance_fail_streak?: number;
     };
@@ -33,7 +37,7 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
 
     for (const company of companies) {
       try {
-        await processCompany(env, company, config, maxDays, nowIso, stats, batch, doFetch);
+        await processCompany(env, company, config, maxDays, maxNewPerRun, nowIso, stats, batch, doFetch);
         stats.companiesOk++;
         batch.companySuccess(company.id, nowIso);
       } catch (err) {
@@ -76,6 +80,7 @@ async function processCompany(
   company: StoredCompany,
   config: ScoringConfig,
   maxDays: number,
+  maxNewPerRun: number,
   nowIso: string,
   stats: RunStats,
   batch: RunBatch,
@@ -100,6 +105,11 @@ async function processCompany(
       // Dedup: existente -> continuar. NO se escribe last_seen por presencia:
       // costaria ~129k filas/dia (>100k free tier). La presencia de un job
       // abierto la garantiza el auto-expire; last_seen se estampa al cerrar.
+      continue;
+    }
+    if (stats.jobsNew >= maxNewPerRun) {
+      // Tope de CPU alcanzado: el resto queda para el proximo run (siguen
+      // siendo "nuevos"; al no estar en el store, el auto-expire no los toca).
       continue;
     }
     stats.jobsNew++;
