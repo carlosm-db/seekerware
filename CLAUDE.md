@@ -126,6 +126,6 @@ de tiempo y nunca en el repo.
 | 3 | Pipeline + cron + Telegram + instrumentacion (runs/events/notifications) | Hecho 2026-07-17 (cron */30 activo, siembra completa sin notificar, canal Telegram probado; primera notificacion organica pendiente de que aparezca un job nuevo) |
 | 4 | Consola v1 (login cookie, Hoy, Jobs, Empresas, Calibracion, Salud) | Hecho 2026-07-17 |
 | 5 | Connectors Lever + Ashby | Hecho 2026-07-17 (25 empresas activas; primeras notificaciones organicas el mismo dia) |
-| 6 | Banco de blocks + CV factory + PDF + archivo R2 | Contenido del banco desde 2026-07-09; revision aparcada; integracion pendiente |
+| 6 | Banco de blocks + CV factory + PDF + archivo Drive | Codigo hecho y desplegado 2026-07-17 (banco sembrado 9 anchors/69 blocks; Gemini+auth Google probados vivos); BLOQUEADO en runtime: el service account no accede a la plantilla (compartir el Doc con el SA) |
 | 7 | Consola v2 (Tracker, Replay, Banco, CVs, Semana) | Hecho 2026-07-17 (nucleo: Tracker, Replay, Semana, digest de lunes, radar de similares; /blocks y /cvs en estado vacio hasta el paso 6) |
 | 8 | Kit de aplicacion + bot bidireccional + banco answers | Pendiente |
