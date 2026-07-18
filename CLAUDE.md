@@ -127,5 +127,5 @@ de tiempo y nunca en el repo.
 | 4 | Consola v1 (login cookie, Hoy, Jobs, Empresas, Calibracion, Salud) | Hecho 2026-07-17 |
 | 5 | Connectors Lever + Ashby | Hecho 2026-07-17 (25 empresas activas; primeras notificaciones organicas el mismo dia) |
 | 6 | Banco de blocks + CV factory + PDF + archivo R2 | Contenido del banco desde 2026-07-09; revision aparcada; integracion pendiente |
-| 7 | Consola v2 (Tracker, Replay, Banco, CVs, Semana) | Pendiente |
+| 7 | Consola v2 (Tracker, Replay, Banco, CVs, Semana) | Hecho 2026-07-17 (nucleo: Tracker, Replay, Semana, digest de lunes, radar de similares; /blocks y /cvs en estado vacio hasta el paso 6) |
 | 8 | Kit de aplicacion + bot bidireccional + banco answers | Pendiente |
