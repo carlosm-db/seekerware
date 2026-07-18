@@ -540,12 +540,9 @@ export function consoleApp(): App {
         .all<{ id: number; ts: string; key: string; replay_summary: string | null; diff_summary: string | null }>()
     ).results;
 
-    // Strength shown in plain words (never bare numbers — owner principle).
-    const strengthLabel = (w: number) =>
-      w >= 3 ? 'Strong' : w === 2 ? null : w === 1 ? 'Light' : w <= -3 ? 'Strongly against' : 'Against';
     const chip = (category: string, term: string, weight: number) => (
       <span class="chip">
-        {term}{strengthLabel(weight) ? <span class="muted"> · {strengthLabel(weight)}</span> : null}
+        {term}{weight !== 2 ? <span class="muted"> {weight > 0 ? `+${weight}` : weight}</span> : null}
         <form class="inline" method="post" action="/config/word-remove">
           <input type="hidden" name="category" value={category} />
           <input type="hidden" name="term" value={term} />
