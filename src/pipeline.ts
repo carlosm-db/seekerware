@@ -190,7 +190,6 @@ async function buildDigest(env: Env) {
       (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1 AND verdict != 'Skip') survivors,
       (SELECT COUNT(*) FROM jobs WHERE notified_at >= ?1) notified,
       (SELECT COUNT(*) FROM applications WHERE applied_at >= ?1) applied,
-      (SELECT COALESCE(value,'5') FROM config WHERE key='weekly_goal') goal,
       (SELECT COUNT(*) FROM companies WHERE active=1 AND fail_count > 0) failing`,
   ).bind(cutoff).first<Record<string, number | string>>();
   const top = await env.DB.prepare(
@@ -206,7 +205,6 @@ async function buildDigest(env: Env) {
     survivors: Number(wk?.survivors ?? 0),
     notified: Number(wk?.notified ?? 0),
     applied: Number(wk?.applied ?? 0),
-    goal: Number(wk?.goal ?? 5),
     topCompany: top?.name ?? null,
     failing: Number(wk?.failing ?? 0),
   };

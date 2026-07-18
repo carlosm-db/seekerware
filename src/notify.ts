@@ -91,7 +91,6 @@ export interface DigestData {
   survivors: number;
   notified: number;
   applied: number;
-  goal: number;
   topCompany: string | null;
   failing: number;
 }
@@ -101,7 +100,8 @@ export function formatDigest(d: DigestData): string {
   const lines = [
     '📊 <b>Seekerware week</b>',
     `runs: ${d.runsOk}/${d.runsTotal} OK · seen ${d.seen} · new ${d.newJobs}`,
-    `survivors ${d.survivors} · notified ${d.notified} · applied <b>${d.applied}/${d.goal}</b>`,
+    // Plain personal count — never a quota/ratio (owner decision 2026-07-18).
+    `survivors ${d.survivors} · notified ${d.notified} · applied <b>${d.applied}</b>`,
   ];
   if (d.topCompany) lines.push(`top company: ${escapeHtml(d.topCompany)}`);
   if (d.failing > 0) lines.push(`⚠️ ${d.failing} company(ies) failing — check /companies`);

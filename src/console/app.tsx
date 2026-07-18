@@ -148,9 +148,8 @@ export function consoleApp(): App {
     const strip = await c.env.DB.prepare(
       `SELECT
         (SELECT COUNT(*) FROM applications WHERE stage='applied' AND applied_at >= datetime('now','-7 days')) applied_week,
-        (SELECT value FROM config WHERE key='weekly_goal') goal,
         (SELECT status FROM runs ORDER BY id DESC LIMIT 1) run_status`,
-    ).first<{ applied_week: number; goal: string | null; run_status: string | null }>();
+    ).first<{ applied_week: number; run_status: string | null }>();
 
     const pg = pageNum(c);
     const rows = (
@@ -191,7 +190,7 @@ export function consoleApp(): App {
       ['Profile & setup', '/blocks', `${panel?.blocks_approved ?? 0}/${panel?.blocks_total ?? 0}`, 'blocks approved'],
       ['Profile & setup', '/contact', panel?.contact_set ? 'set ✓' : 'not set', 'contact profile'],
       ['Output', '/cvs', `${panel?.cvs_total ?? 0}`, 'CVs generated'],
-      ['System', '/week', `${strip?.applied_week ?? 0}/${strip?.goal ?? '5'}`, 'applied this week'],
+      ['System', '/week', `${strip?.applied_week ?? 0}`, 'applied this week'],
       ['System', '/health', strip?.run_status ?? '—', 'last run'],
     ];
 
@@ -199,7 +198,7 @@ export function consoleApp(): App {
       <>
         <div class="statgrid">
           <div class="stat"><div class="n">{pendingTotal}</div><div class="l">pending triage</div></div>
-          <div class="stat"><div class="n">{strip?.applied_week ?? 0}/{strip?.goal ?? '5'}</div><div class="l">applied this week</div></div>
+          <div class="stat"><div class="n">{strip?.applied_week ?? 0}</div><div class="l">applied this week</div></div>
           <div class="stat"><div class="n">{health}</div><div class="l">system health</div></div>
         </div>
         <div class="cardgrid">
@@ -227,7 +226,7 @@ export function consoleApp(): App {
             </div>
             <div class="muted">{j.why_it_fits} · {j.positioning_lead}</div>
             <div class="actions" style="margin-top:8px">
-              {(['prepared|Prepare', 'applied|Applied', 'dismissed|Dismiss'] as const).map((x) => {
+              {(['prepared|Prepare', 'applied|I applied ✓', 'dismissed|Dismiss'] as const).map((x) => {
                 const [stage, label] = x.split('|');
                 return (
                   <form class="inline" method="post" action="/triage">
@@ -962,7 +961,6 @@ export function consoleApp(): App {
     const iso = (ms: number) => new Date(ms).toISOString();
     const cur = await win(iso(nowMs - 7 * 86400000), iso(nowMs + 1));
     const prev = await win(iso(nowMs - 14 * 86400000), iso(nowMs - 7 * 86400000));
-    const goal = Number((await c.env.DB.prepare("SELECT value FROM config WHERE key='weekly_goal'").first<{ value: string }>())?.value ?? 5);
     const tta = (
       await c.env.DB.prepare(
         `SELECT j.notified_at, a.applied_at FROM applications a JOIN jobs j ON j.url_hash = a.url_hash
@@ -990,7 +988,7 @@ export function consoleApp(): App {
     return page(c, 'Week', (
       <>
         <div class="statgrid">
-          <div class="stat"><div class="n">{cur.applied}/{goal}</div><div class="l">applied vs goal</div></div>
+          <div class="stat"><div class="n">{cur.applied}</div><div class="l">applied</div></div>
           <div class="stat"><div class="n">{median ?? '—'}{median ? 'h' : ''}</div><div class="l">median time-to-apply (30d)</div></div>
           <div class="stat"><div class="n">{aging?.n ?? 0}</div><div class="l">stalled &gt;7d</div></div>
         </div>
