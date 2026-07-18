@@ -513,12 +513,14 @@ export function consoleApp(): App {
   }
 
   // ---------- Contact profile (private; fills CV template placeholders) ----------
-  // Top-level simple fields (phone/location feed the CV header per track).
-  const CONTACT_FIELDS: Array<[string, string]> = [
-    ['phone_ca', 'Canadian phone (canada_coop)'],
+  // Phone + CV location grouped by country (phone/location feed the CV header per track).
+  const SIMPLE_CO: Array<[string, string]> = [
     ['phone_co', 'Colombian phone (colombia_perm & contractor_usd)'],
-    ['location_ca', 'Canada location for CV header (e.g. Vancouver, BC, Canada)'],
     ['location_co', 'Colombia location for CV header (e.g. Medellín, Colombia)'],
+  ];
+  const SIMPLE_CA: Array<[string, string]> = [
+    ['phone_ca', 'Canadian phone (canada_coop)'],
+    ['location_ca', 'Canada location for CV header (e.g. Vancouver, BC, Canada)'],
   ];
   // Structured addresses (application forms only — never in the CV).
   const ADDR_CA: Array<[string, string]> = [
@@ -549,12 +551,12 @@ export function consoleApp(): App {
           <p class="muted">Private data — stored only in D1, never in the repo. The CV header uses <code>{'{{phone}}'}</code> and <code>{'{{location}}'}</code> filled per track (name/email/LinkedIn are hardcoded in the template). The structured addresses below are stored only for step-8 application forms and never shown in the CV.</p>
         </div>
         <form method="post" action="/contact" class="card">
-          <h2 style="margin-top:0">Phone & CV location</h2>
-          {CONTACT_FIELDS.map(([key, label]) => field(key, label, str(profile[key])))}
-          <h2>Canada address (forms)</h2>
-          {ADDR_CA.map(([key, label]) => field(`address_ca__${key}`, label, addr('address_ca')[key] ?? ''))}
-          <h2>Colombia address (forms)</h2>
+          <h2 style="margin-top:0">🇨🇴 Colombia</h2>
+          {SIMPLE_CO.map(([key, label]) => field(key, label, str(profile[key])))}
           {ADDR_CO.map(([key, label]) => field(`address_co__${key}`, label, addr('address_co')[key] ?? ''))}
+          <h2>🇨🇦 Canada</h2>
+          {SIMPLE_CA.map(([key, label]) => field(key, label, str(profile[key])))}
+          {ADDR_CA.map(([key, label]) => field(`address_ca__${key}`, label, addr('address_ca')[key] ?? ''))}
           <button type="submit" class="primary">Save contact profile</button>
         </form>
       </>
@@ -564,7 +566,7 @@ export function consoleApp(): App {
   app.post('/contact', async (c) => {
     const b = await c.req.parseBody();
     const profile: Record<string, unknown> = {};
-    for (const [key] of CONTACT_FIELDS) profile[key] = String(b[key] ?? '').trim();
+    for (const [key] of [...SIMPLE_CO, ...SIMPLE_CA]) profile[key] = String(b[key] ?? '').trim();
     const buildAddr = (prefix: string, fields: Array<[string, string]>) => {
       const obj: Record<string, string> = {};
       for (const [key] of fields) obj[key] = String(b[`${prefix}__${key}`] ?? '').trim();
