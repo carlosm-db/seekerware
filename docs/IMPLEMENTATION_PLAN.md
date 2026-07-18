@@ -143,7 +143,7 @@ bulk-approve desde /blocks, no revision fila-a-fila).
 | Password de login (hash) | Paso 4 | pendiente (comando guiado) |
 | Bucket R2 `CV_ARCHIVE` | Paso 6 | pendiente (1 clic) |
 | Revision ligera del banco de blocks | Paso 6 | aparcada por decision |
-| Datos de contacto para el kit (a `config` privada) | Paso 8 | pendiente |
+| Encabezado de contacto en la plantilla de Docs | Paso 6 | pendiente (lo agrega el propietario a mano en el Doc) |
 
 ## 13. Registro de decisiones
 
@@ -176,7 +176,9 @@ bulk-approve desde /blocks, no revision fila-a-fila).
 - **2026-07-17** — Excepcion al no-scraping: HTML publico de la pagina de
   apply de Lever, solo deteccion de preguntas.
 - **2026-07-17** — Datos de contacto del propietario como dato operativo en
-  D1 privada (clave de `config`); jamas en el repo.
+  D1 privada. **Revisada el mismo dia por el propietario**: los datos de
+  contacto viven UNICAMENTE en la plantilla de Google Docs (encabezado);
+  ni en D1, ni en el repo, ni en el kit.
 - **2026-07-17** — R2 como archivo inmutable de PDFs (snapshots generated/
   submitted); Drive sigue siendo master editable. **Revertida el mismo dia**:
   activar R2 exige registrar tarjeta (viola "free tiers estrictos sin

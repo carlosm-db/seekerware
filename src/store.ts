@@ -94,6 +94,7 @@ export interface JobInsert {
   first_seen: string;
   last_seen: string;
   notified_at: string | null;
+  cv_pending: 0 | 1;
   why_it_fits: string;
   positioning_lead: string;
   description_text: string;
@@ -112,13 +113,13 @@ export class RunBatch {
       this.env.DB.prepare(
         `INSERT INTO jobs (url_hash, url, company_id, ats, ext_id, title, location, posted_at,
            freshness_ok, track, score, verdict, status, first_seen, last_seen, notified_at,
-           why_it_fits, positioning_lead, description_text, score_breakdown, title_norm)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           cv_pending, why_it_fits, positioning_lead, description_text, score_breakdown, title_norm)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       ).bind(
         j.url_hash, j.url, j.company_id, j.ats, j.ext_id, j.title, j.location, j.posted_at,
         j.freshness_ok, j.track, j.score, j.verdict, j.status, j.first_seen, j.last_seen,
-        j.notified_at, j.why_it_fits, j.positioning_lead, j.description_text, j.score_breakdown,
-        j.title_norm,
+        j.notified_at, j.cv_pending, j.why_it_fits, j.positioning_lead, j.description_text,
+        j.score_breakdown, j.title_norm,
       ),
     );
   }

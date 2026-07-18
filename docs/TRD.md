@@ -236,9 +236,9 @@ extendido en `docs/audits/2026-07-17-diseno-consola-ux.md`.
   `GEMINI_API_KEY`, `GOOGLE_SA_KEY` (JSON del service account),
   `DRIVE_FOLDER_ID`, `CV_TEMPLATE_DOC_ID`; en paso 4: `LOGIN_PASSWORD_HASH`,
   `SESSION_SECRET`; en paso 8: `TELEGRAM_WEBHOOK_TOKEN`. Los datos de
-  contacto del propietario para el kit (nombre, email, telefono, links)
-  viven como clave privada de `config` en D1 (decision 2026-07-17: dato
-  operativo de runtime, permitido por CLAUDE.md §4; JAMAS en el repo).
+  contacto del propietario viven UNICAMENTE en la plantilla de Google Docs
+  (decision 2026-07-17, revisada el mismo dia a peticion del propietario:
+  ni en D1 ni en el repo); el kit del paso 8 no maneja campos de contacto.
 - **Tabla `config`** (editable sin deploy): tuning del motor +
   `FRESHNESS_MAX_DAYS`.
 - **GitHub Actions secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`

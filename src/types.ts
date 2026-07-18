@@ -35,4 +35,9 @@ export interface Env {
   API_TOKEN?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
+  GEMINI_API_KEY?: string;
+  /** JSON completo del service account de GCP (paso 6). */
+  GOOGLE_SA_KEY?: string;
+  DRIVE_FOLDER_ID?: string;
+  CV_TEMPLATE_DOC_ID?: string;
 }

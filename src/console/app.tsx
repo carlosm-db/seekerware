@@ -727,25 +727,153 @@ export function consoleApp(): App {
     return c.redirect(`/config?m=${encodeURIComponent(`revertido: ${row.key}`)}`);
   });
 
-  // ---------- Banco / CVs (estados vacios hasta el paso 6) ----------
+  // ---------- Banco ----------
   app.get('/blocks', async (c) => {
-    const n = await c.env.DB.prepare('SELECT COUNT(*) n FROM blocks').first<{ n: number }>();
+    const rows = (
+      await c.env.DB.prepare(
+        'SELECT id, section, anchor_id, angle, status, es_status, tags, text_en FROM blocks ORDER BY section, anchor_id, id',
+      ).all<Record<string, string | null>>()
+    ).results;
+    if (rows.length === 0) {
+      return page(c, 'Banco de blocks', (
+        <div class="card"><p>El banco aun no esta sembrado en la base (seeds del paso 6).</p></div>
+      ));
+    }
+    const counts = {
+      total: rows.length,
+      approved: rows.filter((r) => r.status === 'approved').length,
+      esOk: rows.filter((r) => r.es_status === 'approved').length,
+    };
     return page(c, 'Banco de blocks', (
-      <div class="card">
-        <p>{(n?.n ?? 0) === 0
-          ? 'El banco vive aun en el documento maestro privado (OneDrive). Se siembra a la base en el paso 6, tras tu revision ligera — esta pagina se convertira en el gestor completo (aprobaciones, cola de sugerencias, cobertura, paridad EN/ES).'
-          : `${n?.n} blocks en la base.`}</p>
-      </div>
+      <>
+        <div class="statgrid">
+          <div class="stat"><div class="n">{counts.approved}/{counts.total}</div><div class="l">blocks aprobados</div></div>
+          <div class="stat"><div class="n">{counts.esOk}/{counts.total}</div><div class="l">paridad ES aprobada</div></div>
+        </div>
+        <div class="card actions">
+          <form class="inline" method="post" action="/blocks/approve-all">
+            <button type="submit" class="primary">Aprobar TODO el banco (EN + ES)</button>
+          </form>
+          <span class="muted">La revision ligera: mira los CVs de MUESTRA en /cvs; si te representan, aprueba todo aqui.</span>
+        </div>
+        <table>
+          <tr><th>id</th><th>seccion</th><th>angle</th><th>estado</th><th>ES</th><th>texto (EN)</th><th></th></tr>
+          {rows.map((b) => (
+            <tr>
+              <td class="muted">{b.id}</td>
+              <td>{b.section}</td>
+              <td>{b.angle ?? '—'}</td>
+              <td class={b.status === 'approved' ? 'ok' : 'warn'}>{b.status}</td>
+              <td class={b.es_status === 'approved' ? 'ok' : 'muted'}>{b.es_status}</td>
+              <td>{String(b.text_en ?? '').slice(0, 110)}…</td>
+              <td>
+                {b.status !== 'approved' ? (
+                  <form class="inline" method="post" action="/blocks/approve">
+                    <input type="hidden" name="id" value={String(b.id)} />
+                    <button type="submit">aprobar</button>
+                  </form>
+                ) : (
+                  <form class="inline" method="post" action="/blocks/retire">
+                    <input type="hidden" name="id" value={String(b.id)} />
+                    <button type="submit">retirar</button>
+                  </form>
+                )}
+              </td>
+            </tr>
+          ))}
+        </table>
+      </>
     ));
   });
 
-  app.get('/cvs', async (c) =>
-    page(c, 'Biblioteca de CVs', (
-      <div class="card">
-        <p>Los CVs generados apareceran aqui cuando la fabrica arranque (paso 6): Doc editable + PDF archivado en Drive (generado y enviado), blocks usados, notas del verificador, regenerar, y export CSV del historico.</p>
-      </div>
-    )),
-  );
+  app.post('/blocks/approve', async (c) => {
+    const b = await c.req.parseBody();
+    await c.env.DB.prepare(
+      "UPDATE blocks SET status='approved', es_status = CASE WHEN text_es IS NOT NULL THEN 'approved' ELSE es_status END, updated_at=? WHERE id=?",
+    ).bind(now(), String(b.id)).run();
+    return c.redirect('/blocks?m=aprobado');
+  });
+
+  app.post('/blocks/retire', async (c) => {
+    const b = await c.req.parseBody();
+    await c.env.DB.prepare("UPDATE blocks SET status='retired', updated_at=? WHERE id=?")
+      .bind(now(), String(b.id)).run();
+    return c.redirect('/blocks?m=retirado (nunca se borra)');
+  });
+
+  app.post('/blocks/approve-all', async (c) => {
+    await c.env.DB.prepare(
+      "UPDATE blocks SET status='approved', es_status = CASE WHEN text_es IS NOT NULL THEN 'approved' ELSE es_status END, updated_at=? WHERE status IN ('draft','review')",
+    ).bind(now()).run();
+    return c.redirect('/blocks?m=banco completo aprobado');
+  });
+
+  // ---------- CVs ----------
+  app.get('/cvs', async (c) => {
+    const cvs = (
+      await c.env.DB.prepare(
+        `SELECT v.id, v.doc_url, v.lang, v.sample, v.pending, v.created_at, v.rationale, v.verifier_notes,
+                j.title, co.name company
+         FROM cvs v JOIN jobs j ON j.url_hash = v.url_hash JOIN companies co ON co.id = j.company_id
+         ORDER BY v.id DESC LIMIT 50`,
+      ).all<Record<string, string | number | null>>()
+    ).results;
+    const candidates = (
+      await c.env.DB.prepare(
+        `SELECT j.url_hash, j.title, co.name company FROM jobs j JOIN companies co ON co.id = j.company_id
+         WHERE j.verdict IN ('Apply','Stretch-worth-it') AND j.status IN ('new','notified')
+         ORDER BY j.score DESC LIMIT 30`,
+      ).all<Record<string, string>>()
+    ).results;
+    return page(c, 'Biblioteca de CVs', (
+      <>
+        <form method="post" action="/cvs/sample" class="card actions">
+          <strong>Generar CV de MUESTRA</strong>
+          <select name="hash">
+            {candidates.map((j) => <option value={j.url_hash}>{`${j.title!.slice(0, 50)} @ ${j.company}`}</option>)}
+          </select>
+          <select name="lang"><option value="en">EN</option><option value="es">ES</option></select>
+          <button type="submit" class="primary">Generar (usa blocks draft — solo revision)</button>
+        </form>
+        {cvs.length === 0 ? <div class="card"><p>Aun no hay CVs generados.</p></div> : (
+          <table>
+            <tr><th>#</th><th>job</th><th>idioma</th><th>tipo</th><th>doc</th><th>seleccion</th><th>tweaks del verifier</th><th>fecha</th></tr>
+            {cvs.map((v) => (
+              <tr>
+                <td>{v.id}</td>
+                <td>{v.title} <div class="muted">{v.company}</div></td>
+                <td>{v.lang}</td>
+                <td>{v.sample ? <span class="warn">MUESTRA</span> : <span class="ok">real</span>}</td>
+                <td><a href={String(v.doc_url)} target="_blank" rel="noreferrer">abrir Doc ↗</a></td>
+                <td class="muted">{String(v.rationale ?? '').slice(0, 80)}</td>
+                <td class="muted">{String(v.verifier_notes ?? '').slice(0, 80)}</td>
+                <td class="muted">{fmt(String(v.created_at))}</td>
+              </tr>
+            ))}
+          </table>
+        )}
+      </>
+    ));
+  });
+
+  app.post('/cvs/sample', async (c) => {
+    const b = await c.req.parseBody();
+    const hash = String(b.hash ?? '');
+    const lang = b.lang === 'es' ? 'es' : 'en';
+    const j = await c.env.DB.prepare(
+      `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, co.name company
+       FROM jobs j JOIN companies co ON co.id = j.company_id WHERE j.url_hash = ?`,
+    ).bind(hash).first<Record<string, string | null>>();
+    if (!j) return c.redirect('/cvs?m=job no encontrado');
+    const { generateCv } = await import('../ia/cv_factory');
+    const fx = await generateCv(c.env, {
+      id: String(j.ext_id ?? ''), company: String(j.company), title: String(j.title),
+      location: String(j.location ?? ''), url: String(j.url), description: String(j.description_text ?? ''),
+      posted_at: null, ats: (j.ats ?? 'greenhouse') as 'greenhouse', raw: null,
+      url_hash: hash, track: j.track ?? null,
+    }, lang, true);
+    return c.redirect(`/cvs?m=${encodeURIComponent(fx.ok ? `muestra generada: revisala en Drive` : `FALLO: ${fx.error}`)}`);
+  });
 
   // ---------- Salud ----------
   app.get('/salud', async (c) => {

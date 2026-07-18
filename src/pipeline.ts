@@ -8,6 +8,8 @@ import { loadScoringConfig } from './config-store';
 import { normalizeTitle, scoreJob, type ScoringConfig } from './scoring';
 import { checkFreshness } from './freshness';
 import { formatDigest, formatJobMessage, formatMaintenance, ruleBasedTexts, sendTelegram } from './notify';
+import { enricher } from './ia/agents';
+import { generateCv } from './ia/cv_factory';
 import { RunStats, trackedFetch } from './runstats';
 import { RunBatch, getCompaniesPage, getCompanyJobs, getConfigValue, openRun, type StoredCompany } from './store';
 
@@ -31,6 +33,28 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
       maintenance_fail_streak?: number;
     };
     const failStreak = observability.maintenance_fail_streak ?? 3;
+
+    // CV factory: fabrica UN pendiente por run (el mas antiguo notificado)
+    if (env.GOOGLE_SA_KEY) {
+      const pending = await env.DB.prepare(
+        `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, c.name company
+         FROM jobs j JOIN companies c ON c.id = j.company_id
+         WHERE j.cv_pending = 1 AND j.status = 'notified' ORDER BY j.notified_at LIMIT 1`,
+      ).first<Record<string, string | null>>();
+      if (pending) {
+        const fx = await generateCv(env, {
+          id: String(pending.ext_id ?? ''), company: String(pending.company), title: String(pending.title),
+          location: String(pending.location ?? ''), url: String(pending.url),
+          description: String(pending.description_text ?? ''), posted_at: null,
+          ats: (pending.ats ?? 'greenhouse') as Job['ats'], raw: null,
+          url_hash: String(pending.url_hash), track: pending.track ?? null,
+        }, 'en', false, doFetch);
+        stats.geminiCalls += fx.gemini_calls;
+        if (!fx.ok) {
+          stats.event({ type: 'gdocs_fail', severity: 'warn', url_hash: String(pending.url_hash), detail: fx.error });
+        }
+      }
+    }
 
     const { companies, nextCursor } = await getCompaniesPage(env, stats);
     stats.companiesTotal = companies.length;
@@ -214,6 +238,7 @@ async function processCompany(
 
     let status: 'new' | 'notified' | 'skipped' | 'closed' = isSurvivor ? 'new' : 'skipped';
     let notifiedAt: string | null = null;
+    let cvPending: 0 | 1 = 0;
     const texts = ruleBasedTexts(result);
 
     if (seeding) {
@@ -235,11 +260,30 @@ async function processCompany(
           status = 'closed';
           stats.event({ type: 'verify_dead', severity: 'info', company_id: company.id, url_hash: hash });
         } else if (alive === true) {
+          // Enricher (solo survivors, TRD §4): mejora los textos; jamas el verdict
+          let ruleBased = true;
+          if (env.GEMINI_API_KEY) {
+            const enriched = await enricher(env, job, {
+              why_it_fits: texts.whyItFits, gap_to_address: texts.gapToAddress, positioning_lead: texts.positioningLead,
+            }, doFetch);
+            stats.geminiCalls += enriched.calls;
+            if (enriched.ok && enriched.data) {
+              texts.whyItFits = enriched.data.why_it_fits;
+              texts.gapToAddress = enriched.data.gap_to_address;
+              texts.positioningLead = enriched.data.positioning_lead;
+              ruleBased = false;
+              if (enriched.modelUsed !== 'gemini-3.1-flash-lite') {
+                stats.event({ type: 'gemini_fallback', severity: 'info', url_hash: hash, detail: enriched.modelUsed });
+              }
+            } else {
+              stats.event({ type: 'gemini_fail', severity: 'warn', url_hash: hash, detail: enriched.error });
+            }
+          }
           const msg = formatJobMessage({
             job, verdict: result.best.verdict, track: result.best.track ?? '—',
             score: result.best.adjusted_score, ageDays: freshness.age_days,
             whyItFits: texts.whyItFits, gapToAddress: texts.gapToAddress,
-            positioningLead: texts.positioningLead, ruleBased: true,
+            positioningLead: texts.positioningLead, ruleBased,
           });
           const sent = await sendTelegram(env, msg, doFetch);
           stats.notifications.push({
@@ -250,6 +294,9 @@ async function processCompany(
             status = 'notified';
             notifiedAt = nowIso;
             stats.notified++;
+            // CV factory solo para verdict Apply: queda cv_pending=1 y lo
+            // fabrica el arranque del run (1 fabrica/run, presupuesto fijo).
+            if (result.best.verdict === 'Apply') cvPending = 1;
           } else {
             stats.event({ type: 'telegram_fail', severity: 'error', url_hash: hash, detail: sent.error });
             // queda 'new': el run siguiente reintenta
@@ -265,6 +312,7 @@ async function processCompany(
       freshness_ok: freshness.freshness_ok, track: result.best.track,
       score: result.best.adjusted_score, verdict: result.best.verdict, status,
       first_seen: nowIso, last_seen: nowIso, notified_at: notifiedAt,
+      cv_pending: cvPending,
       why_it_fits: texts.whyItFits, positioning_lead: texts.positioningLead,
       description_text: job.description, score_breakdown: JSON.stringify(result),
       title_norm: normalizeTitle(job.title),
