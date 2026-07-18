@@ -6,7 +6,7 @@ import type { Child } from 'hono/jsx';
 import { Layout, type FooterStatus } from './layout';
 import { authMiddleware, createSession, setSessionCookie, verifyPassword, type ConsoleEnv } from './auth';
 import { validateScoringConfig } from '../config-store';
-import { SKCATS, newBlockId, normalizeBlockInput } from './blocks-form';
+import { SKCATS, newBlockId, parseBulletEdits } from './blocks-form';
 import { fmtDates, normalizeMonth, tokensOfRole, validateRoleCode } from './roles';
 import {
   applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES, parseMeta,
@@ -1200,150 +1200,188 @@ export function consoleApp(): App {
     return c.redirect(`/config?m=${encodeURIComponent(`reverted: ${row.key}`)}`);
   });
 
-  // ---------- Bank (v4 2026-07-18, LinkedIn-inspired): collapsed role cards,
-  // tap to open, one pencil per item editing in place, EN+ES always, saving IS
-  // the approval — no draft/approve cycle. Editor state is server-rendered via
-  // query params (?edit=<block> / ?editrole=<code> / ?add=<key> / ?addrole=1).
+  // ---------- Bank (v6 2026-07-18, the owner's sketch): a role/group is ONE
+  // form — its fields plus ALL its bullets — edited together via the single ✏️
+  // and saved in ONE transaction. Tap = read mode (clean full-width text).
+  // Saving IS the approval. Editor state via ?editrole / ?editgroup / ?addrole
+  // / ?addproject; ＋add-a-bullet and per-box Delete are small client JS so
+  // typed text never round-trips.
 
   app.get('/blocks', async (c) => {
     const q = c.req.query();
     const anchors = await fetchAnchors(c.env);
     const rows = (
       await c.env.DB.prepare(
-        `SELECT id, section, anchor_id, skcat, tags, text_en, text_es FROM blocks
+        `SELECT id, section, anchor_id, skcat, text_en, text_es FROM blocks
          WHERE status != 'retired' ORDER BY section, anchor_id, id`,
       ).all<Record<string, string | null>>()
     ).results;
     const roleCount = anchors.filter((a) => a.kind === 'role').length;
 
-    /** In-place editor for one existing bullet (?edit=<id>). */
-    const editPane = (b: Record<string, string | null>) => (
-      <div class="editpane">
-        <form method="post" action="/blocks/update" id={`bf-${b.id}`}>
-          <input type="hidden" name="id" value={String(b.id)} />
-          <input type="hidden" name="section" value={String(b.section)} />
-          <input type="hidden" name="anchor_id" value={String(b.anchor_id ?? '')} />
-          <input type="hidden" name="skcat" value={String(b.skcat ?? '')} />
-          <input type="hidden" name="tags" value={String(b.tags ?? '')} />
-          <div class="field"><label>Text — English (required)</label><textarea name="text_en" required>{b.text_en}</textarea></div>
-          <div class="field"><label>Text — Español (required)</label><textarea name="text_es" required>{b.text_es}</textarea></div>
-        </form>
-        <div class="rowactions">
-          <button type="submit" form={`bf-${b.id}`} class="primary">Save</button>
-          <a class="btnlike" href="/blocks">Cancel</a>
-          <span class="spacer" />
-          <form class="inline" method="post" action="/blocks/delete"
-            onsubmit="return confirm('Delete this bullet permanently? This cannot be undone.')">
-            <input type="hidden" name="id" value={String(b.id)} />
-            <button type="submit">Delete bullet</button>
-          </form>
-        </div>
+    /** Read mode: full-width EN + ES text, nothing else. */
+    const readRow = (b: Record<string, string | null>) => (
+      <div class="b-row"><div class="b-text">{b.text_en}<div class="es">{b.text_es}</div></div></div>
+    );
+
+    /** One editable bullet box: token label, Delete, EN + ES (both required). */
+    const bulletBox = (b: Record<string, string | null>, label: string) => (
+      <div class="bbox">
+        <div class="btokenrow"><span class="btoken">{label}</span>
+          <button type="button" class="bdel">Delete</button></div>
+        <input type="hidden" class="delflag" name={`del_${b.id}`} value="" />
+        <div class="field"><label>Text — English</label><textarea name={`en_${b.id}`} required>{b.text_en}</textarea></div>
+        <div class="field"><label>Text — Español</label><textarea name={`es_${b.id}`} required>{b.text_es}</textarea></div>
       </div>
     );
 
-    /** One responsibility: EN + ES with its pencil — or its open editor. */
-    const bulletRow = (b: Record<string, string | null>) =>
-      q.edit === b.id ? editPane(b) : (
-        <div class="b-row">
-          <div class="b-text">{b.text_en}<div class="es">{b.text_es}</div></div>
-          <a class="pencil" href={`/blocks?edit=${encodeURIComponent(String(b.id))}`} title="Edit bullet">✏️</a>
-        </div>
-      );
-
-    /** In-place add form (?add=<key>): EN + ES, both required. */
-    const addPane = (hidden: Record<string, string>) => (
-      <div class="editpane">
-        <form method="post" action="/blocks/create">
-          {Object.entries(hidden).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
-          <div class="field"><label>Text — English (required)</label><textarea name="text_en" required /></div>
-          <div class="field"><label>Text — Español (required)</label><textarea name="text_es" required /></div>
-          <div class="rowactions">
-            <button type="submit" class="primary">Save</button>
-            <a class="btnlike" href="/blocks">Cancel</a>
+    /** The ＋add-a-bullet section (shared by role and group forms). */
+    const bulletsSection = (label: string, boxes: unknown) => (
+      <>
+        <div class="bsecthead"><span class="t">{label}</span>
+          <button type="button" class="btnlike sec addbullet">＋ add a bullet</button></div>
+        <div class="blist">{boxes}</div>
+        <template class="btpl">
+          <div class="bbox">
+            <div class="btokenrow"><span class="btoken">new</span>
+              <button type="button" class="bdel">Delete</button></div>
+            <div class="field"><label>Text — English</label><textarea name="new_en___K__" required /></div>
+            <div class="field"><label>Text — Español</label><textarea name="new_es___K__" required /></div>
           </div>
-        </form>
-      </div>
-    );
-    const addButton = (key: string, label: string) => (
-      <a class="btnlike sec" href={`/blocks?add=${encodeURIComponent(key)}`}>＋ {label}</a>
+        </template>
+      </>
     );
 
-    /** LinkedIn-style role setup (a = existing role; null = create). */
-    const roleEditor = (a: AnchorOpt | null) => {
-      const fid = a ? `rf-${a.id}` : 'rf-new';
+    /** The owner's sketch: role fields + ALL its bullets, one form, one Save.
+        a = existing role (edit); null = create (kind decides role/project). */
+    const roleForm = (a: AnchorOpt | null, bl: Array<Record<string, string | null>>, kind: 'role' | 'project') => {
+      const fid = a ? `rf-${a.id}` : `rf-new-${kind}`;
+      const noun = kind === 'project' ? 'project' : 'role';
       return (
         <div class="editpane">
-          <form method="post" action={a ? '/roles/update' : '/roles/create'} id={fid}>
-            {a ? <input type="hidden" name="id" value={a.id} /> : null}
+          <form method="post" action={a ? '/roles/save' : '/roles/create'} id={fid}>
+            {a ? <input type="hidden" name="id" value={a.id} /> : <input type="hidden" name="kind" value={kind} />}
+            <div class="fld" style="margin-bottom:8px"><label>Title</label>
+              <input type="text" name="title" value={a?.title ?? ''} /></div>
             <div class="fields2">
-              <div class="fld grow"><label>Title</label><input type="text" name="title" value={a?.title ?? ''} /></div>
-              <div class="fld grow"><label>Company / name{a ? '' : ' (required)'}</label>
+              <div class="fld grow"><label>Company{a ? '' : ' (required)'}</label>
                 <input type="text" name="company" value={a?.company ?? ''} required={!a} /></div>
-              <div class="fld w-sm"><label>From</label><input type="month" name="date_from" value={a?.date_from ?? ''} /></div>
-              <div class="fld w-sm"><label>To</label>
-                <input type="month" name="date_to" value={a?.date_to ?? ''} disabled={!!a && !a.date_to && !!a.date_from} /></div>
-            </div>
-            <label class="chk"><input type="checkbox" name="current" checked={!!a && !a.date_to && !!a.date_from}
-              onchange="this.form.elements.date_to.disabled=this.checked; if(this.checked) this.form.elements.date_to.value=''" />
-              I currently work here</label>
-            <div class="fields2">
               {a ? (
                 <div class="fld w-sm"><label>Code (template-coupled)</label>
                   <input type="text" name="new_code" placeholder={a.id} /></div>
               ) : (
-                <>
-                  <div class="fld w-sm"><label>Code — e.g. TD1 (required)</label><input type="text" name="code" required /></div>
-                  <div class="fld"><label>Type</label>
-                    <select name="kind"><option value="role">job / role</option><option value="project">project</option></select></div>
-                </>
+                <div class="fld w-sm"><label>Code (required — e.g. TD1)</label>
+                  <input type="text" name="code" required /></div>
               )}
             </div>
+            <div class="fields2" style="margin-top:6px">
+              <label class="chk"><input type="checkbox" name="current" checked={!!a && !a.date_to && !!a.date_from}
+                onchange="this.form.elements.date_to.disabled=this.checked; if(this.checked) this.form.elements.date_to.value=''" />
+                I currently work here</label>
+              <div class="fld w-sm"><label>From</label>
+                <input type="month" name="date_from" value={a?.date_from ?? ''} /></div>
+              <div class="fld w-sm"><label>To</label>
+                <input type="month" name="date_to" value={a?.date_to ?? ''} disabled={!!a && !a.date_to && !!a.date_from} /></div>
+            </div>
+            {bulletsSection('responsibility bullets', a ? bl.map((b, i) => bulletBox(b, `${a.id}R${i + 1}`)) : null)}
+            <div class="rowactions">
+              <button type="submit" class="primary">{a ? 'Save everything' : `Add ${noun}`}</button>
+              <a class="btnlike" href="/blocks">Cancel</a>
+            </div>
           </form>
-          <div class="rowactions">
-            <button type="submit" form={fid} class="primary">{a ? 'Save role' : 'Add role'}</button>
-            <a class="btnlike" href="/blocks">Cancel</a>
-            {a ? (
-              <>
-                <span class="spacer" />
-                <form class="inline" method="post" action="/roles/delete"
-                  onsubmit={`return confirm('Delete role ${a.id} AND all its bullets permanently? This cannot be undone.')`}>
-                  <input type="hidden" name="id" value={a.id} />
-                  <button type="submit">Delete role</button>
-                </form>
-              </>
-            ) : null}
-          </div>
+          {a ? (
+            <div class="delrolerow">
+              <form class="inline" method="post" action="/roles/delete"
+                onsubmit={`return confirm('Delete ${a.id} AND all its bullets permanently? This cannot be undone.')`}>
+                <input type="hidden" name="id" value={a.id} />
+                <button type="submit">Delete {noun}</button>
+              </form>
+            </div>
+          ) : null}
         </div>
       );
     };
+
+    /** Skills category / summary: same ONE-form pattern over the group's items. */
+    const groupForm = (items: Array<Record<string, string | null>>, hidden: Record<string, string>) => (
+      <div class="editpane">
+        <form method="post" action="/blocks/group-save">
+          {Object.entries(hidden).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
+          {bulletsSection('items', items.map((b, i) => bulletBox(b, `item ${i + 1}`)))}
+          <div class="rowactions">
+            <button type="submit" class="primary">Save everything</button>
+            <a class="btnlike" href="/blocks">Cancel</a>
+          </div>
+        </form>
+      </div>
+    );
 
     const roleCard = (a: AnchorOpt) => {
       const section = a.kind === 'role' ? 'experience' : 'projects';
       const bl = rows.filter((r) => r.anchor_id === a.id && r.section === section);
       const dates = fmtDates(a.date_from, a.date_to);
-      const isOpen = q.editrole === a.id || q.add === a.id || bl.some((r) => r.id === q.edit);
+      const isEdit = q.editrole === a.id;
       return (
-        <details class="rc" open={isOpen}>
+        <details class="rc" open={isEdit}>
           <summary class="rc-head">
             <span class="caret" />
             <span class="rc-title">{a.title ?? a.company ?? a.id}</span>
             {a.title && a.company ? <span class="rc-sub">{a.company}</span> : null}
             {dates ? <span class="rc-dates">{dates}</span> : null}
             <span class="rc-meta">{bl.length} bullets · <span class="chip">{a.id}</span>
-              <a class="pencil" href={`/blocks?editrole=${encodeURIComponent(a.id)}`} title="Edit role">✏️</a>
+              <a class="pencil" href={`/blocks?editrole=${encodeURIComponent(a.id)}`} title="Edit everything in this role">✏️</a>
             </span>
           </summary>
           <div class="rc-body">
-            {q.editrole === a.id ? roleEditor(a) : null}
-            {bl.length === 0 && q.add !== a.id ? <p class="muted">no bullets yet — add the first one</p> : bl.map(bulletRow)}
-            {q.add === a.id ? addPane({ section, anchor_id: a.id, tags: '' })
-              : <div style="margin-top:10px">{addButton(a.id, 'Add bullet')}</div>}
+            {isEdit ? roleForm(a, bl, a.kind === 'project' ? 'project' : 'role')
+              : (bl.length ? bl.map(readRow) : <p class="muted">no bullets yet — ✏️ to add</p>)}
           </div>
         </details>
       );
     };
 
-    const summaryRows = rows.filter((r) => r.section === 'summary');
+    const groupCard = (key: string, title: string, items: Array<Record<string, string | null>>, hidden: Record<string, string>, sub?: string) => {
+      const isEdit = q.editgroup === key;
+      return (
+        <details class="rc" open={isEdit}>
+          <summary class="rc-head">
+            <span class="caret" />
+            <span class="rc-title" style="text-transform:capitalize">{title}</span>
+            {sub ? <span class="rc-sub">{sub}</span> : null}
+            <span class="rc-meta">{items.length} items
+              <a class="pencil" href={`/blocks?editgroup=${encodeURIComponent(key)}`} title="Edit all items">✏️</a>
+            </span>
+          </summary>
+          <div class="rc-body">
+            {isEdit ? groupForm(items, hidden)
+              : (items.length ? items.map(readRow) : <p class="muted">none yet — ✏️ to add</p>)}
+          </div>
+        </details>
+      );
+    };
+
+    const bankJs = `
+(() => {
+  let k = 0;
+  document.querySelectorAll('.addbullet').forEach((btn) => btn.addEventListener('click', () => {
+    const pane = btn.closest('form');
+    const tpl = pane.querySelector('template.btpl');
+    const list = pane.querySelector('.blist');
+    const frag = tpl.content.cloneNode(true);
+    k += 1;
+    frag.querySelectorAll('[name]').forEach((el) => { el.name = el.name.replace('__K__', 'k' + k); });
+    list.appendChild(frag);
+  }));
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.bdel'); if (!b) return;
+    const box = b.closest('.bbox');
+    const del = box.querySelector('input.delflag');
+    if (del) {
+      del.value = '1';
+      box.querySelectorAll('textarea').forEach((t) => { t.disabled = true; });
+      box.hidden = true;
+    } else box.remove();
+  });
+})();`;
 
     return page(c, 'Blocks bank', (
       <>
@@ -1352,84 +1390,76 @@ export function consoleApp(): App {
           <a class="btnlike sec" href="/blocks?addrole=1">＋ Add role</a>
           <a href="/blocks/template-check">Check template ↗</a>
         </div>
-        {q.addrole ? <div class="card">{roleEditor(null)}</div> : null}
+        {q.addrole ? <div class="card">{roleForm(null, [], 'role')}</div> : null}
 
-        <h2>My roles <span class="muted" style="font-weight:400">— newest first, tap to open</span></h2>
+        <h2>My roles <span class="muted" style="font-weight:400">— newest first · tap to read · ✏️ to edit everything</span></h2>
         {anchors.filter((a) => a.kind === 'role').map(roleCard)}
 
-        <h2>My projects</h2>
+        <h2 class="actions">My projects <a class="btnlike sec" href="/blocks?addproject=1">＋ Add project</a></h2>
+        {q.addproject ? <div class="card">{roleForm(null, [], 'project')}</div> : null}
         {anchors.filter((a) => a.kind === 'project').map(roleCard)}
         <p class="muted">Projects are static text in the CV template for now — these bullets are kept for the future project-tailoring option.</p>
 
         <h2>My skills</h2>
-        {SKCATS.map((cat) => {
-          const items = rows.filter((r) => r.section === 'skills' && r.skcat === cat);
-          const key = `skl-${cat}`;
-          return (
-            <div class="card">
-              <div class="actions">
-                <strong style="text-transform:capitalize">{cat}</strong>
-                <span class="muted">{items.length} items</span>
-              </div>
-              {items.length === 0 && q.add !== key ? <p class="muted">none yet</p> : items.map(bulletRow)}
-              {q.add === key ? addPane({ section: 'skills', skcat: cat, tags: '' })
-                : <div style="margin-top:10px">{addButton(key, `Add ${cat} skill`)}</div>}
-            </div>
-          );
-        })}
+        {SKCATS.map((cat) =>
+          groupCard(`skl-${cat}`, cat,
+            rows.filter((r) => r.section === 'skills' && r.skcat === cat),
+            { section: 'skills', skcat: cat }))}
 
         <h2>My summary</h2>
-        <div class="card">
-          <p class="muted">the opening bullets of every CV — the AI picks the best ones per job</p>
-          {summaryRows.length === 0 && q.add !== 'sum' ? <p class="muted">none yet</p> : summaryRows.map(bulletRow)}
-          {q.add === 'sum' ? addPane({ section: 'summary', tags: '' })
-            : <div style="margin-top:10px">{addButton('sum', 'Add summary line')}</div>}
-        </div>
+        {groupCard('sum', 'Summary',
+          rows.filter((r) => r.section === 'summary'),
+          { section: 'summary' },
+          'the opening bullets of every CV — the AI picks the best ones per job')}
+
+        <script dangerouslySetInnerHTML={{ __html: bankJs }} />
       </>
     ));
   });
 
-  app.post('/blocks/create', async (c) => {
-    const body = await c.req.parseBody();
-    const n = normalizeBlockInput(body);
-    if ('error' in n) return c.redirect(`/blocks?m=${encodeURIComponent(`add failed: ${n.error}`)}`);
-    const id = newBlockId(n.section);
-    try {
-      // Saving IS the approval (bank v4): owner-authored content enters live.
-      await c.env.DB.prepare(
-        `INSERT INTO blocks (id, section, anchor_id, skcat, text_en, text_es, es_status, tags, status, updated_at)
-         VALUES (?,?,?,?,?,?,'approved',?,'approved',?)`,
-      ).bind(id, n.section, n.anchor_id, n.skcat, n.text_en, n.text_es, n.tags, now()).run();
-    } catch (err) {
-      return c.redirect(`/blocks?m=${encodeURIComponent(`add failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
-    }
-    return c.redirect(`/blocks?m=${encodeURIComponent('saved')}`);
-  });
+  /** Bullet statements shared by the role/group saves (one transaction). */
+  const bulletStmts = (
+    env: ConsoleEnv,
+    edits: { updates: Array<{ id: string; en: string; es: string }>; deletes: string[]; added: Array<{ en: string; es: string }> },
+    insert: { section: string; anchor_id: string | null; skcat: string | null },
+  ) => {
+    const ts = now();
+    return [
+      ...edits.updates.map((u) =>
+        env.DB.prepare(
+          "UPDATE blocks SET text_en=?, text_es=?, status='approved', es_status='approved', updated_at=? WHERE id=?",
+        ).bind(u.en, u.es, ts, u.id)),
+      ...edits.deletes.map((id) => env.DB.prepare('DELETE FROM blocks WHERE id=?').bind(id)),
+      ...edits.added.map((n) =>
+        env.DB.prepare(
+          `INSERT INTO blocks (id, section, anchor_id, skcat, text_en, text_es, es_status, tags, status, updated_at)
+           VALUES (?,?,?,?,?,?,'approved','','approved',?)`,
+        ).bind(newBlockId(insert.section), insert.section, insert.anchor_id, insert.skcat, n.en, n.es, ts)),
+    ];
+  };
 
-  app.post('/blocks/update', async (c) => {
-    const body = await c.req.parseBody();
-    const id = String(body.id ?? '');
-    const n = normalizeBlockInput(body);
-    if ('error' in n) return c.redirect(`/blocks?edit=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${n.error}`)}`);
+  // Skills category / summary: ONE save for all the group's items.
+  app.post('/blocks/group-save', async (c) => {
+    const b = await c.req.parseBody();
+    const section = String(b.section ?? '');
+    const skcat = String(b.skcat ?? '') || null;
+    if (section === 'skills' ? !skcat || !(SKCATS as readonly string[]).includes(skcat) : section !== 'summary') {
+      return c.redirect('/blocks?m=invalid group');
+    }
+    const key = section === 'summary' ? 'sum' : `skl-${skcat}`;
+    const edits = parseBulletEdits(b);
+    if ('error' in edits) return c.redirect(`/blocks?editgroup=${key}&m=${encodeURIComponent(`save failed: ${edits.error}`)}`);
     try {
-      const r = await c.env.DB.prepare(
-        `UPDATE blocks SET section=?, anchor_id=?, skcat=?, text_en=?, text_es=?,
-           es_status='approved', tags=?, status='approved', updated_at=? WHERE id=?`,
-      ).bind(n.section, n.anchor_id, n.skcat, n.text_en, n.text_es, n.tags, now(), id).run();
-      if (!r.meta.changes) return c.redirect('/blocks?m=block not found');
+      const stmts = bulletStmts(c.env, edits, { section, anchor_id: null, skcat });
+      if (stmts.length) await c.env.DB.batch(stmts);
     } catch (err) {
-      return c.redirect(`/blocks?edit=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
+      return c.redirect(`/blocks?editgroup=${key}&m=${encodeURIComponent(`save failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
     }
     return c.redirect('/blocks?m=saved');
   });
 
-  app.post('/blocks/delete', async (c) => {
-    const b = await c.req.parseBody();
-    await c.env.DB.prepare('DELETE FROM blocks WHERE id = ?').bind(String(b.id ?? '')).run();
-    return c.redirect('/blocks?m=bullet deleted');
-  });
-
   // ---------- Roles (anchors) — the missing write path (2026-07-18) ----------
+  // Create a role/project WITH its bullets in one submit (owner's sketch).
   app.post('/roles/create', async (c) => {
     const b = await c.req.parseBody();
     const code = String(b.code ?? '').trim().toUpperCase();
@@ -1439,19 +1469,27 @@ export function consoleApp(): App {
     const dateFrom = normalizeMonth(String(b.date_from ?? ''));
     // "I currently work here" wins over any stale To value.
     const dateTo = b.current != null ? null : normalizeMonth(String(b.date_to ?? ''));
-    if (!company) return c.redirect('/blocks?m=add role failed: company/name is required');
+    if (!company) return c.redirect(`/blocks?m=add ${kind} failed: company/name is required`);
+    const edits = parseBulletEdits(b);
+    if ('error' in edits) return c.redirect(`/blocks?m=${encodeURIComponent(`add ${kind} failed: ${edits.error}`)}`);
     const existing = ((await c.env.DB.prepare('SELECT id FROM anchors').all<{ id: string }>()).results).map((a) => a.id);
     const err = validateRoleCode(code, existing);
-    if (err) return c.redirect(`/blocks?m=${encodeURIComponent(`add role failed: ${err}`)}`);
-    await c.env.DB.prepare(
-      "INSERT INTO anchors (id, kind, company, title, date_from, date_to, status) VALUES (?,?,?,?,?,?,'active')",
-    ).bind(code, kind, company, title, dateFrom, dateTo).run();
+    if (err) return c.redirect(`/blocks?m=${encodeURIComponent(`add ${kind} failed: ${err}`)}`);
+    const section = kind === 'role' ? 'experience' : 'projects';
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        "INSERT INTO anchors (id, kind, company, title, date_from, date_to, status) VALUES (?,?,?,?,?,?,'active')",
+      ).bind(code, kind, company, title, dateFrom, dateTo),
+      ...bulletStmts(c.env, edits, { section, anchor_id: code, skcat: null }),
+    ]);
     return c.redirect(`/blocks?m=${encodeURIComponent(
-      `role ${code} added — now paste {{${code}R1}}, {{${code}R2}}, … lines into your CV template Doc (with its static header) and run Check template`,
+      `${kind} ${code} added — now paste {{${code}R1}}, {{${code}R2}}, … lines into your CV template Doc (with its static header) and run Check template`,
     )}`);
   });
 
-  app.post('/roles/update', async (c) => {
+  // ONE save for the whole role: its fields AND all its bullets (edits,
+  // deletions, additions) in a single transaction.
+  app.post('/roles/save', async (c) => {
     const b = await c.req.parseBody();
     const id = String(b.id ?? '');
     const company = String(b.company ?? '').trim();
@@ -1463,41 +1501,50 @@ export function consoleApp(): App {
     const row = await c.env.DB.prepare('SELECT id, kind, company FROM anchors WHERE id = ?')
       .bind(id).first<{ id: string; kind: string; company: string | null }>();
     if (!row) return c.redirect('/blocks?m=role not found');
-    if (!newCode || newCode === id) {
-      // Identity edit only — safe, no template coupling.
-      await c.env.DB.prepare('UPDATE anchors SET company = ?, title = ?, date_from = ?, date_to = ? WHERE id = ?')
-        .bind(company || row.company, title, dateFrom, dateTo, id).run();
-      return c.redirect('/blocks?m=role updated');
-    }
-    // CODE rename: template-coupled. Refuse while {{OLD…}} tokens remain in the
-    // Doc; abort on any Google failure (safe default — never rename blind).
-    const existing = ((await c.env.DB.prepare('SELECT id FROM anchors WHERE id != ?').bind(id).all<{ id: string }>()).results).map((a) => a.id);
-    const err = validateRoleCode(newCode, existing);
-    if (err) return c.redirect(`/blocks?m=${encodeURIComponent(`rename failed: ${err}`)}`);
-    try {
-      if (!c.env.CV_TEMPLATE_DOC_ID) throw new Error('CV_TEMPLATE_DOC_ID not configured');
-      const { googleAccessToken, readPlaceholders } = await import('../gdocs');
-      const token = await googleAccessToken(c.env);
-      const docTokens = await readPlaceholders(token, c.env.CV_TEMPLATE_DOC_ID);
-      const leftovers = tokensOfRole(id, docTokens.map((t) => t.name));
-      if (leftovers.length) {
-        return c.redirect(`/blocks?m=${encodeURIComponent(
-          `rename refused: the template still contains ${leftovers.slice(0, 3).join(', ')}${leftovers.length > 3 ? '…' : ''} — update the Doc to {{${newCode}R…}} first`,
+    const edits = parseBulletEdits(b);
+    if ('error' in edits) return c.redirect(`/blocks?editrole=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${edits.error}`)}`);
+    const renaming = !!newCode && newCode !== id;
+    if (renaming) {
+      // CODE rename: template-coupled. Refuse while {{OLD…}} tokens remain in
+      // the Doc; abort on any Google failure (never rename blind).
+      const existing = ((await c.env.DB.prepare('SELECT id FROM anchors WHERE id != ?').bind(id).all<{ id: string }>()).results).map((a) => a.id);
+      const err = validateRoleCode(newCode, existing);
+      if (err) return c.redirect(`/blocks?editrole=${encodeURIComponent(id)}&m=${encodeURIComponent(`rename failed: ${err}`)}`);
+      try {
+        if (!c.env.CV_TEMPLATE_DOC_ID) throw new Error('CV_TEMPLATE_DOC_ID not configured');
+        const { googleAccessToken, readPlaceholders } = await import('../gdocs');
+        const token = await googleAccessToken(c.env);
+        const docTokens = await readPlaceholders(token, c.env.CV_TEMPLATE_DOC_ID);
+        const leftovers = tokensOfRole(id, docTokens.map((t) => t.name));
+        if (leftovers.length) {
+          return c.redirect(`/blocks?editrole=${encodeURIComponent(id)}&m=${encodeURIComponent(
+            `rename refused: the template still contains ${leftovers.slice(0, 3).join(', ')}${leftovers.length > 3 ? '…' : ''} — update the Doc to {{${newCode}R…}} first`,
+          )}`);
+        }
+      } catch (err2) {
+        return c.redirect(`/blocks?editrole=${encodeURIComponent(id)}&m=${encodeURIComponent(
+          `rename aborted (cannot verify the template): ${err2 instanceof Error ? err2.message : 'Google unreachable'}`,
         )}`);
       }
-    } catch (err2) {
-      return c.redirect(`/blocks?m=${encodeURIComponent(
-        `rename aborted (cannot verify the template): ${err2 instanceof Error ? err2.message : 'Google unreachable'}`,
-      )}`);
     }
-    // FK-safe transaction: insert new id, repoint blocks, delete old id.
+    const finalCode = renaming ? newCode : id;
+    const section = row.kind === 'role' ? 'experience' : 'projects';
     await c.env.DB.batch([
-      c.env.DB.prepare("INSERT INTO anchors (id, kind, company, title, date_from, date_to, status) VALUES (?,?,?,?,?,?,'active')")
-        .bind(newCode, row.kind, company || row.company, title, dateFrom, dateTo),
-      c.env.DB.prepare('UPDATE blocks SET anchor_id = ? WHERE anchor_id = ?').bind(newCode, id),
-      c.env.DB.prepare('DELETE FROM anchors WHERE id = ?').bind(id),
+      ...(renaming
+        ? [
+            c.env.DB.prepare(
+              "INSERT INTO anchors (id, kind, company, title, date_from, date_to, status) VALUES (?,?,?,?,?,?,'active')",
+            ).bind(newCode, row.kind, company || row.company, title, dateFrom, dateTo),
+            c.env.DB.prepare('UPDATE blocks SET anchor_id = ? WHERE anchor_id = ?').bind(newCode, id),
+          ]
+        : [
+            c.env.DB.prepare('UPDATE anchors SET company = ?, title = ?, date_from = ?, date_to = ? WHERE id = ?')
+              .bind(company || row.company, title, dateFrom, dateTo, id),
+          ]),
+      ...bulletStmts(c.env, edits, { section, anchor_id: finalCode, skcat: null }),
+      ...(renaming ? [c.env.DB.prepare('DELETE FROM anchors WHERE id = ?').bind(id)] : []),
     ]);
-    return c.redirect(`/blocks?m=${encodeURIComponent(`role renamed ${id} → ${newCode} (bullets repointed)`)}`);
+    return c.redirect(`/blocks?m=${encodeURIComponent(renaming ? `saved — role renamed ${id} → ${newCode}` : 'saved')}`);
   });
 
   // Hard delete, LinkedIn-style (owner decision 2026-07-18): the role AND its

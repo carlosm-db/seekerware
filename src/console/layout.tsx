@@ -104,8 +104,19 @@ details[open] > summary .caret::before { content:'▾' }
 .pencil:hover { border-color:var(--accent); text-decoration:none }
 .b-row { display:flex; gap:10px; padding:10px 0; border-top:1px solid var(--line); align-items:flex-start }
 .b-row:first-of-type { border-top:none }
-.b-text { flex:1; max-width:80ch }
+.b-text { flex:1 }
 .b-text .es { color:var(--muted); font-size:14px; margin-top:2px }
+/* v6: bullet boxes inside the ONE role/group form (owner's sketch). */
+.bsecthead { display:flex; align-items:center; gap:10px; border-top:1px solid var(--line);
+  margin-top:12px; padding-top:10px }
+.bsecthead .t { font-size:12px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--muted); font-weight:700; flex:1 }
+.addbullet { min-height:38px; padding:6px 12px; font-size:14px }
+.bbox { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:10px 0 }
+.btokenrow { display:flex; align-items:center; gap:8px; margin-bottom:6px }
+.btoken { font-size:12px; color:var(--muted); font-family:ui-monospace, monospace; flex:1 }
+.bdel { min-height:0; padding:5px 12px; font-size:13px }
+.delrolerow { display:flex; justify-content:flex-end; margin-top:8px }
 .editpane { border:1px solid var(--accent); border-radius:10px; padding:12px 14px; margin:10px 0; background:var(--card) }
 .fields2 { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-end }
 .fld { display:flex; flex-direction:column; gap:3px }
