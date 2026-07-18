@@ -30,7 +30,7 @@ a { color:var(--accent); text-decoration:none } a:hover { text-decoration:underl
 .drawer a .badge, .topbar .badge { background:var(--accent); color:#fff; border-radius:9px;
   font-size:11px; padding:1px 7px; margin-left:6px }
 
-main { padding:16px }
+main { padding:16px; max-width:1040px; margin:0 auto }
 h1 { font-size:20px; margin:0 0 14px } h2 { font-size:16px; margin:20px 0 8px }
 
 /* ---- tables: scroll inside their box on narrow screens ---- */
@@ -65,6 +65,7 @@ textarea { width:100%; font-family:ui-monospace, monospace; font-size:13px; min-
 .field { display:block; margin-bottom:10px }
 .field label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px }
 .field select, .field input, .field textarea { width:100% }
+#secsel { max-width:460px }
 
 /* ---- responsive grids: single column on phone, multi on desktop ---- */
 .statgrid, .cardgrid { display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:16px }

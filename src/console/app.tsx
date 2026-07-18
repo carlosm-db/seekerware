@@ -21,9 +21,9 @@ export function consoleApp(): App {
   const now = () => new Date().toISOString();
   const fmt = (iso: string | null | undefined) => (iso ? iso.slice(5, 16).replace('T', ' ') : '—');
 
-  // Pagination: 50/page. Query with `LIMIT PAGE+1 OFFSET pg*PAGE`, then if
+  // Pagination: 30/page. Query with `LIMIT PAGE+1 OFFSET pg*PAGE`, then if
   // more than PAGE rows came back there's a next page (drop the extra row).
-  const PAGE = 50;
+  const PAGE = 30;
   const pageNum = (c: Context<{ Bindings: ConsoleEnv }>) => Math.max(0, Math.floor(Number(c.req.query('page')) || 0));
   function pager(base: string, pg: number, hasNext: boolean, params: Record<string, string | undefined>) {
     const qs = (p: number) => {
@@ -159,6 +159,7 @@ export function consoleApp(): App {
         (SELECT status FROM runs ORDER BY id DESC LIMIT 1) run_status`,
     ).first<{ applied_week: number; goal: string | null; run_status: string | null }>();
 
+    const pg = pageNum(c);
     const rows = (
       await c.env.DB.prepare(
         `SELECT j.url_hash, j.title, j.location, j.track, j.verdict, j.score, j.url, j.posted_at,
@@ -168,9 +169,12 @@ export function consoleApp(): App {
          LEFT JOIN applications a ON a.url_hash = j.url_hash
          WHERE j.status IN ('new','notified') AND j.verdict != 'Skip'
            AND (a.url_hash IS NULL OR (a.stage='prepared' AND a.snoozed_until IS NOT NULL AND a.snoozed_until <= ?))
-         ORDER BY j.score DESC, j.first_seen DESC LIMIT 50`,
+         ORDER BY j.score DESC, j.first_seen DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
       ).bind(nowIso).all<Record<string, string | number>>()
     ).results;
+    const hasNext = rows.length > PAGE;
+    if (hasNext) rows.pop();
+    const pendingTotal = await pendingTriage(c.env);
 
     const health = strip?.run_status === 'ok' ? <span class="ok">green</span>
       : strip?.run_status ? <span class="warn">{strip.run_status}</span> : <span class="muted">no runs</span>;
@@ -201,7 +205,7 @@ export function consoleApp(): App {
     return page(c, 'Today', (
       <>
         <div class="statgrid">
-          <div class="stat"><div class="n">{rows.length}</div><div class="l">pending triage</div></div>
+          <div class="stat"><div class="n">{pendingTotal}</div><div class="l">pending triage</div></div>
           <div class="stat"><div class="n">{strip?.applied_week ?? 0}/{strip?.goal ?? '5'}</div><div class="l">applied this week</div></div>
           <div class="stat"><div class="n">{health}</div><div class="l">system health</div></div>
         </div>
@@ -215,7 +219,7 @@ export function consoleApp(): App {
           ))}
         </div>
         <h2>Triage</h2>
-        {rows.length === 0 ? <div class="card">Triage up to date ✓</div> : null}
+        {pendingTotal === 0 ? <div class="card">Triage up to date ✓</div> : null}
         {rows.map((j) => (
           <div class="card">
             <div>
@@ -247,6 +251,7 @@ export function consoleApp(): App {
             </div>
           </div>
         ))}
+        {pager('/', pg, hasNext, {})}
       </>
     ));
   });
@@ -420,6 +425,7 @@ export function consoleApp(): App {
 
   // ---------- Companies ----------
   app.get('/companies', async (c) => {
+    const pg = pageNum(c);
     const rows = (
       await c.env.DB.prepare(
         `SELECT c.id, c.name, c.ats, c.token, c.active, c.fail_count, c.last_ok_fetch, c.last_error, c.notes,
@@ -427,9 +433,11 @@ export function consoleApp(): App {
                 SUM(CASE WHEN j.verdict IN ('Apply','Stretch-worth-it') THEN 1 ELSE 0 END) survivors
          FROM companies c
          LEFT JOIN jobs j ON j.company_id = c.id AND j.first_seen >= datetime('now','-90 days')
-         GROUP BY c.id ORDER BY survivors DESC, c.name`,
+         GROUP BY c.id ORDER BY survivors DESC, c.name LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
       ).all<Record<string, string | number | null>>()
     ).results;
+    const hasNext = rows.length > PAGE;
+    if (hasNext) rows.pop();
 
     return page(c, 'Companies', (
       <>
@@ -460,6 +468,7 @@ export function consoleApp(): App {
             </tr>
           ))}
         </table></div>
+        {pager('/companies', pg, hasNext, {})}
       </>
     ));
   });
@@ -503,7 +512,7 @@ export function consoleApp(): App {
     let thresholds = { apply: 75, stretch: 55 };
     try { thresholds = (JSON.parse(cfg.scoring ?? '{}') as { thresholds: typeof thresholds }).thresholds ?? thresholds; } catch { /* raw */ }
     const history = (
-      await c.env.DB.prepare('SELECT id, ts, key, replay_summary FROM config_history ORDER BY id DESC LIMIT 10')
+      await c.env.DB.prepare('SELECT id, ts, key, replay_summary FROM config_history ORDER BY id DESC LIMIT 30')
         .all<{ id: number; ts: string; key: string; replay_summary: string | null }>()
     ).results;
 
@@ -664,9 +673,11 @@ export function consoleApp(): App {
                 j.title, j.track, j.score, c2.name company
          FROM applications a JOIN jobs j ON j.url_hash = a.url_hash
          JOIN companies c2 ON c2.id = j.company_id
-         WHERE a.stage != 'dismissed' ORDER BY a.updated_at DESC`,
+         WHERE a.stage != 'dismissed' ORDER BY a.updated_at DESC LIMIT 301`,
       ).all<Record<string, string | number | null>>()
     ).results;
+    const capped = rows.length > 300;
+    if (capped) rows.pop();
     const due = rows.filter((r) => r.follow_up_at && String(r.follow_up_at) <= nowIso);
     const daysIn = (iso: string | number | null | undefined) =>
       iso ? Math.floor((Date.now() - new Date(String(iso)).getTime()) / 86400000) : 0;
@@ -679,6 +690,7 @@ export function consoleApp(): App {
             {due.map((r) => <div><a href={`/jobs/${r.url_hash}`}>{r.title}</a> @ {r.company} — follow-up {String(r.follow_up_at).slice(0, 10)}</div>)}
           </div>
         ) : null}
+        {capped ? <div class="card muted">Showing the 300 most recent applications — dismiss or close old items to tidy the board.</div> : null}
         <div class="kanban">
           {STAGES.map((stage) => {
             const col = rows.filter((r) => r.stage === stage);
@@ -1121,14 +1133,17 @@ export function consoleApp(): App {
 
   // ---------- CVs ----------
   app.get('/cvs', async (c) => {
+    const pg = pageNum(c);
     const cvs = (
       await c.env.DB.prepare(
         `SELECT v.id, v.doc_url, v.lang, v.sample, v.pending, v.created_at, v.rationale, v.verifier_notes,
                 j.title, co.name company
          FROM cvs v JOIN jobs j ON j.url_hash = v.url_hash JOIN companies co ON co.id = j.company_id
-         ORDER BY v.id DESC LIMIT 50`,
+         ORDER BY v.id DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
       ).all<Record<string, string | number | null>>()
     ).results;
+    const hasNext = cvs.length > PAGE;
+    if (hasNext) cvs.pop();
     const candidates = (
       await c.env.DB.prepare(
         `SELECT j.url_hash, j.title, co.name company FROM jobs j JOIN companies co ON co.id = j.company_id
@@ -1170,6 +1185,7 @@ export function consoleApp(): App {
             ))}
           </table></div>
         )}
+        {pager('/cvs', pg, hasNext, {})}
       </>
     ));
   });
@@ -1205,7 +1221,7 @@ export function consoleApp(): App {
     if (runsHasNext) runs.pop();
     const events = (
       await c.env.DB.prepare(
-        'SELECT ts, type, severity, detail FROM events ORDER BY id DESC LIMIT 20',
+        'SELECT ts, type, severity, detail FROM events ORDER BY id DESC LIMIT 30',
       ).all<Record<string, string>>()
     ).results;
     const today = await c.env.DB.prepare(
