@@ -1203,12 +1203,14 @@ export function consoleApp(): App {
   // ---------- Bank (v6 2026-07-18, the owner's sketch): a role/group is ONE
   // form — its fields plus ALL its bullets — edited together via the single ✏️
   // and saved in ONE transaction. Tap = read mode (clean full-width text).
-  // Saving IS the approval. Editor state via ?editrole / ?editgroup / ?addrole
-  // / ?addproject; ＋add-a-bullet and per-box Delete are small client JS so
-  // typed text never round-trips.
+  // Saving IS the approval. Editors open in native <dialog> popups
+  // (showModal(): top layer, backdrop, focus trap, Esc — no page reload, no
+  // scroll jump); after a server-side validation error the redirect carries
+  // ?reopen=<dialog id> so the popup reopens with the message visible.
+  // Section order per owner: Summary → Skills → Roles → Projects, each a
+  // collapsible group.
 
   app.get('/blocks', async (c) => {
-    const q = c.req.query();
     const anchors = await fetchAnchors(c.env);
     const rows = (
       await c.env.DB.prepare(
@@ -1285,7 +1287,7 @@ export function consoleApp(): App {
             {bulletsSection('responsibility bullets', a ? bl.map((b, i) => bulletBox(b, `${a.id}R${i + 1}`)) : null)}
             <div class="rowactions">
               <button type="submit" class="primary">{a ? 'Save everything' : `Add ${noun}`}</button>
-              <a class="btnlike" href="/blocks">Cancel</a>
+              <button type="button" onclick="this.closest('dialog').close()">Cancel</button>
             </div>
           </form>
           {a ? (
@@ -1309,53 +1311,63 @@ export function consoleApp(): App {
           {bulletsSection('items', items.map((b, i) => bulletBox(b, `item ${i + 1}`)))}
           <div class="rowactions">
             <button type="submit" class="primary">Save everything</button>
-            <a class="btnlike" href="/blocks">Cancel</a>
+            <button type="button" onclick="this.closest('dialog').close()">Cancel</button>
           </div>
         </form>
       </div>
+    );
+
+    /** Opens the card's <dialog> popup; preventDefault stops the details toggle. */
+    const pencilBtn = (dlgId: string, titleTxt: string) => (
+      <button type="button" class="pencil" title={titleTxt}
+        onclick={`event.preventDefault(); event.stopPropagation(); document.getElementById('${dlgId}').showModal()`}>✏️</button>
     );
 
     const roleCard = (a: AnchorOpt) => {
       const section = a.kind === 'role' ? 'experience' : 'projects';
       const bl = rows.filter((r) => r.anchor_id === a.id && r.section === section);
       const dates = fmtDates(a.date_from, a.date_to);
-      const isEdit = q.editrole === a.id;
+      const dlgId = `dlg-role-${a.id}`;
       return (
-        <details class="rc" open={isEdit}>
-          <summary class="rc-head">
-            <span class="caret" />
-            <span class="rc-title">{a.title ?? a.company ?? a.id}</span>
-            {a.title && a.company ? <span class="rc-sub">{a.company}</span> : null}
-            {dates ? <span class="rc-dates">{dates}</span> : null}
-            <span class="rc-meta">{bl.length} bullets · <span class="chip">{a.id}</span>
-              <a class="pencil" href={`/blocks?editrole=${encodeURIComponent(a.id)}`} title="Edit everything in this role">✏️</a>
-            </span>
-          </summary>
-          <div class="rc-body">
-            {isEdit ? roleForm(a, bl, a.kind === 'project' ? 'project' : 'role')
-              : (bl.length ? bl.map(readRow) : <p class="muted">no bullets yet — ✏️ to add</p>)}
-          </div>
-        </details>
+        <>
+          <details class="rc">
+            <summary class="rc-head">
+              <span class="caret" />
+              <span class="rc-title">{a.title ?? a.company ?? a.id}</span>
+              {a.title && a.company ? <span class="rc-sub">{a.company}</span> : null}
+              {dates ? <span class="rc-dates">{dates}</span> : null}
+              <span class="rc-meta">{bl.length} bullets · <span class="chip">{a.id}</span>
+                {pencilBtn(dlgId, 'Edit everything in this role')}
+              </span>
+            </summary>
+            <div class="rc-body">
+              {bl.length ? bl.map(readRow) : <p class="muted">no bullets yet — ✏️ to add</p>}
+            </div>
+          </details>
+          <dialog id={dlgId}>{roleForm(a, bl, a.kind === 'project' ? 'project' : 'role')}</dialog>
+        </>
       );
     };
 
     const groupCard = (key: string, title: string, items: Array<Record<string, string | null>>, hidden: Record<string, string>, sub?: string) => {
-      const isEdit = q.editgroup === key;
+      const dlgId = `dlg-group-${key}`;
       return (
-        <details class="rc" open={isEdit}>
-          <summary class="rc-head">
-            <span class="caret" />
-            <span class="rc-title" style="text-transform:capitalize">{title}</span>
-            {sub ? <span class="rc-sub">{sub}</span> : null}
-            <span class="rc-meta">{items.length} items
-              <a class="pencil" href={`/blocks?editgroup=${encodeURIComponent(key)}`} title="Edit all items">✏️</a>
-            </span>
-          </summary>
-          <div class="rc-body">
-            {isEdit ? groupForm(items, hidden)
-              : (items.length ? items.map(readRow) : <p class="muted">none yet — ✏️ to add</p>)}
-          </div>
-        </details>
+        <>
+          <details class="rc">
+            <summary class="rc-head">
+              <span class="caret" />
+              <span class="rc-title" style="text-transform:capitalize">{title}</span>
+              {sub ? <span class="rc-sub">{sub}</span> : null}
+              <span class="rc-meta">{items.length} items
+                {pencilBtn(dlgId, 'Edit all items')}
+              </span>
+            </summary>
+            <div class="rc-body">
+              {items.length ? items.map(readRow) : <p class="muted">none yet — ✏️ to add</p>}
+            </div>
+          </details>
+          <dialog id={dlgId}>{groupForm(items, hidden)}</dialog>
+        </>
       );
     };
 
@@ -1381,36 +1393,54 @@ export function consoleApp(): App {
       box.hidden = true;
     } else box.remove();
   });
+  // A failed save redirects with ?reopen=<dialog id>: reopen it, message visible.
+  const rp = new URLSearchParams(location.search).get('reopen');
+  if (rp) { const d = document.getElementById(rp); if (d && d.showModal) d.showModal(); }
 })();`;
+
+    const openDlg = (id: string, label: string) => (
+      <button type="button" class="btnlike sec" onclick={`document.getElementById('${id}').showModal()`}>＋ {label}</button>
+    );
 
     return page(c, 'Blocks bank', (
       <>
         <div class="actions" style="margin-bottom:12px">
           <span><strong>{rows.length}</strong> <span class="muted">bullets</span> · <strong>{roleCount}</strong> <span class="muted">roles</span></span>
-          <a class="btnlike sec" href="/blocks?addrole=1">＋ Add role</a>
           <a href="/blocks/template-check">Check template ↗</a>
         </div>
-        {q.addrole ? <div class="card">{roleForm(null, [], 'role')}</div> : null}
 
-        <h2>My roles <span class="muted" style="font-weight:400">— newest first · tap to read · ✏️ to edit everything</span></h2>
-        {anchors.filter((a) => a.kind === 'role').map(roleCard)}
+        <details class="sect" open>
+          <summary>My summary</summary>
+          {groupCard('sum', 'Summary',
+            rows.filter((r) => r.section === 'summary'),
+            { section: 'summary' },
+            'the opening bullets of every CV — the AI picks the best ones per job')}
+        </details>
 
-        <h2 class="actions">My projects <a class="btnlike sec" href="/blocks?addproject=1">＋ Add project</a></h2>
-        {q.addproject ? <div class="card">{roleForm(null, [], 'project')}</div> : null}
-        {anchors.filter((a) => a.kind === 'project').map(roleCard)}
-        <p class="muted">Projects are static text in the CV template for now — these bullets are kept for the future project-tailoring option.</p>
+        <details class="sect" open>
+          <summary>My skills</summary>
+          {SKCATS.map((cat) =>
+            groupCard(`skl-${cat}`, cat,
+              rows.filter((r) => r.section === 'skills' && r.skcat === cat),
+              { section: 'skills', skcat: cat }))}
+        </details>
 
-        <h2>My skills</h2>
-        {SKCATS.map((cat) =>
-          groupCard(`skl-${cat}`, cat,
-            rows.filter((r) => r.section === 'skills' && r.skcat === cat),
-            { section: 'skills', skcat: cat }))}
+        <details class="sect" open>
+          <summary>My roles</summary>
+          <p class="muted" style="margin:4px 0 10px">newest first · tap a card to read · ✏️ edits everything</p>
+          <div class="actions" style="margin-bottom:10px">{openDlg('dlg-addrole', 'Add role')}</div>
+          {anchors.filter((a) => a.kind === 'role').map(roleCard)}
+        </details>
 
-        <h2>My summary</h2>
-        {groupCard('sum', 'Summary',
-          rows.filter((r) => r.section === 'summary'),
-          { section: 'summary' },
-          'the opening bullets of every CV — the AI picks the best ones per job')}
+        <details class="sect" open>
+          <summary>My projects</summary>
+          <p class="muted" style="margin:4px 0 10px">static text in the CV template for now — bullets kept for the future project-tailoring option</p>
+          <div class="actions" style="margin-bottom:10px">{openDlg('dlg-addproject', 'Add project')}</div>
+          {anchors.filter((a) => a.kind === 'project').map(roleCard)}
+        </details>
+
+        <dialog id="dlg-addrole">{roleForm(null, [], 'role')}</dialog>
+        <dialog id="dlg-addproject">{roleForm(null, [], 'project')}</dialog>
 
         <script dangerouslySetInnerHTML={{ __html: bankJs }} />
       </>
@@ -1448,12 +1478,12 @@ export function consoleApp(): App {
     }
     const key = section === 'summary' ? 'sum' : `skl-${skcat}`;
     const edits = parseBulletEdits(b);
-    if ('error' in edits) return c.redirect(`/blocks?editgroup=${key}&m=${encodeURIComponent(`save failed: ${edits.error}`)}`);
+    if ('error' in edits) return c.redirect(`/blocks?reopen=dlg-group-${key}&m=${encodeURIComponent(`save failed: ${edits.error}`)}`);
     try {
       const stmts = bulletStmts(c.env, edits, { section, anchor_id: null, skcat });
       if (stmts.length) await c.env.DB.batch(stmts);
     } catch (err) {
-      return c.redirect(`/blocks?editgroup=${key}&m=${encodeURIComponent(`save failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
+      return c.redirect(`/blocks?reopen=dlg-group-${key}&m=${encodeURIComponent(`save failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
     }
     return c.redirect('/blocks?m=saved');
   });
@@ -1469,12 +1499,13 @@ export function consoleApp(): App {
     const dateFrom = normalizeMonth(String(b.date_from ?? ''));
     // "I currently work here" wins over any stale To value.
     const dateTo = b.current != null ? null : normalizeMonth(String(b.date_to ?? ''));
-    if (!company) return c.redirect(`/blocks?m=add ${kind} failed: company/name is required`);
+    const reopen = kind === 'project' ? 'dlg-addproject' : 'dlg-addrole';
+    if (!company) return c.redirect(`/blocks?reopen=${reopen}&m=add ${kind} failed: company/name is required`);
     const edits = parseBulletEdits(b);
-    if ('error' in edits) return c.redirect(`/blocks?m=${encodeURIComponent(`add ${kind} failed: ${edits.error}`)}`);
+    if ('error' in edits) return c.redirect(`/blocks?reopen=${reopen}&m=${encodeURIComponent(`add ${kind} failed: ${edits.error}`)}`);
     const existing = ((await c.env.DB.prepare('SELECT id FROM anchors').all<{ id: string }>()).results).map((a) => a.id);
     const err = validateRoleCode(code, existing);
-    if (err) return c.redirect(`/blocks?m=${encodeURIComponent(`add ${kind} failed: ${err}`)}`);
+    if (err) return c.redirect(`/blocks?reopen=${reopen}&m=${encodeURIComponent(`add ${kind} failed: ${err}`)}`);
     const section = kind === 'role' ? 'experience' : 'projects';
     await c.env.DB.batch([
       c.env.DB.prepare(
@@ -1502,14 +1533,14 @@ export function consoleApp(): App {
       .bind(id).first<{ id: string; kind: string; company: string | null }>();
     if (!row) return c.redirect('/blocks?m=role not found');
     const edits = parseBulletEdits(b);
-    if ('error' in edits) return c.redirect(`/blocks?editrole=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${edits.error}`)}`);
+    if ('error' in edits) return c.redirect(`/blocks?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${edits.error}`)}`);
     const renaming = !!newCode && newCode !== id;
     if (renaming) {
       // CODE rename: template-coupled. Refuse while {{OLD…}} tokens remain in
       // the Doc; abort on any Google failure (never rename blind).
       const existing = ((await c.env.DB.prepare('SELECT id FROM anchors WHERE id != ?').bind(id).all<{ id: string }>()).results).map((a) => a.id);
       const err = validateRoleCode(newCode, existing);
-      if (err) return c.redirect(`/blocks?editrole=${encodeURIComponent(id)}&m=${encodeURIComponent(`rename failed: ${err}`)}`);
+      if (err) return c.redirect(`/blocks?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(`rename failed: ${err}`)}`);
       try {
         if (!c.env.CV_TEMPLATE_DOC_ID) throw new Error('CV_TEMPLATE_DOC_ID not configured');
         const { googleAccessToken, readPlaceholders } = await import('../gdocs');
@@ -1517,12 +1548,12 @@ export function consoleApp(): App {
         const docTokens = await readPlaceholders(token, c.env.CV_TEMPLATE_DOC_ID);
         const leftovers = tokensOfRole(id, docTokens.map((t) => t.name));
         if (leftovers.length) {
-          return c.redirect(`/blocks?editrole=${encodeURIComponent(id)}&m=${encodeURIComponent(
+          return c.redirect(`/blocks?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(
             `rename refused: the template still contains ${leftovers.slice(0, 3).join(', ')}${leftovers.length > 3 ? '…' : ''} — update the Doc to {{${newCode}R…}} first`,
           )}`);
         }
       } catch (err2) {
-        return c.redirect(`/blocks?editrole=${encodeURIComponent(id)}&m=${encodeURIComponent(
+        return c.redirect(`/blocks?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(
           `rename aborted (cannot verify the template): ${err2 instanceof Error ? err2.message : 'Google unreachable'}`,
         )}`);
       }

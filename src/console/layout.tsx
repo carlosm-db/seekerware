@@ -117,6 +117,18 @@ details[open] > summary .caret::before { content:'▾' }
 .btoken { font-size:12px; color:var(--muted); font-family:ui-monospace, monospace; flex:1 }
 .bdel { min-height:0; padding:5px 12px; font-size:13px }
 .delrolerow { display:flex; justify-content:flex-end; margin-top:8px }
+/* Editors live in native <dialog> popups: no reload, no scroll jump. */
+dialog { border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--fg);
+  width:min(820px, calc(100vw - 32px)); max-height:calc(100vh - 48px); overflow-y:auto; padding:16px }
+dialog::backdrop { background:rgba(0,0,0,.45) }
+dialog .editpane { border:none; padding:0; margin:0 }
+/* Top-level section toggles: Summary / Skills / Roles / Projects. */
+details.sect { margin-bottom:18px }
+details.sect > summary { list-style:none; font-size:17px; font-weight:700; color:var(--fg);
+  padding:6px 0; min-height:44px; display:flex; align-items:center; gap:8px }
+details.sect > summary::before { content:'▸'; color:var(--muted); font-size:14px }
+details.sect[open] > summary::before { content:'▾' }
+details.sect > summary::-webkit-details-marker { display:none }
 .editpane { border:1px solid var(--accent); border-radius:10px; padding:12px 14px; margin:10px 0; background:var(--card) }
 .fields2 { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-end }
 .fld { display:flex; flex-direction:column; gap:3px }
