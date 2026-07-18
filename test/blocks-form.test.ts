@@ -17,21 +17,26 @@ describe('normalizeBlockInput (post-0007 schema)', () => {
     });
   });
 
-  it('missing ES -> text_es null, es_status missing', () => {
-    const r = ok(normalizeBlockInput({ section: 'summary', text_en: 'Hi' }));
-    expect(r.text_es).toBeNull();
-    expect(r.es_status).toBe('missing');
+  it('rejects a missing ES text (EN+ES always — owner rule 2026-07-18)', () => {
+    const r = normalizeBlockInput({ section: 'summary', text_en: 'Hi' });
+    expect('error' in r && r.error).toMatch(/text_es is required/);
+  });
+
+  it('rejects blank text_es', () => {
+    const r = normalizeBlockInput({ section: 'summary', text_en: 'Hi', text_es: '   ' });
+    expect('error' in r && r.error).toMatch(/text_es is required/);
   });
 
   it('accepts an experience bullet tied to a role', () => {
-    const r = ok(normalizeBlockInput({ section: 'experience', text_en: 'Led X', anchor_id: 'DLAB1' }));
+    const r = ok(normalizeBlockInput({ section: 'experience', text_en: 'Led X', text_es: 'Lideré X', anchor_id: 'DLAB1' }));
     expect(r.anchor_id).toBe('DLAB1');
     expect(r.skcat).toBeNull();
   });
 
   it('trims text', () => {
-    const r = ok(normalizeBlockInput({ section: 'skills', text_en: '  Python  ', skcat: 'technical' }));
+    const r = ok(normalizeBlockInput({ section: 'skills', text_en: '  Python  ', text_es: ' Python ', skcat: 'technical' }));
     expect(r.text_en).toBe('Python');
+    expect(r.text_es).toBe('Python');
   });
 
   it('rejects a bad section', () => {

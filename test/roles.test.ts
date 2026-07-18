@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tokensOfRole, validateRoleCode } from '../src/console/roles';
+import { fmtDates, normalizeMonth, tokensOfRole, validateRoleCode } from '../src/console/roles';
 
 const existing = ['DLAB1', 'BNS1', 'BNS2', 'UPS1', 'BAC1'];
 
@@ -39,5 +39,42 @@ describe('tokensOfRole', () => {
     const names = ['BNS1R1', 'BNS1R2', 'BNS2R1', 'DLAB1R5', 'sum_1', 'BNS1'];
     expect(tokensOfRole('BNS1', names)).toEqual(['BNS1R1', 'BNS1R2']);
     expect(tokensOfRole('BNS2', names)).toEqual(['BNS2R1']);
+  });
+});
+
+describe('normalizeMonth', () => {
+  it('passes YYYY-MM through and trims', () => {
+    expect(normalizeMonth('2021-02')).toBe('2021-02');
+    expect(normalizeMonth(' 2023-12 ')).toBe('2023-12');
+  });
+
+  it('rejects anything else as null', () => {
+    expect(normalizeMonth('')).toBeNull();
+    expect(normalizeMonth('2021-13')).toBeNull();
+    expect(normalizeMonth('2021-00')).toBeNull();
+    expect(normalizeMonth('Feb 2021')).toBeNull();
+    expect(normalizeMonth('2021-2')).toBeNull();
+  });
+});
+
+describe('fmtDates', () => {
+  it('formats a full range', () => {
+    expect(fmtDates('2021-02', '2023-12')).toBe('Feb 2021 – Dec 2023');
+  });
+
+  it('open end = present (current role)', () => {
+    expect(fmtDates('2024-01', null)).toBe('Jan 2024 – present');
+  });
+
+  it('start missing keeps the end', () => {
+    expect(fmtDates(null, '2019-08')).toBe('– Aug 2019');
+  });
+
+  it('nothing set -> empty string', () => {
+    expect(fmtDates(null, null)).toBe('');
+  });
+
+  it('invalid stored values degrade to unset', () => {
+    expect(fmtDates('garbage', null)).toBe('');
   });
 });

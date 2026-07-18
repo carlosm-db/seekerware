@@ -3,9 +3,11 @@ import type { FC, Child } from 'hono/jsx';
 
 const CSS = `
 :root { --bg:#f7f7f5; --fg:#1b1b1f; --muted:#6b6b76; --card:#ffffff; --line:#e4e4e8;
-  --accent:#0f6bff; --ok:#1a7f37; --warn:#b45309; --bad:#b91c1c; --chip:#eef2ff; }
+  --accent:#0f6bff; --ok:#1a7f37; --warn:#b45309; --bad:#b91c1c; --chip:#eef2ff;
+  --ok-soft:#e2f2e6; --warn-soft:#f8ecd9; --bad-soft:#f9e4e2; }
 [data-theme="dark"] { --bg:#101014; --fg:#ececf1; --muted:#9a9aa6; --card:#1a1a21;
-  --line:#2a2a33; --accent:#5c9bff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --chip:#1e2438; }
+  --line:#2a2a33; --accent:#5c9bff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --chip:#1e2438;
+  --ok-soft:#152a1c; --warn-soft:#2d2413; --bad-soft:#321714; }
 * { box-sizing:border-box }
 body { margin:0; background:var(--bg); color:var(--fg);
   font:16px/1.5 system-ui, "Segoe UI", sans-serif; -webkit-text-size-adjust:100%; }
@@ -60,7 +62,35 @@ button, input[type=submit] { cursor:pointer; border:1px solid var(--line);
   background:var(--card); color:var(--fg); border-radius:8px; padding:10px 14px; font-size:15px;
   min-height:44px }
 button.primary { background:var(--accent); color:#fff; border-color:var(--accent) }
+button.secondary { background:var(--card); color:var(--accent); border-color:var(--accent) }
 button.danger { background:var(--bad); color:#fff; border-color:var(--bad) }
+
+/* ---- control language (2026-07-18): actions LOOK like buttons; links navigate.
+   a.btnlike / details.btnlike>summary render with the quiet-button skin so
+   every action has the same affordance without JS. .sec = secondary skin. ---- */
+a.btnlike, details.btnlike > summary { display:inline-flex; align-items:center; gap:5px;
+  border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:8px;
+  padding:10px 14px; font-size:15px; min-height:44px; cursor:pointer }
+a.btnlike:hover { text-decoration:none; border-color:var(--accent) }
+details.btnlike { display:inline-block }
+details.btnlike[open] > summary { border-color:var(--accent) }
+details.btnlike.sec > summary, a.btnlike.sec { color:var(--accent); border-color:var(--accent) }
+details.btnlike > form, details.btnlike > .panel { margin-top:8px }
+
+/* Status pills: language + state fused in ONE badge (EN · draft). */
+.pill { display:inline-block; font-size:11px; font-weight:600; border-radius:999px;
+  padding:1px 9px; white-space:nowrap; vertical-align:1px }
+.pill.draft { background:var(--warn-soft); color:var(--warn) }
+.pill.approved { background:var(--ok-soft); color:var(--ok) }
+.pill.missing { background:var(--bad-soft); color:var(--bad) }
+.pill.retired { background:var(--chip); color:var(--muted) }
+
+/* Bank role cards: identity header (title · company · dates, code demoted). */
+.rolehead { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap }
+.rolehead .rtitle { font-weight:700 }
+.rolehead .rdates { color:var(--muted); font-size:14px; font-variant-numeric:tabular-nums }
+.bullet .pill { margin-right:7px }
+.bullet .es { color:var(--muted); font-size:14px; margin-top:2px }
 input[type=text], input[type=password], input[type=number], input[type=date], select, textarea {
   background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:8px;
   padding:10px 12px; font-size:16px; min-height:44px; max-width:100% }
@@ -116,15 +146,7 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
 /* ---- desktop: DISTRIBUTE the width (never cap/center the page) ---- */
 @media (min-width:1024px) {
   .controls { grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); align-items:stretch }
-  .controls:not(.bankhead) > details[open], .controls:not(.bankhead) > *:has(details[open]) { grid-column:1 / -1 }
-  /* Bank header per the owner's sketch: stats pair | wide Add; wide Approve | filters */
-  .controls.bankhead { grid-template-columns:1fr 1fr 1.6fr;
-    grid-template-areas:"s1 s2 add" "ap ap filt" }
-  .bankhead > .c-s1 { grid-area:s1 } .bankhead > .c-s2 { grid-area:s2 }
-  .bankhead > .c-add { grid-area:add } .bankhead > .c-approve { grid-area:ap }
-  .bankhead > .c-filter { grid-area:filt }
-  .controls.bankhead:has(details[open]) { grid-template-columns:1fr;
-    grid-template-areas:"s1" "s2" "add" "ap" "filt" }
+  .controls > details[open], .controls > *:has(details[open]) { grid-column:1 / -1 }
   .formgrid { display:grid; grid-template-columns:1fr 1fr; column-gap:18px;
     grid-template-areas: "sec anc" "cat cat" "en es" }
   .f-section { grid-area:sec } .f-anchor { grid-area:anc } .f-cat { grid-area:cat }

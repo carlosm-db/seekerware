@@ -16,8 +16,8 @@ export interface NormalizedBlock {
   anchor_id: string | null;
   skcat: string | null;
   text_en: string;
-  text_es: string | null;
-  es_status: 'draft' | 'missing';
+  text_es: string;
+  es_status: 'draft';
   tags: string;
 }
 
@@ -25,8 +25,9 @@ export interface NormalizedBlock {
  * Validates + coerces raw /blocks form fields. Guardrails against
  * silently-invisible content (2026-07-18 audit): an experience/project bullet
  * without a role, or a skill without a category, is accepted by the DB but can
- * never be placed in a CV slot — reject at the door instead. es_status is
- * derived from ES presence; `status` is set by the route.
+ * never be placed in a CV slot — reject at the door instead. English AND
+ * Spanish are both required (owner rule 2026-07-18: everything in the bank
+ * exists in both languages); `status` is set by the route.
  */
 export function normalizeBlockInput(
   body: Record<string, unknown>,
@@ -50,14 +51,15 @@ export function normalizeBlockInput(
   if ((section === 'summary' || section === 'skills') && anchor_id) {
     return { error: `${section} entries are not tied to a role — leave the role empty` };
   }
-  const text_es = s('text_es') || null;
+  const text_es = s('text_es');
+  if (!text_es) return { error: 'text_es is required (every bullet exists in English AND Spanish)' };
   return {
     section,
     anchor_id,
     skcat,
     text_en,
     text_es,
-    es_status: text_es ? 'draft' : 'missing',
+    es_status: 'draft',
     tags: s('tags'),
   };
 }
