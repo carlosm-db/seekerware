@@ -85,6 +85,10 @@ textarea { width:100%; font-family:ui-monospace, monospace; font-size:13px; min-
 .kanban { display:flex; flex-direction:column; gap:14px }
 .kancol { min-width:0 }
 .pager { display:flex; gap:10px; align-items:center; margin:12px 0 }
+.bullet { border-top:1px solid var(--line); padding:9px 0 }
+.bullet:first-of-type { border-top:none }
+.inlinedet { display:inline-block }
+.inlinedet > summary { min-height:0; display:inline-flex }
 .flash { background:var(--chip); border:1px solid var(--accent); padding:10px 14px;
   border-radius:8px; margin-bottom:14px }
 details > summary { cursor:pointer; color:var(--accent); min-height:44px; display:flex; align-items:center }

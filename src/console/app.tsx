@@ -965,40 +965,48 @@ export function consoleApp(): App {
     return c.redirect(`/config?m=${encodeURIComponent(`reverted: ${row.key}`)}`);
   });
 
-  // ---------- Bank ----------
+  // ---------- Bank (role-centric, phone-first — 2026-07-18 rebuild) ----------
+  const BANK_FILTERS = ['section', 'anchor_id', 'skcat', 'status', 'es_status'] as const;
+  /** Whitelisted filter context, preserved across post-action redirects. */
+  function bankRet(q: Record<string, string | undefined>): string {
+    const u = new URLSearchParams();
+    for (const f of BANK_FILTERS) if (q[f]) u.set(f, q[f]!);
+    return u.toString();
+  }
+  /** Re-validates a posted ret string: only whitelisted filter keys survive. */
+  function sanitizeRet(raw: string): string {
+    const u = new URLSearchParams(raw);
+    const out = new URLSearchParams();
+    for (const f of BANK_FILTERS) { const v = u.get(f); if (v) out.set(f, v); }
+    return out.toString();
+  }
+
   app.get('/blocks', async (c) => {
-    const total = await c.env.DB.prepare('SELECT COUNT(*) n FROM blocks').first<{ n: number }>();
-    if ((total?.n ?? 0) === 0) {
-      return page(c, 'Blocks bank', (
-        <div class="card"><p>The bank is not yet seeded in the database (step 6 seeds).</p></div>
-      ));
-    }
     const q = c.req.query();
     const where: string[] = ['1=1'];
     const binds: unknown[] = [];
-    for (const f of ['section', 'anchor_id', 'skcat', 'status', 'es_status'] as const) {
+    for (const f of BANK_FILTERS) {
       if (q[f]) { where.push(`${f} = ?`); binds.push(q[f]); }
     }
-    // Filter option lists (distinct values)
-    const distinct = async (col: string) =>
-      (await c.env.DB.prepare(`SELECT DISTINCT ${col} v FROM blocks WHERE ${col} IS NOT NULL ORDER BY ${col}`).all<{ v: string }>())
-        .results.map((r) => r.v);
-    const anchors = await distinct('anchor_id');
-    const allAnchors = await fetchAnchors(c.env);
+    const ret = bankRet(q);
+
+    const anchorsAll = (
+      await c.env.DB.prepare('SELECT id, company, kind, status FROM anchors ORDER BY kind, id')
+        .all<{ id: string; company: string | null; kind: string; status: string }>()
+    ).results;
+    const activeAnchors = anchorsAll.filter((a) => a.status === 'active');
+    const retiredAnchors = anchorsAll.filter((a) => a.status === 'retired');
+
+    const rows = (
+      await c.env.DB.prepare(
+        `SELECT id, section, anchor_id, skcat, status, es_status, text_en, text_es FROM blocks
+         WHERE ${where.join(' AND ')} ORDER BY section, anchor_id, id`,
+      ).bind(...binds).all<Record<string, string | null>>()
+    ).results;
 
     const counts = await c.env.DB.prepare(
       "SELECT COUNT(*) total, SUM(status='approved') approved, SUM(es_status='approved') es_ok FROM blocks",
     ).first<{ total: number; approved: number; es_ok: number }>();
-
-    const pg = pageNum(c);
-    const rows = (
-      await c.env.DB.prepare(
-        `SELECT id, section, anchor_id, skcat, status, es_status, text_en FROM blocks
-         WHERE ${where.join(' AND ')} ORDER BY section, anchor_id, id LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
-      ).bind(...binds).all<Record<string, string | null>>()
-    ).results;
-    const hasNext = rows.length > PAGE;
-    if (hasNext) rows.pop();
 
     const sel = (name: string, opts: string[], current?: string) => (
       <select name={name}>
@@ -1006,13 +1014,102 @@ export function consoleApp(): App {
         {opts.map((o) => <option value={o} selected={o === current}>{o}</option>)}
       </select>
     );
-    // Group visible rows by section for readability
-    const bySection = new Map<string, typeof rows>();
-    for (const b of rows) {
-      const s = String(b.section);
-      if (!bySection.has(s)) bySection.set(s, []);
-      bySection.get(s)!.push(b);
-    }
+    const show = (s: string) => !q.section || q.section === s;
+
+    /** One content bullet: FULL text (EN + ES), status, actions. Card-based — readable on a phone. */
+    const bullet = (b: Record<string, string | null>) => (
+      <div class="bullet">
+        <div>{b.text_en}</div>
+        {b.text_es ? <div class="muted">{b.text_es}</div> : <div class="warn">no Spanish text yet</div>}
+        <div class="actions" style="margin-top:4px">
+          <span class={b.status === 'approved' ? 'ok' : 'warn'}>{b.status}</span>
+          <span class="muted">ES {b.es_status}</span>
+          <a href={`/blocks/edit?id=${encodeURIComponent(String(b.id))}&${ret}`}>edit</a>
+          {b.status !== 'approved' ? (
+            <form class="inline" method="post" action="/blocks/approve">
+              <input type="hidden" name="id" value={String(b.id)} />
+              <input type="hidden" name="ret" value={ret} />
+              <button type="submit">approve</button>
+            </form>
+          ) : (
+            <form class="inline" method="post" action="/blocks/retire">
+              <input type="hidden" name="id" value={String(b.id)} />
+              <input type="hidden" name="ret" value={ret} />
+              <button type="submit">retire</button>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+
+    /** Contextual add form: role/category pre-filled — write the text, done. */
+    const miniAdd = (label: string, hidden: Record<string, string>) => (
+      <details>
+        <summary>＋ {label}</summary>
+        <form method="post" action="/blocks/create" style="margin-top:8px">
+          {Object.entries(hidden).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
+          <input type="hidden" name="ret" value={ret} />
+          <div class="field"><label>Text — English (required)</label><textarea name="text_en" required /></div>
+          <div class="field"><label>Text — Spanish</label><textarea name="text_es" /></div>
+          <div class="actions">
+            <button type="submit" class="primary">Add as draft</button>
+            <a href={`/blocks?${ret}`}>Cancel</a>
+          </div>
+        </form>
+      </details>
+    );
+
+    /** Group approve button (only when the group still has drafts). */
+    const approveGroup = (field: string, value: string, drafts: number) =>
+      drafts > 0 ? (
+        <form class="inline" method="post" action="/blocks/approve-group">
+          <input type="hidden" name="field" value={field} />
+          <input type="hidden" name="value" value={value} />
+          <input type="hidden" name="ret" value={ret} />
+          <button type="submit">approve {drafts} draft{drafts > 1 ? 's' : ''}</button>
+        </form>
+      ) : null;
+
+    const roleCard = (a: { id: string; company: string | null; kind: string }) => {
+      const section = a.kind === 'role' ? 'experience' : 'projects';
+      const bl = rows.filter((r) => r.anchor_id === a.id && r.section === section);
+      const approved = bl.filter((r) => r.status === 'approved').length;
+      const drafts = bl.filter((r) => r.status === 'draft').length;
+      return (
+        <div class="card">
+          <div class="actions">
+            <strong>{a.company ?? a.id}</strong>
+            <span class="chip">{a.id}</span>
+            <span class="muted">{approved}/{bl.length} approved</span>
+            {approveGroup('anchor_id', a.id, drafts)}
+            <details class="inlinedet">
+              <summary>manage</summary>
+              <form method="post" action="/roles/update" class="actions" style="margin-top:6px">
+                <input type="hidden" name="id" value={a.id} />
+                <input type="hidden" name="ret" value={ret} />
+                <input type="text" name="company" value={a.company ?? ''} placeholder="company / name" />
+                <input type="text" name="new_code" placeholder={`code (${a.id})`} style="max-width:120px" />
+                <button type="submit">save</button>
+              </form>
+              <form method="post" action="/roles/retire" class="inline"
+                onsubmit="return confirm('Retire this role? Its bullets stay but the role leaves CV selection. Reactivate anytime.')">
+                <input type="hidden" name="id" value={a.id} />
+                <input type="hidden" name="ret" value={ret} />
+                <button type="submit">retire role</button>
+              </form>
+            </details>
+          </div>
+          {bl.length === 0 ? <p class="muted">no bullets yet — add the first one</p> : bl.map(bullet)}
+          {miniAdd(`Add bullet to ${a.id}`, { section, anchor_id: a.id, tags: '' })}
+        </div>
+      );
+    };
+
+    const skillsOf = (cat: string) => rows.filter((r) => r.section === 'skills' && r.skcat === cat);
+    const summaryRows = rows.filter((r) => r.section === 'summary');
+    const expCount = rows.filter((r) => r.section === 'experience').length;
+    const prjCount = rows.filter((r) => r.section === 'projects').length;
+    const sklCount = rows.filter((r) => r.section === 'skills').length;
 
     return page(c, 'Blocks bank', (
       <>
@@ -1030,7 +1127,7 @@ export function consoleApp(): App {
             <details>
               <summary>More filters</summary>
               <div class="actions" style="margin-top:10px">
-                {sel('anchor_id', anchors, q.anchor_id)}
+                {sel('anchor_id', activeAnchors.map((a) => a.id), q.anchor_id)}
                 {sel('skcat', [...SKCATS], q.skcat)}
                 {sel('status', ['draft', 'approved', 'retired'], q.status)}
                 {sel('es_status', ['missing', 'draft', 'approved'], q.es_status)}
@@ -1042,10 +1139,11 @@ export function consoleApp(): App {
           <details class="card c-add">
             <summary><strong>+ Add block</strong></summary>
             <form method="post" action="/blocks/create" style="margin-top:10px">
-              {blockFields(allAnchors)}
+              {blockFields(activeAnchors)}
+              <input type="hidden" name="ret" value={ret} />
               <div class="actions">
                 <button type="submit" class="primary">Add as draft</button>
-                <a href="/blocks">Cancel</a>
+                <a href={`/blocks?${ret}`}>Cancel</a>
               </div>
             </form>
           </details>
@@ -1054,44 +1152,106 @@ export function consoleApp(): App {
               onsubmit="return confirm('Approve EVERY draft block (EN + ES where present)? You can retire individual blocks afterwards.')">
               <button type="submit" class="primary">Approve the ENTIRE bank (EN + ES)</button>
             </form>
-            <div class="muted">Light review: look at the SAMPLE CVs in /cvs; if they represent you, approve everything here.</div>
+            <div class="muted">Light review: look at the SAMPLE CVs in /cvs; if they represent you, approve everything here. <a href="/blocks/template-check">Check template ↗</a></div>
           </div>
         </div>
-        {[...bySection.entries()].map(([section, brows]) => (
+
+        {show('experience') ? (
           <>
-            <h2>{section} ({brows.length})</h2>
-            <div class="table-wrap"><table>
-              <tr><th>id</th><th class="hide-sm">role</th><th class="hide-sm">category</th><th>status</th><th>ES</th><th class="hide-sm">text (EN)</th><th></th></tr>
-              {brows.map((b) => (
-                <tr>
-                  <td class="muted">{b.id}</td>
-                  <td class="hide-sm muted">{b.anchor_id ?? '—'}</td>
-                  <td class="hide-sm">{b.skcat ?? '—'}</td>
-                  <td class={b.status === 'approved' ? 'ok' : 'warn'}>{b.status}</td>
-                  <td class={b.es_status === 'approved' ? 'ok' : 'muted'}>{b.es_status}</td>
-                  <td class="hide-sm">{String(b.text_en ?? '').slice(0, 90)}…</td>
-                  <td>
-                    <a href={`/blocks/edit?id=${encodeURIComponent(String(b.id))}`}>edit</a>{' · '}
-                    {b.status !== 'approved' ? (
-                      <form class="inline" method="post" action="/blocks/approve">
-                        <input type="hidden" name="id" value={String(b.id)} />
-                        <button type="submit">approve</button>
-                      </form>
-                    ) : (
-                      <form class="inline" method="post" action="/blocks/retire">
-                        <input type="hidden" name="id" value={String(b.id)} />
-                        <button type="submit">retire</button>
-                      </form>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </table></div>
+            <h2>My roles ({expCount} bullets)</h2>
+            {activeAnchors.filter((a) => a.kind === 'role').map(roleCard)}
+            <details class="card">
+              <summary><strong>＋ Add role</strong> <span class="muted">(new job or project)</span></summary>
+              <form method="post" action="/roles/create" style="margin-top:8px">
+                <input type="hidden" name="ret" value={ret} />
+                <div class="field"><label>Company / name</label><input type="text" name="company" required /></div>
+                <div class="field"><label>Short code — uppercase, e.g. TD1 (also goes in your CV template as {'{{CODE}}'}R1…)</label>
+                  <input type="text" name="code" required style="max-width:160px" /></div>
+                <div class="field"><label>Type</label>
+                  <select name="kind"><option value="role">job / role</option><option value="project">project</option></select></div>
+                <div class="actions">
+                  <button type="submit" class="primary">Add role</button>
+                  <a href={`/blocks?${ret}`}>Cancel</a>
+                </div>
+              </form>
+            </details>
+            {retiredAnchors.length > 0 ? (
+              <details class="card">
+                <summary class="muted">Retired roles ({retiredAnchors.length})</summary>
+                {retiredAnchors.map((a) => (
+                  <div class="actions" style="margin-top:6px">
+                    <span>{a.company ?? a.id}</span> <span class="chip">{a.id}</span>
+                    <form class="inline" method="post" action="/roles/reactivate">
+                      <input type="hidden" name="id" value={a.id} />
+                      <input type="hidden" name="ret" value={ret} />
+                      <button type="submit">reactivate</button>
+                    </form>
+                  </div>
+                ))}
+              </details>
+            ) : null}
           </>
-        ))}
-        {pager('/blocks', pg, hasNext, { section: q.section, anchor_id: q.anchor_id, angle: q.angle, status: q.status, es_status: q.es_status })}
+        ) : null}
+
+        {show('projects') ? (
+          <>
+            <h2>My projects ({prjCount} bullets)</h2>
+            {activeAnchors.filter((a) => a.kind === 'project').map(roleCard)}
+            <p class="muted">Projects are static text in the CV template for now — these bullets are kept for the future project-tailoring option.</p>
+          </>
+        ) : null}
+
+        {show('skills') ? (
+          <>
+            <h2>My skills ({sklCount})</h2>
+            {SKCATS.map((cat) => {
+              const items = skillsOf(cat);
+              const drafts = items.filter((r) => r.status === 'draft').length;
+              return (
+                <div class="card">
+                  <div class="actions">
+                    <strong style="text-transform:capitalize">{cat}</strong>
+                    <span class="muted">{items.length} items</span>
+                    {approveGroup('skcat', cat, drafts)}
+                  </div>
+                  {items.length === 0 ? <p class="muted">none yet</p> : items.map(bullet)}
+                  {miniAdd(`Add ${cat} skill`, { section: 'skills', skcat: cat, tags: '' })}
+                </div>
+              );
+            })}
+          </>
+        ) : null}
+
+        {show('summary') ? (
+          <>
+            <h2>My summary ({summaryRows.length} lines)</h2>
+            <div class="card">
+              <div class="actions">
+                <span class="muted">the opening bullets of every CV — the AI picks the best ones per job</span>
+                {approveGroup('section', 'summary', summaryRows.filter((r) => r.status === 'draft').length)}
+              </div>
+              {summaryRows.length === 0 ? <p class="muted">none yet</p> : summaryRows.map(bullet)}
+              {miniAdd('Add summary line', { section: 'summary', tags: '' })}
+            </div>
+          </>
+        ) : null}
       </>
     ));
+  });
+
+  app.post('/blocks/approve-group', async (c) => {
+    const b = await c.req.parseBody();
+    const field = String(b.field ?? '');
+    const value = String(b.value ?? '');
+    if (!['anchor_id', 'skcat', 'section'].includes(field) || !value) {
+      return c.redirect('/blocks?m=invalid group');
+    }
+    await c.env.DB.prepare(
+      `UPDATE blocks SET status='approved',
+        es_status = CASE WHEN text_es IS NOT NULL THEN 'approved' ELSE es_status END,
+        updated_at = ? WHERE ${field} = ? AND status = 'draft'`,
+    ).bind(now(), value).run();
+    return c.redirect(`/blocks?${sanitizeRet(String(b.ret ?? ''))}&m=${encodeURIComponent(`${value} approved`)}`);
   });
 
   app.post('/blocks/approve', async (c) => {
@@ -1099,14 +1259,14 @@ export function consoleApp(): App {
     await c.env.DB.prepare(
       "UPDATE blocks SET status='approved', es_status = CASE WHEN text_es IS NOT NULL THEN 'approved' ELSE es_status END, updated_at=? WHERE id=?",
     ).bind(now(), String(b.id)).run();
-    return c.redirect('/blocks?m=approved');
+    return c.redirect(`/blocks?${sanitizeRet(String(b.ret ?? ''))}&m=approved`);
   });
 
   app.post('/blocks/retire', async (c) => {
     const b = await c.req.parseBody();
     await c.env.DB.prepare("UPDATE blocks SET status='retired', updated_at=? WHERE id=?")
       .bind(now(), String(b.id)).run();
-    return c.redirect('/blocks?m=retired (never deleted)');
+    return c.redirect(`/blocks?${sanitizeRet(String(b.ret ?? ''))}&m=retired (kept, not deleted)`);
   });
 
   app.post('/blocks/approve-all', async (c) => {
@@ -1156,8 +1316,10 @@ export function consoleApp(): App {
   });
 
   app.post('/blocks/create', async (c) => {
-    const n = normalizeBlockInput(await c.req.parseBody());
-    if ('error' in n) return c.redirect(`/blocks?m=${encodeURIComponent(`add failed: ${n.error}`)}`);
+    const body = await c.req.parseBody();
+    const ret = sanitizeRet(String(body.ret ?? ''));
+    const n = normalizeBlockInput(body);
+    if ('error' in n) return c.redirect(`/blocks?${ret}&m=${encodeURIComponent(`add failed: ${n.error}`)}`);
     const id = newBlockId(n.section);
     try {
       await c.env.DB.prepare(
@@ -1165,9 +1327,9 @@ export function consoleApp(): App {
          VALUES (?,?,?,?,?,?,?,?,'draft',?)`,
       ).bind(id, n.section, n.anchor_id, n.skcat, n.text_en, n.text_es, n.es_status, n.tags, now()).run();
     } catch (err) {
-      return c.redirect(`/blocks?m=${encodeURIComponent(`add failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
+      return c.redirect(`/blocks?${ret}&m=${encodeURIComponent(`add failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
     }
-    return c.redirect(`/blocks?section=${n.section}&m=${encodeURIComponent('block added (draft)')}`);
+    return c.redirect(`/blocks?${ret || `section=${n.section}`}&m=${encodeURIComponent('added (draft)')}`);
   });
 
   app.post('/blocks/update', async (c) => {
@@ -1204,38 +1366,40 @@ export function consoleApp(): App {
   // ---------- Roles (anchors) — the missing write path (2026-07-18) ----------
   app.post('/roles/create', async (c) => {
     const b = await c.req.parseBody();
+    const ret = sanitizeRet(String(b.ret ?? ''));
     const code = String(b.code ?? '').trim().toUpperCase();
     const kind = String(b.kind ?? 'role') === 'project' ? 'project' : 'role';
     const company = String(b.company ?? '').trim();
-    if (!company) return c.redirect('/blocks?m=add role failed: company/name is required');
+    if (!company) return c.redirect(`/blocks?${ret}&m=add role failed: company/name is required`);
     const existing = ((await c.env.DB.prepare('SELECT id FROM anchors').all<{ id: string }>()).results).map((a) => a.id);
     const err = validateRoleCode(code, existing);
-    if (err) return c.redirect(`/blocks?m=${encodeURIComponent(`add role failed: ${err}`)}`);
+    if (err) return c.redirect(`/blocks?${ret}&m=${encodeURIComponent(`add role failed: ${err}`)}`);
     await c.env.DB.prepare("INSERT INTO anchors (id, kind, company, status) VALUES (?,?,?,'active')")
       .bind(code, kind, company).run();
-    return c.redirect(`/blocks?m=${encodeURIComponent(
+    return c.redirect(`/blocks?${ret}&m=${encodeURIComponent(
       `role ${code} added — now paste {{${code}R1}}, {{${code}R2}}, … lines into your CV template Doc (with its static header) and run Check template`,
     )}`);
   });
 
   app.post('/roles/update', async (c) => {
     const b = await c.req.parseBody();
+    const ret = sanitizeRet(String(b.ret ?? ''));
     const id = String(b.id ?? '');
     const company = String(b.company ?? '').trim();
     const newCode = String(b.new_code ?? '').trim().toUpperCase();
     const row = await c.env.DB.prepare('SELECT id, kind, company FROM anchors WHERE id = ?')
       .bind(id).first<{ id: string; kind: string; company: string | null }>();
-    if (!row) return c.redirect('/blocks?m=role not found');
+    if (!row) return c.redirect(`/blocks?${ret}&m=role not found`);
     if (!newCode || newCode === id) {
       // Company/name rename only — safe, no template coupling.
       await c.env.DB.prepare('UPDATE anchors SET company = ? WHERE id = ?').bind(company || row.company, id).run();
-      return c.redirect('/blocks?m=role updated');
+      return c.redirect(`/blocks?${ret}&m=role updated`);
     }
     // CODE rename: template-coupled. Refuse while {{OLD…}} tokens remain in the
     // Doc; abort on any Google failure (safe default — never rename blind).
     const existing = ((await c.env.DB.prepare('SELECT id FROM anchors WHERE id != ?').bind(id).all<{ id: string }>()).results).map((a) => a.id);
     const err = validateRoleCode(newCode, existing);
-    if (err) return c.redirect(`/blocks?m=${encodeURIComponent(`rename failed: ${err}`)}`);
+    if (err) return c.redirect(`/blocks?${ret}&m=${encodeURIComponent(`rename failed: ${err}`)}`);
     try {
       if (!c.env.CV_TEMPLATE_DOC_ID) throw new Error('CV_TEMPLATE_DOC_ID not configured');
       const { googleAccessToken, readPlaceholders } = await import('../gdocs');
@@ -1243,12 +1407,12 @@ export function consoleApp(): App {
       const docTokens = await readPlaceholders(token, c.env.CV_TEMPLATE_DOC_ID);
       const leftovers = tokensOfRole(id, docTokens.map((t) => t.name));
       if (leftovers.length) {
-        return c.redirect(`/blocks?m=${encodeURIComponent(
+        return c.redirect(`/blocks?${ret}&m=${encodeURIComponent(
           `rename refused: the template still contains ${leftovers.slice(0, 3).join(', ')}${leftovers.length > 3 ? '…' : ''} — update the Doc to {{${newCode}R…}} first`,
         )}`);
       }
     } catch (err2) {
-      return c.redirect(`/blocks?m=${encodeURIComponent(
+      return c.redirect(`/blocks?${ret}&m=${encodeURIComponent(
         `rename aborted (cannot verify the template): ${err2 instanceof Error ? err2.message : 'Google unreachable'}`,
       )}`);
     }
@@ -1259,21 +1423,21 @@ export function consoleApp(): App {
       c.env.DB.prepare('UPDATE blocks SET anchor_id = ? WHERE anchor_id = ?').bind(newCode, id),
       c.env.DB.prepare('DELETE FROM anchors WHERE id = ?').bind(id),
     ]);
-    return c.redirect(`/blocks?m=${encodeURIComponent(`role renamed ${id} → ${newCode} (bullets repointed)`)}`);
+    return c.redirect(`/blocks?${ret}&m=${encodeURIComponent(`role renamed ${id} → ${newCode} (bullets repointed)`)}`);
   });
 
   app.post('/roles/retire', async (c) => {
     const b = await c.req.parseBody();
     await c.env.DB.prepare("UPDATE anchors SET status='retired', retired_at=? WHERE id=?")
       .bind(now(), String(b.id ?? '')).run();
-    return c.redirect('/blocks?m=role retired (kept for history — reactivate anytime)');
+    return c.redirect(`/blocks?${sanitizeRet(String(b.ret ?? ''))}&m=role retired (kept for history — reactivate anytime)`);
   });
 
   app.post('/roles/reactivate', async (c) => {
     const b = await c.req.parseBody();
     await c.env.DB.prepare("UPDATE anchors SET status='active', retired_at=NULL WHERE id=?")
       .bind(String(b.id ?? '')).run();
-    return c.redirect('/blocks?m=role reactivated');
+    return c.redirect(`/blocks?${sanitizeRet(String(b.ret ?? ''))}&m=role reactivated`);
   });
 
   // ---------- CVs ----------
