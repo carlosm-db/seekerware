@@ -6,6 +6,7 @@ import type { Child } from 'hono/jsx';
 import { Layout, type FooterStatus } from './layout';
 import { authMiddleware, createSession, setSessionCookie, verifyPassword, type ConsoleEnv } from './auth';
 import { validateScoringConfig } from '../config-store';
+import { ANGLES, SECTIONS, newBlockId, normalizeBlockInput } from './blocks-form';
 import * as greenhouse from '../connectors/greenhouse';
 import type { Company } from '../types';
 import type { ScoreResult } from '../scoring';
@@ -39,6 +40,50 @@ export function consoleApp(): App {
         <span class="muted">page {pg + 1}</span>
         {hasNext ? <a href={qs(pg + 1)}>Next →</a> : <span class="muted">Next →</span>}
       </div>
+    );
+  }
+
+  // ---------- Bank add/edit shared bits (docs/UI.md §2) ----------
+  type AnchorOpt = { id: string; company: string | null; kind: string };
+  type BlockEdit = {
+    section?: string | null; anchor_id?: string | null; angle?: string | null;
+    text_en?: string | null; text_es?: string | null; tags?: string | null;
+    fact_key?: string | null; evidence?: string | null; source?: string | null;
+  };
+  const fetchAnchors = async (env: ConsoleEnv): Promise<AnchorOpt[]> =>
+    (await env.DB.prepare('SELECT id, company, kind FROM anchors ORDER BY kind, id').all<AnchorOpt>()).results;
+
+  /** Shared field set for the add (b undefined) and edit (b prefilled) block forms. */
+  function blockFields(anchors: AnchorOpt[], b?: BlockEdit) {
+    return (
+      <>
+        <div class="field"><label>Section</label>
+          <select name="section" required>
+            {SECTIONS.map((s) => <option value={s} selected={b?.section === s}>{s}</option>)}
+          </select></div>
+        <div class="field"><label>Role / anchor (experience &amp; projects only)</label>
+          <select name="anchor_id">
+            <option value="" selected={!b?.anchor_id}>(none)</option>
+            {anchors.map((a) => <option value={a.id} selected={b?.anchor_id === a.id}>{a.id} — {a.company ?? '—'} ({a.kind})</option>)}
+          </select></div>
+        <div class="field"><label>Angle (experience emphasis)</label>
+          <select name="angle">
+            <option value="" selected={!b?.angle}>(none)</option>
+            {ANGLES.map((a) => <option value={a} selected={b?.angle === a}>{a}</option>)}
+          </select></div>
+        <div class="field"><label>Text — English (required)</label>
+          <textarea name="text_en" required>{b?.text_en ?? ''}</textarea></div>
+        <div class="field"><label>Text — Spanish (parity)</label>
+          <textarea name="text_es">{b?.text_es ?? ''}</textarea></div>
+        <div class="field"><label>Tags — for a skill use skcat:technical | methodologies | academic | emerging</label>
+          <input type="text" name="tags" value={b?.tags ?? ''} /></div>
+        <div class="field"><label>fact_key (optional — groups phrasings of one fact)</label>
+          <input type="text" name="fact_key" value={b?.fact_key ?? ''} /></div>
+        <div class="field"><label>Evidence</label>
+          <input type="text" name="evidence" value={b?.evidence ?? ''} /></div>
+        <div class="field"><label>Source</label>
+          <input type="text" name="source" value={b?.source ?? ''} /></div>
+      </>
     );
   }
 
@@ -871,6 +916,7 @@ export function consoleApp(): App {
       (await c.env.DB.prepare(`SELECT DISTINCT ${col} v FROM blocks WHERE ${col} IS NOT NULL ORDER BY ${col}`).all<{ v: string }>())
         .results.map((r) => r.v);
     const [anchors, angles] = await Promise.all([distinct('anchor_id'), distinct('angle')]);
+    const allAnchors = await fetchAnchors(c.env);
 
     const counts = await c.env.DB.prepare(
       "SELECT COUNT(*) total, SUM(status='approved') approved, SUM(es_status='approved') es_ok FROM blocks",
@@ -906,15 +952,33 @@ export function consoleApp(): App {
           <div class="stat"><div class="n">{counts?.approved ?? 0}/{counts?.total ?? 0}</div><div class="l">approved blocks</div></div>
           <div class="stat"><div class="n">{counts?.es_ok ?? 0}/{counts?.total ?? 0}</div><div class="l">ES parity approved</div></div>
         </div>
-        <form method="get" action="/blocks" class="card actions">
-          {sel('section', ['summary', 'skills', 'experience', 'projects'], q.section)}
-          {sel('anchor_id', anchors, q.anchor_id)}
-          {sel('angle', angles, q.angle)}
-          {sel('status', ['draft', 'review', 'approved', 'retired'], q.status)}
-          {sel('es_status', ['missing', 'draft', 'approved'], q.es_status)}
-          <button type="submit" class="primary">Filter</button>
-          <a href="/blocks">Clear</a>
+        <form method="get" action="/blocks" class="card">
+          <div class="field">
+            <label for="secsel">Section</label>
+            <select id="secsel" name="section" onchange="this.form.submit()">
+              <option value="" selected={!q.section}>All sections</option>
+              {SECTIONS.map((s) => <option value={s} selected={q.section === s}>{s}</option>)}
+            </select>
+          </div>
+          <details>
+            <summary>More filters</summary>
+            <div class="actions" style="margin-top:10px">
+              {sel('anchor_id', anchors, q.anchor_id)}
+              {sel('angle', angles, q.angle)}
+              {sel('status', ['draft', 'review', 'approved', 'retired'], q.status)}
+              {sel('es_status', ['missing', 'draft', 'approved'], q.es_status)}
+              <button type="submit" class="primary">Apply filters</button>
+              <a href="/blocks">Clear</a>
+            </div>
+          </details>
         </form>
+        <details class="card">
+          <summary><strong>+ Add block</strong></summary>
+          <form method="post" action="/blocks/create" style="margin-top:10px">
+            {blockFields(allAnchors)}
+            <button type="submit" class="primary">Add as draft</button>
+          </form>
+        </details>
         <div class="card actions">
           <form class="inline" method="post" action="/blocks/approve-all">
             <button type="submit" class="primary">Approve the ENTIRE bank (EN + ES)</button>
@@ -935,6 +999,7 @@ export function consoleApp(): App {
                   <td class={b.es_status === 'approved' ? 'ok' : 'muted'}>{b.es_status}</td>
                   <td class="hide-sm">{String(b.text_en ?? '').slice(0, 90)}…</td>
                   <td>
+                    <a href={`/blocks/edit?id=${encodeURIComponent(String(b.id))}`}>edit</a>{' · '}
                     {b.status !== 'approved' ? (
                       <form class="inline" method="post" action="/blocks/approve">
                         <input type="hidden" name="id" value={String(b.id)} />
@@ -977,6 +1042,81 @@ export function consoleApp(): App {
       "UPDATE blocks SET status='approved', es_status = CASE WHEN text_es IS NOT NULL THEN 'approved' ELSE es_status END, updated_at=? WHERE status IN ('draft','review')",
     ).bind(now()).run();
     return c.redirect('/blocks?m=entire bank approved');
+  });
+
+  app.get('/blocks/edit', async (c) => {
+    const id = c.req.query('id') ?? '';
+    const b = await c.env.DB.prepare(
+      'SELECT id, section, anchor_id, angle, fact_key, text_en, text_es, es_status, tags, evidence, source, status FROM blocks WHERE id = ?',
+    ).bind(id).first<Record<string, string | null>>();
+    if (!b) return c.redirect('/blocks?m=block not found');
+    const anchors = await fetchAnchors(c.env);
+    return page(c, 'Edit block', (
+      <>
+        <p class="muted">{String(b.id)} · status <strong>{String(b.status)}</strong> · ES {String(b.es_status)}</p>
+        <form method="post" action="/blocks/update" class="card">
+          <input type="hidden" name="id" value={String(b.id)} />
+          {blockFields(anchors, b)}
+          <div class="actions">
+            <button type="submit" class="primary">Save changes</button>
+            <a href="/blocks">Cancel</a>
+          </div>
+        </form>
+        <div class="card actions">
+          {b.status !== 'approved' ? (
+            <form class="inline" method="post" action="/blocks/approve">
+              <input type="hidden" name="id" value={String(b.id)} />
+              <button type="submit">approve</button>
+            </form>
+          ) : (
+            <form class="inline" method="post" action="/blocks/retire">
+              <input type="hidden" name="id" value={String(b.id)} />
+              <button type="submit">retire (keep record)</button>
+            </form>
+          )}
+          <form class="inline" method="post" action="/blocks/delete" onsubmit="return confirm('Delete this block permanently? This cannot be undone.')">
+            <input type="hidden" name="id" value={String(b.id)} />
+            <button type="submit" class="danger">Delete permanently</button>
+          </form>
+        </div>
+      </>
+    ));
+  });
+
+  app.post('/blocks/create', async (c) => {
+    const n = normalizeBlockInput(await c.req.parseBody());
+    if ('error' in n) return c.redirect(`/blocks?m=${encodeURIComponent(`add failed: ${n.error}`)}`);
+    const id = newBlockId(n.section);
+    try {
+      await c.env.DB.prepare(
+        `INSERT INTO blocks (id, section, anchor_id, fact_key, angle, text_en, text_es, es_status, tags, evidence, source, status, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,'draft',?)`,
+      ).bind(id, n.section, n.anchor_id, n.fact_key || id, n.angle, n.text_en, n.text_es, n.es_status, n.tags, n.evidence, n.source, now()).run();
+    } catch (err) {
+      return c.redirect(`/blocks?m=${encodeURIComponent(`add failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
+    }
+    return c.redirect(`/blocks?section=${n.section}&m=${encodeURIComponent('block added (draft)')}`);
+  });
+
+  app.post('/blocks/update', async (c) => {
+    const body = await c.req.parseBody();
+    const id = String(body.id ?? '');
+    const n = normalizeBlockInput(body);
+    if ('error' in n) return c.redirect(`/blocks/edit?id=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${n.error}`)}`);
+    try {
+      await c.env.DB.prepare(
+        `UPDATE blocks SET section=?, anchor_id=?, fact_key=?, angle=?, text_en=?, text_es=?, es_status=?, tags=?, evidence=?, source=?, updated_at=? WHERE id=?`,
+      ).bind(n.section, n.anchor_id, n.fact_key || id, n.angle, n.text_en, n.text_es, n.es_status, n.tags, n.evidence, n.source, now(), id).run();
+    } catch (err) {
+      return c.redirect(`/blocks/edit?id=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
+    }
+    return c.redirect('/blocks?m=block updated');
+  });
+
+  app.post('/blocks/delete', async (c) => {
+    const b = await c.req.parseBody();
+    await c.env.DB.prepare('DELETE FROM blocks WHERE id = ?').bind(String(b.id ?? '')).run();
+    return c.redirect('/blocks?m=block deleted permanently');
   });
 
   // ---------- CVs ----------

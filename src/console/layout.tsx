@@ -57,10 +57,14 @@ button, input[type=submit] { cursor:pointer; border:1px solid var(--line);
   background:var(--card); color:var(--fg); border-radius:8px; padding:10px 14px; font-size:15px;
   min-height:44px }
 button.primary { background:var(--accent); color:#fff; border-color:var(--accent) }
+button.danger { background:var(--bad); color:#fff; border-color:var(--bad) }
 input[type=text], input[type=password], input[type=number], input[type=date], select, textarea {
   background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:8px;
   padding:10px 12px; font-size:16px; min-height:44px; max-width:100% }
 textarea { width:100%; font-family:ui-monospace, monospace; font-size:13px; min-height:120px }
+.field { display:block; margin-bottom:10px }
+.field label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px }
+.field select, .field input, .field textarea { width:100% }
 
 /* ---- responsive grids: single column on phone, multi on desktop ---- */
 .statgrid, .cardgrid { display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:16px }
