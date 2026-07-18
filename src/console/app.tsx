@@ -241,6 +241,10 @@ export function consoleApp(): App {
                 <input type="hidden" name="stage" value="snooze3" />
                 <button type="submit">Snooze 3d</button>
               </form>
+              <form class="inline" method="post" action={`/jobs/${j.url_hash}/cv`}>
+                <input type="hidden" name="back" value="today" />
+                <button type="submit">CV</button>
+              </form>
             </div>
           </div>
         ))}
@@ -361,7 +365,12 @@ export function consoleApp(): App {
         <div class="card">
           <div><strong>{j.company}</strong> · 📍 {j.location || '—'} · <span class={`v-${j.verdict}`}>{j.verdict}</span> · {j.score}/100 · <span class="chip">{j.track ?? '—'}</span> · <span class={`s-${j.status}`}>{j.status}</span></div>
           <div class="muted">posted: {fmt(j.posted_at as string)} · seen: {fmt(j.first_seen as string)} · notified: {fmt(j.notified_at as string)}</div>
-          <div style="margin-top:6px"><a href={String(j.url)} target="_blank" rel="noreferrer">open job ↗</a></div>
+          <div class="actions" style="margin-top:6px">
+            <a href={String(j.url)} target="_blank" rel="noreferrer">open job ↗</a>
+            <form class="inline" method="post" action={`/jobs/${hash}/cv`}>
+              <button type="submit">Generate CV</button>
+            </form>
+          </div>
         </div>
         {breakdown ? (
           <div class="card">
@@ -1703,13 +1712,6 @@ export function consoleApp(): App {
     ).results;
     const hasNext = cvs.length > PAGE;
     if (hasNext) cvs.pop();
-    const candidates = (
-      await c.env.DB.prepare(
-        `SELECT j.url_hash, j.title, co.name company FROM jobs j JOIN companies co ON co.id = j.company_id
-         WHERE j.verdict IN ('Apply','Stretch-worth-it') AND j.status IN ('new','notified')
-         ORDER BY j.score DESC LIMIT 30`,
-      ).all<Record<string, string>>()
-    ).results;
     const contactSet = await c.env.DB.prepare("SELECT 1 FROM config WHERE key='contact_profile'").first();
     return page(c, 'CV library', (
       <>
@@ -1719,23 +1721,10 @@ export function consoleApp(): App {
             <a href="/contact">Set it now →</a>
           </div>
         ) : null}
-        <form method="post" action="/cvs/sample" class="card actions">
-          <strong>Generate SAMPLE CV</strong>
-          <select name="hash">
-            {candidates.map((j) => <option value={j.url_hash}>{`${j.title!.slice(0, 50)} @ ${j.company}`}</option>)}
-          </select>
-          <select name="lang"><option value="en">EN</option><option value="es">ES</option></select>
-          <button type="submit" class="primary">Generate (uses draft blocks — review only)</button>
-        </form>
-        <form method="post" action="/cvs/real" class="card actions"
-          onsubmit="return confirm('Queue a REAL CV for this job? It renders from APPROVED blocks only, on the next pipeline run.')">
-          <strong>Queue REAL CV</strong>
-          <select name="hash">
-            {candidates.map((j) => <option value={j.url_hash}>{`${j.title!.slice(0, 50)} @ ${j.company}`}</option>)}
-          </select>
-          <button type="submit">Queue for the next run</button>
-          <span class="muted">needs an approved bank; the pipeline builds one CV per run</span>
-        </form>
+        <div class="card actions">
+          <span class="muted">To generate a CV, open the job (Today or Jobs) and tap <strong>Generate CV</strong> there.</span>
+          <a href="/blocks/template-check">Check template ↗</a>
+        </div>
         {cvs.length === 0 ? <div class="card"><p>No CVs generated yet.</p></div> : (
           <div class="table-wrap"><table>
             <tr><th>#</th><th>job</th><th>language</th><th>type</th><th>doc</th><th>selection</th><th>verifier tweaks</th><th>date</th></tr>
@@ -1758,46 +1747,47 @@ export function consoleApp(): App {
     ));
   });
 
-  app.post('/cvs/sample', async (c) => {
+  // Generate CV — lives ON the job (2026-07-18: pickers were backwards).
+  // Approved bank -> queue a REAL build; unapproved -> render a SAMPLE now.
+  app.post('/jobs/:hash/cv', async (c) => {
+    const hash = c.req.param('hash');
     const b = await c.req.parseBody();
-    const hash = String(b.hash ?? '');
-    const lang = b.lang === 'es' ? 'es' : 'en';
+    const back = String(b.back ?? '') === 'today' ? '/' : `/jobs/${hash}`;
     const j = await c.env.DB.prepare(
-      `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, co.name company
+      `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, j.status, co.name company
        FROM jobs j JOIN companies co ON co.id = j.company_id WHERE j.url_hash = ?`,
     ).bind(hash).first<Record<string, string | null>>();
-    if (!j) return c.redirect('/cvs?m=job not found');
+    if (!j || !['new', 'notified'].includes(String(j.status))) {
+      return c.redirect(`${back}?m=job not found or closed`);
+    }
+    const approved = await c.env.DB.prepare("SELECT COUNT(*) n FROM blocks WHERE status='approved'").first<{ n: number }>();
+    if ((approved?.n ?? 0) > 0) {
+      await c.env.DB.prepare('UPDATE jobs SET cv_pending = 1 WHERE url_hash = ?').bind(hash).run();
+      return c.redirect(`${back}?m=${encodeURIComponent('REAL CV queued — the next pipeline run builds it from your approved bank')}`);
+    }
+    // Bank not approved yet: build a SAMPLE right now so the owner can judge.
     const { generateCv } = await import('../ia/cv_factory');
     const fx = await generateCv(c.env, {
       id: String(j.ext_id ?? ''), company: String(j.company), title: String(j.title),
       location: String(j.location ?? ''), url: String(j.url), description: String(j.description_text ?? ''),
       posted_at: null, ats: (j.ats ?? 'greenhouse') as 'greenhouse', raw: null,
       url_hash: hash, track: j.track ?? null,
-    }, lang, true);
+    }, 'en', true);
     // Honest flash: exactly what filled, what stayed blank, what was not understood.
     let msg: string;
     if (fx.ok) {
       const f = fx.fill;
-      const parts = [`sample generated · ${f?.filled.length ?? 0} slots filled`];
+      const parts = [`SAMPLE generated (bank not approved yet) · ${f?.filled.length ?? 0} slots filled`];
       if (f?.blanked.length) parts.push(`${f.blanked.length} blank: ${f.blanked.slice(0, 6).join(', ')}${f.blanked.length > 6 ? '…' : ''}`);
       if (f?.unrecognized.length) parts.push(`⚠ unknown tokens: ${f.unrecognized.slice(0, 6).join(', ')}`);
       if (f?.unplaced_blocks.length) parts.push(`${f.unplaced_blocks.length} selected blocks had no slot`);
       if (fx.contact_missing) parts.push('⚠ contact profile not set (empty phone/location)');
+      parts.push('see it in /cvs');
       msg = parts.join(' · ');
     } else {
       msg = `FAILED: ${fx.error}`;
     }
-    return c.redirect(`/cvs?m=${encodeURIComponent(msg)}`);
-  });
-
-  app.post('/cvs/real', async (c) => {
-    const b = await c.req.parseBody();
-    const hash = String(b.hash ?? '');
-    const j = await c.env.DB.prepare("SELECT url_hash FROM jobs WHERE url_hash = ? AND status IN ('new','notified')")
-      .bind(hash).first();
-    if (!j) return c.redirect('/cvs?m=job not found or closed');
-    await c.env.DB.prepare('UPDATE jobs SET cv_pending = 1 WHERE url_hash = ?').bind(hash).run();
-    return c.redirect('/cvs?m=queued: the next pipeline run builds the REAL CV (approved blocks only)');
+    return c.redirect(`${back}?m=${encodeURIComponent(msg)}`);
   });
 
   // ---------- Health ----------
