@@ -143,54 +143,55 @@ ALTER TABLE jobs ADD COLUMN cv_pdf_key TEXT;
 
 ## 5. `anchors` and `blocks` tables — the blocks bank
 
-The bank is the core asset of the CV layer: the canonical, governed record,
-with evidence, of the owner's professional claims. Model: one **fact**
-(verifiable fact, with a single exact metric) can have several **blocks**
-(approved phrasings), differentiated by **angle** (the projection they serve)
-and language. The select-only guarantee is only as good as the completeness and
-accuracy of this bank.
+The bank is the core asset of the CV layer: the owner's CV content, managed in
+his own terms (roles with bullets, skills by category, summary lines — console
+/blocks). The select-only guarantee is only as good as the completeness and
+accuracy of this bank. Migration 0007 (2026-07-18) dropped the unused metadata
+columns (`fact_key`, `evidence`, `source`, `suggested`, `angle` on blocks;
+`titles`, `dates` on anchors): nothing at runtime read them and they made the
+editor a puzzle. The fact/evidence registry lives in the owner's private master
+document, outside the repo and outside D1.
 
 ### `anchors` — registry of real roles and projects
 
 | Column | Type | Writer | Description |
 |--------|------|--------|-------------|
-| id | TEXT PK | user | e.g. `scotiatech-2021`, `prj-chequeguardai` |
+| id | TEXT PK | user | The role code — used verbatim as the `{{<CODE>R<N>}}` template placeholder prefix. e.g. `BNS1`, `prj-chequeguardai` |
 | kind | TEXT enum `role\|project` | user | Anchor type |
-| company / dates | TEXT | user | Render metadata (console display) |
-| titles | TEXT JSON | user | Retained for the console; NOT used for CV rendering since the 2026-07-18 fill-in-place model (role headers are static in the template) |
+| company | TEXT | user | Display name in the console |
+| status | TEXT enum `active\|retired` | user | Retired roles leave dropdowns and CV selection; history/FKs kept |
+| retired_at | TEXT ISO | system | When retired |
 
-**Role codes (canonical `id`, 2026-07-18).** Since the fill-in-place CV model,
-each experience role's `anchors.id` is its short code — also used verbatim as
-the `{{<CODE>R<N>}}` responsibility placeholder in the template: `DLAB1`
-(DiversoLab), `BNS2` (Scotiabank branch), `BNS1` (Scotiatech), `UPS1` (UPS),
-`BAC1` (Banco Agrario). One term per concept across DB, code, and template.
+**Role codes (canonical `id`).** `DLAB1` (DiversoLab), `BNS2` (Scotiabank
+branch), `BNS1` (Scotiatech), `UPS1` (UPS), `BAC1` (Banco Agrario). One term
+per concept across DB, code, and template. Managed from the console
+(`/roles/create|update|retire|reactivate`): codes validated
+(`^[A-Z][A-Z0-9]{1,7}$`, no `R<digits>` suffix, no cross-collisions), code
+renames are FK-safe transactions gated on the template no longer containing
+the old `{{OLD…}}` tokens.
 
 ```sql
 CREATE TABLE anchors (
-  id      TEXT PRIMARY KEY,
-  kind    TEXT NOT NULL CHECK (kind IN ('role','project')),
-  company TEXT,
-  dates   TEXT,
-  titles  TEXT  -- JSON {internal, market_canada, market_colombia, contractor}
+  id         TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL CHECK (kind IN ('role','project')),
+  company    TEXT,
+  status     TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','retired')),
+  retired_at TEXT
 );
 ```
 
-### `blocks` — approved phrasings of facts
+### `blocks` — the owner's CV content
 
 | Column | Type | Writer | Description |
 |--------|------|--------|-------------|
-| id | TEXT PK | user | `{sec}-{anchor\|topic}-{nn}[-{angle}]`, e.g. `exp-BNS1-01-data` |
+| id | TEXT PK | system | Auto-generated (`{sec}-{uuid8}`); opaque, never shown in a CV |
 | section | TEXT enum `summary\|skills\|experience\|projects` | user | CV section |
-| anchor_id | TEXT FK -> anchors | user | Experience: the role code (`DLAB1`…) driving `{{<CODE>R<N>}}`. Null in summary/skills |
-| fact_key | TEXT | user | Groups all phrasings/languages of the same fact |
-| angle | TEXT enum `data\|compliance\|operations\|leadership` or NULL | user | The projection this phrasing serves |
-| text_en / text_es | TEXT | user | Phrasings of the SAME fact in each language (parity required) |
-| es_status | TEXT enum `missing\|draft\|approved` | user | ES parity status |
-| tags | TEXT csv | user | Controlled vocabulary SHARED with `config` (domain/tool/signal families + track-fit). Skills also carry `skcat:<methodologies\|technical\|academic\|emerging>` — the category whose `{{skills_<cat>}}` line the item fills (Languages is static, not a category) |
-| evidence | TEXT | user | Real verifiable fact backing the claim |
-| source | TEXT | user | Provenance (CV variant, portfolio case, project) |
-| status | TEXT enum `draft\|review\|approved\|retired` | user | Lifecycle; only `approved` enters the cv_selector enum; `retired` is never deleted (audit trail) |
-| suggested | TEXT | system | AI proposal (tweak or new block) pending review; NEVER used in render |
+| anchor_id | TEXT FK -> anchors | user | Experience/projects: the role code driving `{{<CODE>R<N>}}`. Null in summary/skills (enforced by the form) |
+| skcat | TEXT enum `technical\|methodologies\|academic\|emerging` or NULL | user | Skill category → fills the `{{skills_<cat>}}` line. Required for skills (form-enforced); Languages is static template text, not a category |
+| text_en / text_es | TEXT | user | The content, per language |
+| es_status | TEXT enum `missing\|draft\|approved` | user | ES status; language-symmetric: editing EN never re-drafts approved ES (and vice versa) |
+| tags | TEXT csv | user/system | Free hint text shown to the AI selector; not user-facing in the form |
+| status | TEXT enum `draft\|review\|approved\|retired` | user | Lifecycle; only `approved` enters the cv_selector enum for REAL CVs (`review` is currently unused) |
 | updated_at | TEXT ISO | system | Last modification |
 
 ```sql
@@ -199,25 +200,17 @@ CREATE TABLE blocks (
   section    TEXT NOT NULL
                CHECK (section IN ('summary','skills','experience','projects')),
   anchor_id  TEXT REFERENCES anchors(id),
-  fact_key   TEXT NOT NULL,
-  angle      TEXT CHECK (angle IN ('data','compliance','operations','leadership')),
+  skcat      TEXT CHECK (skcat IN ('technical','methodologies','academic','emerging')),
   text_en    TEXT,
   text_es    TEXT,
   es_status  TEXT NOT NULL DEFAULT 'missing'
                CHECK (es_status IN ('missing','draft','approved')),
   tags       TEXT,
-  evidence   TEXT,
-  source     TEXT,
   status     TEXT NOT NULL DEFAULT 'draft'
                CHECK (status IN ('draft','review','approved','retired')),
-  suggested  TEXT,
   updated_at TEXT
 );
 ```
-
-The fact registry (fact_key -> fact + exact metric + evidence + source) lives
-in the bank's master document (the owner's private resource, outside the repo);
-`fact_key` references it from D1.
 
 ## 6. `config` table — rules-engine tuning and operation
 
@@ -243,11 +236,12 @@ the keys and JSON sub-formats **is decided in build 2** with real jobs.
 - Auto-expire ONLY over companies with a successful fetch in the run.
 - A company's first run: seeding with `status = 'skipped'`, without notifying.
 - `closed` is not reopened nor re-notified.
-- The cv_selector only sees blocks with `status = 'approved'`.
-- An `approved` block MUST have `evidence`, `fact_key`, and >= 1 tag.
+- The cv_selector only sees blocks with `status = 'approved'` for REAL CVs
+  (SAMPLE builds may use drafts — that is the owner's light-review loop).
 - Rendering in ES requires `es_status = 'approved'` on all selected blocks
   (parity report before rendering colombia_perm).
-- `retired` is never deleted (bank audit trail).
+- `retired` blocks/roles are kept (bank audit trail); the console also offers
+  a confirm-guarded permanent delete for content the owner considers junk.
 - The run's writes in `db.batch()` (per-batch atomicity).
 
 ## 8. Limits and scale
@@ -400,9 +394,12 @@ Written on every save from the console; enables "revert to this version".
   `applications`/`job_events` NEVER (audit trail) · `jobs` unchanged.
 - **Operational `config` keys**: `quota_limits` (editable free-tier limits),
   `observability` (alert thresholds, Monday digest ~06:00 America/Bogota,
-  retention), `weekly_goal` (weekly application target, initially 5),
-  `contact_profile` (PRIVATE JSON, owner-entered via the console `/contact`
-  page; never in the repo). Shape: `{ phone_ca, phone_co, location_ca,
+  retention, `cv_pending_max` CV retry budget), `schedule` (owner-editable
+  pipeline window/cadence `{every_hours,start_hour,end_hour,timezone}`; the
+  cron is a dumb hourly tick gated by it — console /health panel; NO
+  weekly_goal: metrics are plain personal counts, never quotas — owner
+  decision 2026-07-18), `contact_profile` (PRIVATE JSON, owner-entered via
+  the console `/contact` page; never in the repo). Shape: `{ phone_ca, phone_co, location_ca,
   location_co, address_ca:{country,province,city,address,zip},
   address_co:{country,department,municipality,neighbourhood,address,detail,
   zip} }`. `{{phone}}`/`{{location}}` fill the CV header from CA vs CO by

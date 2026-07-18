@@ -100,19 +100,19 @@ describe('scoreJob — tracks and gates', () => {
   });
 
   it('remote contractor without a B2B signal gets a penalty (subtracts 15)', () => {
-    const conJob = job({
+    const withSignalJob = job({
       title: 'Business Analyst',
       location: 'Remote worldwide',
       description: 'Payments and banking. SQL. Independent contractor, B2B.',
     });
-    const sinJob = job({
+    const withoutSignalJob = job({
       title: 'Business Analyst',
       location: 'Remote worldwide',
       description: 'Payments and banking. SQL.',
     });
-    const con = scoreJob(conJob, config).tracks.contractor_usd!;
-    const sin = scoreJob(sinJob, config).tracks.contractor_usd!;
-    expect(con.adjusted_score - sin.adjusted_score).toBeGreaterThanOrEqual(15);
+    const withSignal = scoreJob(withSignalJob, config).tracks.contractor_usd!;
+    const withoutSignal = scoreJob(withoutSignalJob, config).tracks.contractor_usd!;
+    expect(withSignal.adjusted_score - withoutSignal.adjusted_score).toBeGreaterThanOrEqual(15);
   });
 });
 

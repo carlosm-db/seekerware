@@ -203,6 +203,23 @@ row-by-row review).
   "contact only in the Docs template" and "contact in D1 for the kit" notes.
   Owner enters values via the console `/contact` page; address is
   application-forms-only (step 8), never in the CV.
+- **2026-07-18 (PM)** — **Console rebuilt around the owner** (full audit in
+  docs/audits/2026-07-18-*.md, 7 reports; complete plan approved in one act):
+  (1) migration 0007 dropped the dead bank columns (fact_key/evidence/source/
+  suggested/angle; anchors titles/dates) and promoted `skcat` to a column;
+  (2) roles are console-managed (create/rename/retire/reactivate, validated
+  codes, template-gated renames); (3) /blocks is role-centric (full EN/ES text
+  visible on phone; contextual add; per-role approve; language-symmetric
+  approval); (4) **Check template** diffs bank↔Doc tokens both ways;
+  (5) Calibration humanized (plain settings, word chips, draft → preview
+  impact → activate, history with human diff, previewed revert, JSON demoted);
+  (6) **no quotas**: weekly_goal removed everywhere, metrics are plain counts
+  ("this is personal, not KPI"); (7) /cvs is a pure library — **Generate CV**
+  lives on the job (SAMPLE unapproved / REAL queue approved); (8) **Schedule
+  panel** on /health: hourly 24/7 cron tick gated by owner-editable D1
+  `schedule` (window/cadence/timezone, DST-aware, no deploys); (9) scoring
+  fixes v1.6 + re-score action (see track-routing audit). Deferred by owner:
+  single-schema.sql repo cleanup (C0), ES template (C1), AI projects (C2).
 - **2026-07-18** — **Fill-in-place CV factory**: the owner's template is the
   source of truth for structure; the factory reads its `{{...}}` tokens and
   fills each with EXACT approved-block text (contact, `{{sum_N}}`,

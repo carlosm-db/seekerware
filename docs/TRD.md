@@ -109,7 +109,7 @@ output_key}`, sequential runner, wrapper with:
 | Agent | Model | Temp | Role |
 |-------|-------|------|------|
 | `enricher` | 3.1-flash-lite | 0.4 | Improves why_it_fits / gap_to_address / positioning_lead of the survivor |
-| `cv_selector` | 3.1-flash-lite | 0.3 | Selects block IDs per section + order + emphasis (JSON, enum of IDs); enum built ONLY from `approved` blocks; selection guided by `tags` (vocabulary shared with `config`) and `angle` |
+| `cv_selector` | 3.1-flash-lite | 0.3 | Selects block IDs per section + order (JSON, enum of IDs); enum built ONLY from `approved` blocks (drafts allowed in SAMPLE mode); selection guided by `tags` and the skill category `skcat` |
 | `cv_verifier` | 2.5-flash | 0 | Verifies the rendered Doc against job and bank; "Suggested tweaks" appendix (suggestions, never edits) |
 
 ## 5. Store, freshness, and notification
@@ -135,7 +135,7 @@ output_key}`, sequential runner, wrapper with:
 
 ```
 survivor Apply
-  -> cv_selector (IDs per section/angle from the job's matched tags;
+  -> cv_selector (IDs per section from the job's matched tags/categories;
      language per the job — ES render requires es_status approved)
   -> template-driven fill via Google REST APIs (zero AI in this step):
        Drive files.copy of CV_TEMPLATE_DOC_ID into DRIVE_FOLDER_ID,
@@ -195,7 +195,9 @@ notification or the CV.
 ## 7. Orchestration (src/pipeline.ts)
 
 ```
-cron (30-60 min) -> scheduled() -> runPipeline(env)
+cron (hourly 24/7 tick; the D1 `schedule` config — console /health panel —
+decides which ticks run: window/cadence/timezone, DST-aware, no deploy)
+  -> scheduled() -> runPipeline(env)
   for each active company (isolated in try/catch):
     fetchJobs -> normalize -> dedup / update store
     new: score + tracks -> verdict

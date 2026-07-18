@@ -54,16 +54,16 @@ triage; every mutation works without JS (real forms, enhanced with htmx).
 | Route | Page | Purpose | v |
 |-------|------|---------|---|
 | `/login` | Login | the only route without auth | 1 |
-| `/` | **Today** | morning page: status strip (pending, pace vs goal, health, upcoming follow-ups) + triage of survivors (prepare `p` / applied `a` / dismiss `x` / snooze `s` / note `n`; undo 30 s) | 1 |
-| `/jobs` · `/jobs/:hash` | **Jobs** | everything seen: combinable filters (track/verdict/status/stage/company/text), saved views, "why NOT" chip on near-misses, CSV export; detail: score breakdown by category, gates table per track, description, history, CV panel | 1 (table + minimal detail) |
-| `/tracker` | **Tracker** | applications kanban: Notified → Prepared → Applied → Interview → Offer/Rejected, with notes, dates, overdue follow-ups; drag-and-drop | 2 |
-| `/companies` | **Companies** | CRUD + health (failure streak, last error) + **90d ROI** (jobs seen, survivors, yield %) + pruning suggestions + "test token" button (dry-run preview on create) | 1 |
-| `/config` | **Calibration** | structured editors (weights, keywords per family, gates, thresholds over a histogram) + **Replay**: simulate a draft config against the last N jobs (default 200, max 1000) with verdict diff and volume projection BEFORE saving; history with revert | 1 (editor) / 2 (replay) |
-| `/blocks` · `/blocks/edit` | **Bank** | instant **Section** dropdown (auto-filter) + collapsible fine filters; **+ Add block** and per-block **Edit** (`/blocks/edit`) forms (section, role/anchor, angle, EN/ES text, tags incl. `skcat:`, evidence) — new/edited blocks enter `draft`; **Approve** / **Retire** (soft, kept) / **Delete** (permanent, behind a confirm); approve-entire-bank; grouped by section; EN/ES parity stat. Anchors registry + `suggested` queue = future | 2 (with step 6) |
-| `/cvs` | **CVs** | library of generated CVs: Doc + PDF, blocks used, persisted verifier notes, regenerate, diff between generations | 2 (with step 6) |
-| `/aplicaciones` | **Applications** | kit queue: pending Apply → kit ready (PDF, matched answers, red questions, deep link) → applied; question census | 2 (step 8) |
-| `/salud` | **Health** | last run + history (`runs`), event log, quota meters (peak subrequests vs 50, D1 vs limits, Gemini vs RPD), companies with problems, integrity checks | 1 (runs) / 2 (complete) |
-| `/semana` | **Week** | weekly funnel per track (seen→survivors→applied→interviews→offers), conversions with deltas, momentum (triage streak, pace vs `weekly_goal`, median time-to-apply), aging WIP | 2 |
+| `/` | **Today** | morning page: status strip (pending triage, applied-this-week count, health) + triage of survivors (Prepare / I applied ✓ / Dismiss / Snooze 3d / CV) two-up on desktop, paginated | 1 |
+| `/jobs` · `/jobs/:hash` | **Jobs** | everything seen: filters (track/verdict/status/title text) + quick views; detail: score breakdown by category, gates table per track, description, history, similar-jobs radar, **Generate CV** button (SAMPLE while the bank is unapproved, REAL queue once approved) | 1 |
+| `/tracker` | **Tracker** | applications kanban: Prepared → Applied → Interview → Offer/Rejected, notes, dates, overdue follow-ups (bounded at the 300 most recent) | 1 |
+| `/companies` | **Companies** | CRUD + health (failure streak, last error) + 90d yield, token probe on create, paginated | 1 |
+| `/config` | **Calibration** | plain-language settings ("Notify me at score ≥ …", freshness); keyword word-chips per category with plain weights (Strong/Normal/Light/Against); per-track gate sentences with chips; chip edits accumulate in a DRAFT → one **Preview impact & activate** flow (Replay under the hood) → history with human `diff_summary` and previewed revert; **Re-score** action materializes the active config over stored jobs; raw JSON demoted to an Advanced fold | 1 |
+| `/blocks` · `/blocks/edit` · `/blocks/template-check` | **Bank** | role-centric: **My roles** (cards with full EN/ES bullet text, contextual add-bullet, per-role approve, role create/rename/retire/reactivate), **My skills** (4 category groups, category select), **My summary**; section switcher + fine filters; approve-all behind confirm; per-block edit page keeps Retire (soft) / Delete (confirm, permanent); **Check template** diffs the bank against the Doc's `{{…}}` tokens both ways | 2 |
+| `/cvs` | **CVs** | pure library of generated CVs (Doc links, SAMPLE/real, selection rationale, verifier notes, fill report), paginated; generation happens on the job pages | 2 |
+| `/applications` | **Applications** | kit queue: pending Apply → kit ready (PDF, matched answers, red questions, deep link) → applied; question census | 2 (step 8) |
+| `/health` | **Health** | **Schedule panel** (run every N hours, window, timezone — no deploy needed) + runs history (paginated), event log, quota meters | 1 |
+| `/week` | **Week** | weekly funnel (seen→survivors→notified→applied — plain counts, no goals/quotas by owner decision), median time-to-apply, stalled WIP | 2 |
 
 Cross-cutting: top nav with badges (triage pending, suggested, health), an
 omnipresent footer "last run X min ago · N companies OK · errors", global
