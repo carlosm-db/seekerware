@@ -48,7 +48,8 @@ export interface CatalogBlock {
   id: string;
   section: string;
   anchor_id: string | null;
-  angle: string | null;
+  /** Skill category (skills blocks only): technical/methodologies/academic/emerging. */
+  skcat: string | null;
   tags: string;
   text: string;
 }
@@ -68,7 +69,7 @@ export async function cvSelector(
   const idsBySection = (s: string) => catalog.filter((b) => b.section === s).map((b) => b.id);
   const enumOrNull = (ids: string[]) => (ids.length ? { type: 'STRING', enum: ids } : { type: 'STRING' });
   const catalogText = catalog
-    .map((b) => `${b.id} [${b.section}${b.angle ? '/' + b.angle : ''}] tags:${b.tags} :: ${b.text.slice(0, 140)}`)
+    .map((b) => `${b.id} [${b.section}${b.skcat ? '/' + b.skcat : ''}] tags:${b.tags} :: ${b.text.slice(0, 140)}`)
     .join('\n');
   return callGemini<Selection>(env, {
     temperature: 0.3,

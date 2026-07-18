@@ -119,10 +119,9 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
   .controls.bankhead:has(details[open]) { grid-template-columns:1fr;
     grid-template-areas:"s1" "s2" "add" "ap" "filt" }
   .formgrid { display:grid; grid-template-columns:1fr 1fr; column-gap:18px;
-    grid-template-areas: "sec anc" "ang tags" "en es" "fk ev" "src src" }
-  .f-section { grid-area:sec } .f-anchor { grid-area:anc } .f-angle { grid-area:ang }
-  .f-en { grid-area:en } .f-es { grid-area:es } .f-tags { grid-area:tags }
-  .f-factkey { grid-area:fk } .f-evidence { grid-area:ev } .f-source { grid-area:src }
+    grid-template-areas: "sec anc" "cat cat" "en es" }
+  .f-section { grid-area:sec } .f-anchor { grid-area:anc } .f-cat { grid-area:cat }
+  .f-en { grid-area:en } .f-es { grid-area:es }
   .cols-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start }
   .cols-2.main-side { grid-template-columns:3fr 2fr }
   .twoup { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start }

@@ -2,22 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { buildSlotMap } from '../src/ia/cv_factory';
 import type { CatalogBlock, Selection } from '../src/ia/agents';
 
-function blk(id: string, section: string, anchor_id: string | null, tags: string, text: string): CatalogBlock {
-  return { id, section, anchor_id, angle: null, tags, text };
+function blk(id: string, section: string, anchor_id: string | null, skcat: string | null, text: string): CatalogBlock {
+  return { id, section, anchor_id, skcat, tags: '', text };
 }
 
 /** Canonical tokens as the template would carry them ({{name}}, unpadded). */
 const tok = (...names: string[]) => names.map((name) => ({ name, raw: `{{${name}}}` }));
 
 const catalog: CatalogBlock[] = [
-  blk('sum-1', 'summary', null, '', 'Summary bullet one'),
-  blk('sum-2', 'summary', null, '', 'Summary bullet two'),
-  blk('sk-sql', 'skills', null, 'skcat:technical', 'SQL'),
-  blk('sk-py', 'skills', null, 'skcat:technical', 'Python'),
-  blk('sk-agile', 'skills', null, 'skcat:methodologies', 'Agile'),
-  blk('e-bns1-a', 'experience', 'BNS1', '', 'Led X'),
-  blk('e-bns1-b', 'experience', 'BNS1', '', 'Built Y'),
-  blk('e-dlab-a', 'experience', 'DLAB1', '', 'Advised Z'),
+  blk('sum-1', 'summary', null, null, 'Summary bullet one'),
+  blk('sum-2', 'summary', null, null, 'Summary bullet two'),
+  blk('sk-sql', 'skills', null, 'technical', 'SQL'),
+  blk('sk-py', 'skills', null, 'technical', 'Python'),
+  blk('sk-agile', 'skills', null, 'methodologies', 'Agile'),
+  blk('e-bns1-a', 'experience', 'BNS1', null, 'Led X'),
+  blk('e-bns1-b', 'experience', 'BNS1', null, 'Built Y'),
+  blk('e-dlab-a', 'experience', 'DLAB1', null, 'Advised Z'),
 ];
 const byId = new Map(catalog.map((b) => [b.id, b]));
 const roleCodes = ['DLAB1', 'BNS1', 'BAC1'];

@@ -6,7 +6,7 @@ import type { Child } from 'hono/jsx';
 import { Layout, type FooterStatus } from './layout';
 import { authMiddleware, createSession, setSessionCookie, verifyPassword, type ConsoleEnv } from './auth';
 import { validateScoringConfig } from '../config-store';
-import { ANGLES, SECTIONS, newBlockId, normalizeBlockInput } from './blocks-form';
+import { SECTIONS, SKCATS, newBlockId, normalizeBlockInput } from './blocks-form';
 import * as greenhouse from '../connectors/greenhouse';
 import type { Company } from '../types';
 import type { ScoreResult } from '../scoring';
@@ -46,12 +46,11 @@ export function consoleApp(): App {
   // ---------- Bank add/edit shared bits (docs/UI.md §2) ----------
   type AnchorOpt = { id: string; company: string | null; kind: string };
   type BlockEdit = {
-    section?: string | null; anchor_id?: string | null; angle?: string | null;
+    section?: string | null; anchor_id?: string | null; skcat?: string | null;
     text_en?: string | null; text_es?: string | null; tags?: string | null;
-    fact_key?: string | null; evidence?: string | null; source?: string | null;
   };
   const fetchAnchors = async (env: ConsoleEnv): Promise<AnchorOpt[]> =>
-    (await env.DB.prepare('SELECT id, company, kind FROM anchors ORDER BY kind, id').all<AnchorOpt>()).results;
+    (await env.DB.prepare("SELECT id, company, kind FROM anchors WHERE status = 'active' ORDER BY kind, id").all<AnchorOpt>()).results;
 
   /** Shared field set for the add (b undefined) and edit (b prefilled) block forms. */
   function blockFields(anchors: AnchorOpt[], b?: BlockEdit) {
@@ -61,28 +60,21 @@ export function consoleApp(): App {
           <select name="section" required>
             {SECTIONS.map((s) => <option value={s} selected={b?.section === s}>{s}</option>)}
           </select></div>
-        <div class="field f-anchor"><label>Role / anchor (experience &amp; projects only)</label>
+        <div class="field f-anchor"><label>Which role? (experience &amp; projects)</label>
           <select name="anchor_id">
             <option value="" selected={!b?.anchor_id}>(none)</option>
-            {anchors.map((a) => <option value={a.id} selected={b?.anchor_id === a.id}>{a.id} — {a.company ?? '—'} ({a.kind})</option>)}
+            {anchors.map((a) => <option value={a.id} selected={b?.anchor_id === a.id}>{a.company ?? a.id} ({a.id})</option>)}
           </select></div>
-        <div class="field f-angle"><label>Angle (experience emphasis)</label>
-          <select name="angle">
-            <option value="" selected={!b?.angle}>(none)</option>
-            {ANGLES.map((a) => <option value={a} selected={b?.angle === a}>{a}</option>)}
+        <div class="field f-cat"><label>Category (skills only)</label>
+          <select name="skcat">
+            <option value="" selected={!b?.skcat}>(none)</option>
+            {SKCATS.map((k) => <option value={k} selected={b?.skcat === k}>{k}</option>)}
           </select></div>
         <div class="field f-en"><label>Text — English (required)</label>
           <textarea name="text_en" required>{b?.text_en ?? ''}</textarea></div>
-        <div class="field f-es"><label>Text — Spanish (parity)</label>
+        <div class="field f-es"><label>Text — Spanish</label>
           <textarea name="text_es">{b?.text_es ?? ''}</textarea></div>
-        <div class="field f-tags"><label>Tags — for a skill use skcat:technical | methodologies | academic | emerging</label>
-          <input type="text" name="tags" value={b?.tags ?? ''} /></div>
-        <div class="field f-factkey"><label>fact_key (optional — groups phrasings of one fact)</label>
-          <input type="text" name="fact_key" value={b?.fact_key ?? ''} /></div>
-        <div class="field f-evidence"><label>Evidence</label>
-          <input type="text" name="evidence" value={b?.evidence ?? ''} /></div>
-        <div class="field f-source"><label>Source</label>
-          <input type="text" name="source" value={b?.source ?? ''} /></div>
+        <input type="hidden" name="tags" value={b?.tags ?? ''} />
       </div>
     );
   }
@@ -983,14 +975,14 @@ export function consoleApp(): App {
     const q = c.req.query();
     const where: string[] = ['1=1'];
     const binds: unknown[] = [];
-    for (const f of ['section', 'anchor_id', 'angle', 'status', 'es_status'] as const) {
+    for (const f of ['section', 'anchor_id', 'skcat', 'status', 'es_status'] as const) {
       if (q[f]) { where.push(`${f} = ?`); binds.push(q[f]); }
     }
     // Filter option lists (distinct values)
     const distinct = async (col: string) =>
       (await c.env.DB.prepare(`SELECT DISTINCT ${col} v FROM blocks WHERE ${col} IS NOT NULL ORDER BY ${col}`).all<{ v: string }>())
         .results.map((r) => r.v);
-    const [anchors, angles] = await Promise.all([distinct('anchor_id'), distinct('angle')]);
+    const anchors = await distinct('anchor_id');
     const allAnchors = await fetchAnchors(c.env);
 
     const counts = await c.env.DB.prepare(
@@ -1000,7 +992,7 @@ export function consoleApp(): App {
     const pg = pageNum(c);
     const rows = (
       await c.env.DB.prepare(
-        `SELECT id, section, anchor_id, angle, status, es_status, tags, text_en FROM blocks
+        `SELECT id, section, anchor_id, skcat, status, es_status, text_en FROM blocks
          WHERE ${where.join(' AND ')} ORDER BY section, anchor_id, id LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
       ).bind(...binds).all<Record<string, string | null>>()
     ).results;
@@ -1038,8 +1030,8 @@ export function consoleApp(): App {
               <summary>More filters</summary>
               <div class="actions" style="margin-top:10px">
                 {sel('anchor_id', anchors, q.anchor_id)}
-                {sel('angle', angles, q.angle)}
-                {sel('status', ['draft', 'review', 'approved', 'retired'], q.status)}
+                {sel('skcat', [...SKCATS], q.skcat)}
+                {sel('status', ['draft', 'approved', 'retired'], q.status)}
                 {sel('es_status', ['missing', 'draft', 'approved'], q.es_status)}
                 <button type="submit" class="primary">Apply filters</button>
                 <a href="/blocks">Clear</a>
@@ -1068,12 +1060,12 @@ export function consoleApp(): App {
           <>
             <h2>{section} ({brows.length})</h2>
             <div class="table-wrap"><table>
-              <tr><th>id</th><th class="hide-sm">anchor</th><th class="hide-sm">angle</th><th>status</th><th>ES</th><th class="hide-sm">text (EN)</th><th></th></tr>
+              <tr><th>id</th><th class="hide-sm">role</th><th class="hide-sm">category</th><th>status</th><th>ES</th><th class="hide-sm">text (EN)</th><th></th></tr>
               {brows.map((b) => (
                 <tr>
                   <td class="muted">{b.id}</td>
                   <td class="hide-sm muted">{b.anchor_id ?? '—'}</td>
-                  <td class="hide-sm">{b.angle ?? '—'}</td>
+                  <td class="hide-sm">{b.skcat ?? '—'}</td>
                   <td class={b.status === 'approved' ? 'ok' : 'warn'}>{b.status}</td>
                   <td class={b.es_status === 'approved' ? 'ok' : 'muted'}>{b.es_status}</td>
                   <td class="hide-sm">{String(b.text_en ?? '').slice(0, 90)}…</td>
@@ -1126,7 +1118,7 @@ export function consoleApp(): App {
   app.get('/blocks/edit', async (c) => {
     const id = c.req.query('id') ?? '';
     const b = await c.env.DB.prepare(
-      'SELECT id, section, anchor_id, angle, fact_key, text_en, text_es, es_status, tags, evidence, source, status FROM blocks WHERE id = ?',
+      'SELECT id, section, anchor_id, skcat, text_en, text_es, es_status, tags, status FROM blocks WHERE id = ?',
     ).bind(id).first<Record<string, string | null>>();
     if (!b) return c.redirect('/blocks?m=block not found');
     const anchors = await fetchAnchors(c.env);
@@ -1168,9 +1160,9 @@ export function consoleApp(): App {
     const id = newBlockId(n.section);
     try {
       await c.env.DB.prepare(
-        `INSERT INTO blocks (id, section, anchor_id, fact_key, angle, text_en, text_es, es_status, tags, evidence, source, status, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,'draft',?)`,
-      ).bind(id, n.section, n.anchor_id, n.fact_key || id, n.angle, n.text_en, n.text_es, n.es_status, n.tags, n.evidence, n.source, now()).run();
+        `INSERT INTO blocks (id, section, anchor_id, skcat, text_en, text_es, es_status, tags, status, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,'draft',?)`,
+      ).bind(id, n.section, n.anchor_id, n.skcat, n.text_en, n.text_es, n.es_status, n.tags, now()).run();
     } catch (err) {
       return c.redirect(`/blocks?m=${encodeURIComponent(`add failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
     }
@@ -1182,10 +1174,20 @@ export function consoleApp(): App {
     const id = String(body.id ?? '');
     const n = normalizeBlockInput(body);
     if ('error' in n) return c.redirect(`/blocks/edit?id=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${n.error}`)}`);
+    const old = await c.env.DB.prepare('SELECT text_en, text_es, status, es_status, tags FROM blocks WHERE id = ?')
+      .bind(id).first<{ text_en: string | null; text_es: string | null; status: string; es_status: string; tags: string | null }>();
+    if (!old) return c.redirect('/blocks?m=block not found');
+    // Language-symmetric approval (2026-07-18 audit): editing one language
+    // never silently un-approves the other. Each language re-drafts only when
+    // ITS text actually changed.
+    const status = n.text_en !== (old.text_en ?? '') ? 'draft' : old.status;
+    const esStatus = (n.text_es ?? '') === (old.text_es ?? '')
+      ? old.es_status
+      : (n.text_es ? 'draft' : 'missing');
     try {
       await c.env.DB.prepare(
-        `UPDATE blocks SET section=?, anchor_id=?, fact_key=?, angle=?, text_en=?, text_es=?, es_status=?, tags=?, evidence=?, source=?, updated_at=? WHERE id=?`,
-      ).bind(n.section, n.anchor_id, n.fact_key || id, n.angle, n.text_en, n.text_es, n.es_status, n.tags, n.evidence, n.source, now(), id).run();
+        `UPDATE blocks SET section=?, anchor_id=?, skcat=?, text_en=?, text_es=?, es_status=?, tags=?, status=?, updated_at=? WHERE id=?`,
+      ).bind(n.section, n.anchor_id, n.skcat, n.text_en, n.text_es, esStatus, n.tags || (old.tags ?? ''), status, now(), id).run();
     } catch (err) {
       return c.redirect(`/blocks/edit?id=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
     }

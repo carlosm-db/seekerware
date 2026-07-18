@@ -75,7 +75,7 @@ interface BlockRow {
   id: string;
   section: string;
   anchor_id: string | null;
-  angle: string | null;
+  skcat: string | null;
   tags: string | null;
   text_en: string | null;
   text_es: string | null;
@@ -97,7 +97,7 @@ export async function generateCv(
     const statusFilter = sample ? "('draft','review','approved')" : "('approved')";
     const rows = (
       await env.DB.prepare(
-        `SELECT id, section, anchor_id, angle, tags, text_en, text_es, es_status, status
+        `SELECT id, section, anchor_id, skcat, tags, text_en, text_es, es_status, status
          FROM blocks WHERE status IN ${statusFilter}`,
       ).all<BlockRow>()
     ).results;
@@ -111,7 +111,7 @@ export async function generateCv(
       return { ok: false, gemini_calls: 0, error: `insufficient bank to render ${lang}${sample ? '' : ' (approved)'}: ${usable.length} blocks` };
     }
     const catalog: CatalogBlock[] = usable.map((b) => ({
-      id: b.id, section: b.section, anchor_id: b.anchor_id, angle: b.angle,
+      id: b.id, section: b.section, anchor_id: b.anchor_id, skcat: b.skcat,
       tags: b.tags ?? '', text: (lang === 'es' ? b.text_es : b.text_en) ?? '',
     }));
 
@@ -121,9 +121,11 @@ export async function generateCv(
     if (!sel.ok || !sel.data) return { ok: false, gemini_calls: geminiCalls, error: `cv_selector: ${sel.error}` };
     const selection = sel.data;
 
-    // 3) Catalog lookup + valid role codes (experience anchor ids)
+    // 3) Catalog lookup + valid role codes (active roles only)
     const byId = new Map(catalog.map((b) => [b.id, b]));
-    const roleCodes = ((await env.DB.prepare('SELECT id FROM anchors').all<{ id: string }>()).results).map((a) => a.id);
+    const roleCodes = ((await env.DB.prepare(
+      "SELECT id FROM anchors WHERE kind = 'role' AND status = 'active'",
+    ).all<{ id: string }>()).results).map((a) => a.id);
 
     // 4) Verifier (temp 0) over the selected content
     const ver = await cvVerifier(env, job, verifierText(selection, byId), doFetch);
@@ -192,12 +194,6 @@ export async function generateCv(
   }
 }
 
-/** Parses the skcat:<category> tag from a block's tags; '' when absent. */
-function skcatOf(tags: string): string {
-  for (const t of tags.split(/[\s,]+/)) if (t.startsWith('skcat:')) return t.slice(6);
-  return '';
-}
-
 export interface SlotFill extends FillReport {
   /** RAW token literal (exactly as typed in the Doc) -> replacement text. */
   map: Record<string, string>;
@@ -236,7 +232,7 @@ export function buildSlotMap(
   }
   const skillsByCat = new Map<string, Array<{ id: string; text: string }>>();
   for (const id of selection.skills) {
-    const cat = skcatOf(byId.get(id)?.tags ?? '');
+    const cat = byId.get(id)?.skcat ?? '';
     if (!cat) continue;
     const arr = skillsByCat.get(cat) ?? [];
     arr.push({ id, text: text(id) });
