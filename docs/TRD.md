@@ -154,16 +154,20 @@ y llama las APIs REST con `fetch`. Sin SDKs de Google (no corren en Workers).
 
 Nombre del Doc: `CV — {company} — {title} — {yyyy-mm-dd}`.
 
-**Export PDF + archivo R2** (paso 6): tras el cv_verifier se renderiza una
-copia LIMPIA (sin apendice "Suggested tweaks") y se exporta via Drive
+**Export PDF + archivo en Drive** (paso 6; R2 descartado 2026-07-17: su
+activacion exige tarjeta — viola "free tiers estrictos sin tarjeta"): tras
+el cv_verifier se renderiza una copia LIMPIA (sin apendice "Suggested
+tweaks") y se exporta via Drive
 `files/{id}/export?mimeType=application/pdf` (+1 subrequest). El PDF se
-archiva inmutable en R2 (binding `CV_ARCHIVE`; bucket creado por el
-propietario — infra no-code; JAMAS publico, solo lectura via worker tras el
-login). Dos snapshots: `generated` (al renderizar) y `submitted` (al marcar
-aplicado — el CV exacto enviado, post-ediciones del propietario; el diff
-entre ambos alimenta el banco de blocks). Key:
-`cv/{url_hash}/{yyyymmdd-hhmm}-{generated|submitted}.pdf`. Fallo de R2 =
-evento `r2_fail`; nunca bloquea notificacion ni CV.
+archiva en la subcarpeta `archive/` de la carpeta compartida — inmutable
+POR CONVENCION: el sistema solo crea, jamas edita ni borra ahi. Dos
+snapshots: `generated` (al renderizar) y `submitted` (al marcar aplicado —
+el CV exacto enviado, post-ediciones del propietario; el diff entre ambos
+alimenta el banco de blocks). Nombre:
+`cv/{url_hash}/{yyyymmdd-hhmm}-{generated|submitted}.pdf`; el file id de
+Drive se guarda en `jobs.cv_pdf_key` / `applications.cv_pdf_key`. Fallo del
+archivado = evento `r2_fail` (termino del glosario se conserva); nunca
+bloquea notificacion ni CV.
 
 ## 7. Orquestacion (src/pipeline.ts)
 

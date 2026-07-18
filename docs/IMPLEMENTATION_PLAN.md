@@ -90,9 +90,10 @@ bulk-approve desde /blocks, no revision fila-a-fila).
 
 - **Entregables**: seed del banco aprobado a `anchors`+`blocks`;
   `src/ia/gemini.ts` + `src/ia/agents.ts` + `src/ia/cv_factory.ts` +
-  `src/gdocs.ts`; export PDF (copia limpia sin apendice); bucket R2
-  `CV_ARCHIVE` (creado por el propietario — 1 clic) + snapshots
-  generated/submitted; migration `0005` (tabla cvs, jobs.cv_pdf_key).
+  `src/gdocs.ts`; export PDF (copia limpia sin apendice); archivo de PDFs
+  en subcarpeta `archive/` de Drive (R2 descartado 2026-07-17: exige
+  tarjeta) + snapshots generated/submitted; migration `0005` (tabla cvs,
+  jobs.cv_pdf_key).
 - **Aceptacion**: un Apply genera Doc cuyo cuerpo contiene SOLO texto de
   blocks approved (diff verificable), PDF limpio archivado en R2, notas del
   verifier persistidas en `cvs`; render ES bloqueado sin paridad aprobada.
@@ -177,7 +178,10 @@ bulk-approve desde /blocks, no revision fila-a-fila).
 - **2026-07-17** — Datos de contacto del propietario como dato operativo en
   D1 privada (clave de `config`); jamas en el repo.
 - **2026-07-17** — R2 como archivo inmutable de PDFs (snapshots generated/
-  submitted); Drive sigue siendo master editable.
+  submitted); Drive sigue siendo master editable. **Revertida el mismo dia**:
+  activar R2 exige registrar tarjeta (viola "free tiers estrictos sin
+  tarjeta"); el archivo de PDFs pasa a subcarpeta `archive/` de Drive,
+  inmutable por convencion (el sistema solo crea, jamas edita/borra).
 - **2026-07-17** — Tabla `applications` = tracker del usuario (stages);
   maquinaria de envio approved/submitted NO se construye (coherente con el
   rechazo de L2b/L3).
