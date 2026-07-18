@@ -1809,6 +1809,15 @@ export function consoleApp(): App {
       "SELECT MAX(subrequests) peak_subreq, SUM(d1_reads) reads, SUM(d1_writes) writes, COUNT(*) runs FROM runs WHERE date(started_at) = date('now')",
     ).first<{ peak_subreq: number; reads: number; writes: number; runs: number }>();
 
+    const { DEFAULT_SCHEDULE, SCHEDULE_TIMEZONES, nextRunAfter, normalizeSchedule } = await import('../schedule');
+    const schedRow = await c.env.DB.prepare("SELECT value FROM config WHERE key='schedule'").first<{ value: string }>();
+    let schedRaw: unknown = null;
+    try { if (schedRow) schedRaw = JSON.parse(schedRow.value); } catch { /* defaults */ }
+    const sched = normalizeSchedule(schedRaw ?? DEFAULT_SCHEDULE);
+    const lastRun = runs[0]?.started_at ? fmt(String(runs[0].started_at)) : '—';
+    const next = nextRunAfter(new Date(), sched);
+    const hourOpts = Array.from({ length: 24 }, (_, h) => h);
+
     return page(c, 'Health', (
       <>
         <div class="statgrid">
@@ -1817,6 +1826,29 @@ export function consoleApp(): App {
           <div class="stat"><div class="n">{today?.writes ?? 0}</div><div class="l">D1 writes today (limit 100k)</div></div>
           <div class="stat"><div class="n">{today?.reads ?? 0}</div><div class="l">D1 reads today (limit 5M)</div></div>
         </div>
+        <form method="post" action="/health/schedule" class="card actions">
+          <strong>Schedule</strong>
+          <label>run every{' '}
+            <select name="every_hours">
+              {[1, 2, 3, 4, 6, 12].map((h) => <option value={String(h)} selected={h === sched.every_hours}>{h}h</option>)}
+            </select>
+          </label>
+          <label>from{' '}
+            <select name="start_hour">
+              {hourOpts.map((h) => <option value={String(h)} selected={h === sched.start_hour}>{h}:00</option>)}
+            </select>
+          </label>
+          <label>to{' '}
+            <select name="end_hour">
+              {hourOpts.map((h) => <option value={String(h)} selected={h === sched.end_hour}>{h}:00</option>)}
+            </select>
+          </label>
+          <select name="timezone">
+            {SCHEDULE_TIMEZONES.map((tz) => <option value={tz} selected={tz === sched.timezone}>{tz}</option>)}
+          </select>
+          <button type="submit" class="primary">Save schedule</button>
+          <span class="muted">last run {lastRun} UTC · next expected {next ? fmt(next.toISOString()) : '—'} UTC</span>
+        </form>
         <div class="table-wrap"><table>
           <tr><th>run</th><th>start</th><th>status</th><th class="hide-sm">ms</th><th>companies</th><th class="hide-sm">seen</th><th class="hide-sm">new</th><th>surv.</th><th>notif.</th><th class="hide-sm">closed</th><th class="hide-sm">subreq</th><th>errors</th></tr>
           {runs.map((r) => (
@@ -1843,9 +1875,19 @@ export function consoleApp(): App {
     ));
   });
 
-  // Redirects from the old Spanish routes (bookmarks)
-  app.get('/semana', (c) => c.redirect('/week'));
-  app.get('/salud', (c) => c.redirect('/health'));
+  app.post('/health/schedule', async (c) => {
+    const b = await c.req.parseBody();
+    const { normalizeSchedule } = await import('../schedule');
+    const sched = normalizeSchedule({
+      every_hours: Number(b.every_hours), start_hour: Number(b.start_hour),
+      end_hour: Number(b.end_hour), timezone: String(b.timezone ?? ''),
+    });
+    await c.env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('schedule', ?)")
+      .bind(JSON.stringify(sched)).run();
+    return c.redirect(`/health?m=${encodeURIComponent(
+      `schedule saved: every ${sched.every_hours}h, ${sched.start_hour}:00–${sched.end_hour}:00 ${sched.timezone}`,
+    )}`);
+  });
 
   return app;
 }

@@ -5,9 +5,10 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
   "observability": { "enabled": true },
-  // Hourly 9am-7pm US Eastern: UTC superset (13-23 = EDT window, 0 = 7pm EST in
-  // winter); scheduled() guards the exact ET hours, so DST never shifts the window.
-  "triggers": { "crons": ["0 0,13-23 * * *"] },
+  // Dumb hourly tick, 24/7. Whether a tick RUNS is decided by the owner-editable
+  // D1 config `schedule` (console /health panel) — window/cadence changes need
+  // no deploy. Skipped ticks exit immediately (near-zero cost).
+  "triggers": { "crons": ["0 * * * *"] },
   "d1_databases": [
     {
       "binding": "DB",

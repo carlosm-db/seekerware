@@ -229,22 +229,21 @@ async function preview(job: Job, config: ScoringConfig | null): Promise<PreviewR
   return row;
 }
 
-/** Hour of day in US Eastern time (DST-aware) — the cron window is owner-local. */
-function easternHour(d: Date): number {
-  return Number(
-    new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(d),
-  );
-}
-
 export default {
   fetch: app.fetch,
 
   async scheduled(_controller: ScheduledController, env: ConsoleEnv, ctx: ExecutionContext): Promise<void> {
-    // Cron fires hourly over a UTC superset (0,13-23); run ONLY 9am–7pm Eastern,
-    // exact year-round despite DST (owner decision 2026-07-18).
-    const h = easternHour(new Date());
-    if (h < 9 || h > 19) {
-      console.log(`cron skipped: ${h}:00 ET outside the 9-19 window`);
+    // The cron is a dumb hourly 24/7 tick; the owner-editable D1 config
+    // `schedule` (console /health panel) decides which ticks actually run.
+    const { normalizeSchedule, shouldRunAt } = await import('./schedule');
+    let raw: unknown = null;
+    try {
+      const row = await env.DB.prepare("SELECT value FROM config WHERE key='schedule'").first<{ value: string }>();
+      if (row) raw = JSON.parse(row.value);
+    } catch { /* fall back to defaults */ }
+    const sched = normalizeSchedule(raw);
+    if (!shouldRunAt(new Date(), sched)) {
+      console.log(`cron tick skipped: outside the ${sched.start_hour}-${sched.end_hour} ${sched.timezone} window`);
       return;
     }
     ctx.waitUntil(
