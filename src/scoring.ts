@@ -10,6 +10,8 @@ export interface Keyword {
   term: string;
   /** Weight; negative = signal against (subtracts within the category, floor 0). */
   weight: number;
+  /** Display language ('es' = Spanish list in the console; absent = English). Matching ignores it. */
+  lang?: 'es';
 }
 
 export interface Gate {

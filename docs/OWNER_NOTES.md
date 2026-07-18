@@ -19,6 +19,9 @@ No secrets or private values in this file — only where to put them.
    open the `client_email` inside your GOOGLE_SA_KEY JSON
    (…@…iam.gserviceaccount.com) and share BOTH the CV template Doc AND the
    Drive folder with it as **Editor**.
+5. **Apply scoring config v1.7** (adds the English/Español keyword split on
+   Calibration; run BEFORE making chip edits so nothing is overwritten):
+   `npx wrangler d1 execute seekerware --remote --file=seeds/seed_config.sql`
 
 ## B. Console pass (phone is fine)
 

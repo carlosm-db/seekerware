@@ -540,9 +540,12 @@ export function consoleApp(): App {
         .all<{ id: number; ts: string; key: string; replay_summary: string | null; diff_summary: string | null }>()
     ).results;
 
+    // Strength shown in plain words (never bare numbers — owner principle).
+    const strengthLabel = (w: number) =>
+      w >= 3 ? 'Strong' : w === 2 ? null : w === 1 ? 'Light' : w <= -3 ? 'Strongly against' : 'Against';
     const chip = (category: string, term: string, weight: number) => (
       <span class="chip">
-        {term}{weight !== 2 ? <span class="muted"> {weight > 0 ? `+${weight}` : weight}</span> : null}
+        {term}{strengthLabel(weight) ? <span class="muted"> · {strengthLabel(weight)}</span> : null}
         <form class="inline" method="post" action="/config/word-remove">
           <input type="hidden" name="category" value={category} />
           <input type="hidden" name="term" value={term} />
@@ -604,12 +607,16 @@ export function consoleApp(): App {
         <h2>What I want to see (word lists)</h2>
         {(Object.keys(cfg.keywords) as Array<keyof typeof cfg.keywords>).map((cat) => {
           const kws = cfg.keywords[cat] ?? [];
-          const pos = kws.filter((k) => k.weight > 0);
+          const posEn = kws.filter((k) => k.weight > 0 && k.lang !== 'es');
+          const posEs = kws.filter((k) => k.weight > 0 && k.lang === 'es');
           const neg = kws.filter((k) => k.weight < 0);
           return (
             <div class="card">
               <strong>{CAT_LABELS[cat] ?? cat}</strong>
-              <div style="margin:8px 0">{pos.map((k) => chip(cat, k.term, k.weight))}</div>
+              <div style="margin:8px 0"><span class="muted">English: </span>{posEn.map((k) => chip(cat, k.term, k.weight))}</div>
+              {posEs.length ? (
+                <div style="margin:8px 0"><span class="muted">Español (matches Colombian postings): </span>{posEs.map((k) => chip(cat, k.term, k.weight))}</div>
+              ) : null}
               {neg.length ? (
                 <div style="margin:8px 0"><span class="muted">Works against me: </span>{neg.map((k) => chip(cat, k.term, k.weight))}</div>
               ) : null}
@@ -618,6 +625,10 @@ export function consoleApp(): App {
                 <input type="text" name="term" placeholder="add a word or phrase" required />
                 <select name="weight">
                   {WEIGHT_LABELS.map(([w, l]) => <option value={String(w)} selected={w === 2}>{l}</option>)}
+                </select>
+                <select name="lang">
+                  <option value="">English</option>
+                  <option value="es">Español</option>
                 </select>
                 <button type="submit">Add</button>
               </form>
@@ -694,11 +705,12 @@ export function consoleApp(): App {
     const cat = String(b.category ?? '');
     const term = String(b.term ?? '').trim().toLowerCase();
     const weight = Number(b.weight ?? 2);
+    const lang = String(b.lang ?? '') === 'es' ? 'es' as const : undefined;
     const { cfg } = await loadDraftOrLive(c.env);
     const list = cfg.keywords[cat as keyof typeof cfg.keywords];
     if (!list || !term) return c.redirect('/config?m=invalid word');
     if (list.some((k) => k.term === term)) return c.redirect(`/config?m=${encodeURIComponent(`"${term}" is already listed`)}`);
-    list.push({ term, weight });
+    list.push(lang ? { term, weight, lang } : { term, weight });
     try { validateScoringConfig(cfg); } catch (err) {
       return c.redirect(`/config?m=${encodeURIComponent(`rejected: ${err instanceof Error ? err.message : 'invalid'}`)}`);
     }
