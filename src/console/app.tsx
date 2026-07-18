@@ -1023,10 +1023,10 @@ export function consoleApp(): App {
 
     return page(c, 'Blocks bank', (
       <>
-        <div class="controls">
-          <div class="stat"><div class="n">{counts?.approved ?? 0}/{counts?.total ?? 0}</div><div class="l">approved blocks</div></div>
-          <div class="stat"><div class="n">{counts?.es_ok ?? 0}/{counts?.total ?? 0}</div><div class="l">ES parity approved</div></div>
-          <form method="get" action="/blocks" class="card">
+        <div class="controls bankhead">
+          <div class="stat c-s1"><div class="n">{counts?.approved ?? 0}/{counts?.total ?? 0}</div><div class="l">approved blocks</div></div>
+          <div class="stat c-s2"><div class="n">{counts?.es_ok ?? 0}/{counts?.total ?? 0}</div><div class="l">ES parity approved</div></div>
+          <form method="get" action="/blocks" class="card c-filter">
             <div class="field">
               <label for="secsel">Section</label>
               <select id="secsel" name="section" onchange="this.form.submit()">
@@ -1046,15 +1046,19 @@ export function consoleApp(): App {
               </div>
             </details>
           </form>
-          <details class="card">
+          <details class="card c-add">
             <summary><strong>+ Add block</strong></summary>
             <form method="post" action="/blocks/create" style="margin-top:10px">
               {blockFields(allAnchors)}
-              <button type="submit" class="primary">Add as draft</button>
+              <div class="actions">
+                <button type="submit" class="primary">Add as draft</button>
+                <a href="/blocks">Cancel</a>
+              </div>
             </form>
           </details>
-          <div class="card">
-            <form class="inline" method="post" action="/blocks/approve-all">
+          <div class="card c-approve">
+            <form class="inline" method="post" action="/blocks/approve-all"
+              onsubmit="return confirm('Approve EVERY draft block (EN + ES where present)? You can retire individual blocks afterwards.')">
               <button type="submit" class="primary">Approve the ENTIRE bank (EN + ES)</button>
             </form>
             <div class="muted">Light review: look at the SAMPLE CVs in /cvs; if they represent you, approve everything here.</div>

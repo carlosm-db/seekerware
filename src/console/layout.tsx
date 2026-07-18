@@ -109,7 +109,15 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
 /* ---- desktop: DISTRIBUTE the width (never cap/center the page) ---- */
 @media (min-width:1024px) {
   .controls { grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); align-items:stretch }
-  .controls > details[open], .controls > *:has(details[open]) { grid-column:1 / -1 }
+  .controls:not(.bankhead) > details[open], .controls:not(.bankhead) > *:has(details[open]) { grid-column:1 / -1 }
+  /* Bank header per the owner's sketch: stats pair | wide Add; wide Approve | filters */
+  .controls.bankhead { grid-template-columns:1fr 1fr 1.6fr;
+    grid-template-areas:"s1 s2 add" "ap ap filt" }
+  .bankhead > .c-s1 { grid-area:s1 } .bankhead > .c-s2 { grid-area:s2 }
+  .bankhead > .c-add { grid-area:add } .bankhead > .c-approve { grid-area:ap }
+  .bankhead > .c-filter { grid-area:filt }
+  .controls.bankhead:has(details[open]) { grid-template-columns:1fr;
+    grid-template-areas:"s1" "s2" "add" "ap" "filt" }
   .formgrid { display:grid; grid-template-columns:1fr 1fr; column-gap:18px;
     grid-template-areas: "sec anc" "ang tags" "en es" "fk ev" "src src" }
   .f-section { grid-area:sec } .f-anchor { grid-area:anc } .f-angle { grid-area:ang }
