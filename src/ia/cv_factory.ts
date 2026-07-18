@@ -49,6 +49,17 @@ export function contactPlaceholders(track: string | null, p: ContactProfile): Re
   };
 }
 
+export interface FillReport {
+  /** Token names that received non-empty block/contact text. */
+  filled: string[];
+  /** Recognized tokens resolved to '' (no content available for the slot). */
+  blanked: string[];
+  /** Tokens the factory does not understand (typo'd names) — resolved to ''. */
+  unrecognized: string[];
+  /** Selected block ids that ended up in NO slot (template lacks tokens). */
+  unplaced_blocks: string[];
+}
+
 export interface FactoryResult {
   ok: boolean;
   contact_missing?: boolean;
@@ -56,6 +67,7 @@ export interface FactoryResult {
   pdf_file_id?: string;
   cv_id?: number;
   gemini_calls: number;
+  fill?: FillReport;
   error?: string;
 }
 
@@ -134,9 +146,9 @@ export async function generateCv(
     try { profile = contactRow ? (JSON.parse(contactRow.value) as ContactProfile) : {}; } catch { /* invalid json */ }
     if (!contactRow) contactMissing = true;
 
-    const tokens = await readPlaceholders(token, doc.id, doFetch);
-    const slotMap = buildSlotMap(tokens, selection, byId, roleCodes, contactPlaceholders(job.track, profile));
-    await replacePlaceholders(token, doc.id, slotMap, doFetch);
+    const docTokens = await readPlaceholders(token, doc.id, doFetch);
+    const fill = buildSlotMap(docTokens, selection, byId, roleCodes, contactPlaceholders(job.track, profile));
+    await replacePlaceholders(token, doc.id, fill.map, doFetch);
 
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').slice(0, 12);
     const pdfId = await exportAndArchivePdf(env, token, doc.id, `${stamp} — ${job.company} — generated.pdf`, doFetch);
@@ -150,18 +162,31 @@ export async function generateCv(
 
     // 6) Persistence
     const nowIso = new Date().toISOString();
+    const fillReport: FillReport = {
+      filled: fill.filled, blanked: fill.blanked,
+      unrecognized: fill.unrecognized, unplaced_blocks: fill.unplaced_blocks,
+    };
     const cvRow = await env.DB.prepare(
       `INSERT INTO cvs (url_hash, doc_id, doc_url, lang, pdf_file_id, blocks_used, verifier_notes, rationale, sample, pending, created_at)
        VALUES (?,?,?,?,?,?,?,?,?,0,?) RETURNING id`,
     ).bind(
       job.url_hash, doc.id, doc.url, lang, pdfId,
-      JSON.stringify({ summary: selection.summary, skills: selection.skills, experience: selection.experience, projects: selection.projects }),
+      // Truthful audit trail: what was selected vs what actually landed in a slot.
+      JSON.stringify({
+        selected: { summary: selection.summary, skills: selection.skills, experience: selection.experience, projects: selection.projects },
+        placed: fill.used_block_ids,
+        tokens: fillReport,
+      }),
       JSON.stringify(tweaks), selection.rationale, sample ? 1 : 0, nowIso,
     ).first<{ id: number }>();
-    await env.DB.prepare('UPDATE jobs SET cv_doc_url = ?, cv_pdf_key = ?, cv_pending = 0 WHERE url_hash = ?')
-      .bind(doc.url, pdfId, job.url_hash).run();
+    // SAMPLE builds must never clear a queued REAL CV or stamp sample artifacts
+    // on the job row (2026-07-18 audit).
+    if (!sample) {
+      await env.DB.prepare('UPDATE jobs SET cv_doc_url = ?, cv_pdf_key = ?, cv_pending = 0 WHERE url_hash = ?')
+        .bind(doc.url, pdfId, job.url_hash).run();
+    }
 
-    return { ok: true, contact_missing: contactMissing, doc_url: doc.url, pdf_file_id: pdfId, cv_id: cvRow?.id, gemini_calls: geminiCalls };
+    return { ok: true, contact_missing: contactMissing, doc_url: doc.url, pdf_file_id: pdfId, cv_id: cvRow?.id, gemini_calls: geminiCalls, fill: fillReport };
   } catch (err) {
     return { ok: false, gemini_calls: geminiCalls, error: err instanceof Error ? err.message : 'factory error' };
   }
@@ -173,24 +198,33 @@ function skcatOf(tags: string): string {
   return '';
 }
 
+export interface SlotFill extends FillReport {
+  /** RAW token literal (exactly as typed in the Doc) -> replacement text. */
+  map: Record<string, string>;
+  /** Block ids actually placed into some slot. */
+  used_block_ids: string[];
+}
+
 /**
  * Deterministic slot fill (zero AI): maps every {{...}} token PRESENT in the
- * template to selected block text. Recognized tokens:
- *   - {{phone}} / {{location}}  -> contact map (per track)
- *   - {{sum_N}}                 -> Nth selected summary block
- *   - {{skills_<cat>}}          -> selected skills tagged skcat:<cat>, joined
- *   - {{<CODE>R<N>}}            -> Nth selected responsibility for role <CODE>
+ * template to selected block text, keyed by the token's RAW literal so padded
+ * hand-typed tokens ('{{ phone }}') are still replaced. Recognized names:
+ *   - phone / location   -> contact map (per track)
+ *   - sum_N              -> Nth selected summary block
+ *   - skills_<cat>       -> selected skills tagged skcat:<cat>, joined
+ *   - <CODE>R<N>         -> Nth selected responsibility for role <CODE>
  * `selection` order is preserved within each role/category. Slots with no
- * matching block, and any UNRECOGNIZED token, resolve to '' so a raw {{...}}
- * never leaks into a CV.
+ * matching content, and any UNRECOGNIZED token, resolve to '' so a raw {{...}}
+ * never leaks into a CV — and everything is reported (filled/blanked/
+ * unrecognized/unplaced) instead of failing silently.
  */
 export function buildSlotMap(
-  tokens: Set<string>,
+  tokens: Array<{ name: string; raw: string }>,
   selection: Selection,
   byId: Map<string, CatalogBlock>,
   roleCodes: string[],
   contact: Record<string, string>,
-): Record<string, string> {
+): SlotFill {
   const text = (id: string | undefined) => (id ? byId.get(id)?.text ?? '' : '');
 
   const expByRole = new Map<string, string[]>();
@@ -200,31 +234,60 @@ export function buildSlotMap(
     arr.push(id);
     expByRole.set(code, arr);
   }
-  const skillsByCat = new Map<string, string[]>();
+  const skillsByCat = new Map<string, Array<{ id: string; text: string }>>();
   for (const id of selection.skills) {
     const cat = skcatOf(byId.get(id)?.tags ?? '');
     if (!cat) continue;
     const arr = skillsByCat.get(cat) ?? [];
-    arr.push(text(id));
+    arr.push({ id, text: text(id) });
     skillsByCat.set(cat, arr);
   }
 
   const map: Record<string, string> = {};
-  for (const name of tokens) {
-    const full = `{{${name}}}`;
-    if (full in contact) { map[full] = contact[full]!; continue; }
+  const filled: string[] = [];
+  const blanked: string[] = [];
+  const unrecognized: string[] = [];
+  const used = new Set<string>();
+  const place = (raw: string, name: string, value: string, blockId?: string) => {
+    map[raw] = value;
+    if (value) {
+      filled.push(name);
+      if (blockId) used.add(blockId);
+    } else blanked.push(name);
+  };
+
+  for (const { name, raw } of tokens) {
+    const canonical = `{{${name}}}`;
+    if (canonical in contact) { place(raw, name, contact[canonical]!); continue; }
     let m = /^sum_(\d+)$/.exec(name);
-    if (m) { map[full] = text(selection.summary[Number(m[1]) - 1]); continue; }
-    m = /^skills_(.+)$/.exec(name);
-    if (m) { map[full] = (skillsByCat.get(m[1]!) ?? []).join(', '); continue; }
-    m = /^(.+)R(\d+)$/.exec(name);
-    if (m && roleCodes.includes(m[1]!)) {
-      map[full] = text((expByRole.get(m[1]!) ?? [])[Number(m[2]) - 1]);
+    if (m) {
+      const id = selection.summary[Number(m[1]) - 1];
+      place(raw, name, text(id), id);
       continue;
     }
-    map[full] = '';
+    m = /^skills_(.+)$/.exec(name);
+    if (m) {
+      const items = skillsByCat.get(m[1]!) ?? [];
+      map[raw] = items.map((i) => i.text).join(', ');
+      if (map[raw]) {
+        filled.push(name);
+        for (const i of items) used.add(i.id);
+      } else blanked.push(name);
+      continue;
+    }
+    m = /^(.+)R(\d+)$/.exec(name);
+    if (m && roleCodes.includes(m[1]!)) {
+      const id = (expByRole.get(m[1]!) ?? [])[Number(m[2]) - 1];
+      place(raw, name, text(id), id);
+      continue;
+    }
+    map[raw] = '';
+    unrecognized.push(name);
   }
-  return map;
+
+  const selected = [...selection.summary, ...selection.skills, ...selection.experience];
+  const unplaced_blocks = selected.filter((id) => !used.has(id));
+  return { map, filled, blanked, unrecognized, unplaced_blocks, used_block_ids: [...used] };
 }
 
 /** Plain-text view of the selection for the verifier (labels help it reason). */

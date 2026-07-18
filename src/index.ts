@@ -89,6 +89,74 @@ app.get('/api/replay-batch', async (c) => {
   });
 });
 
+/**
+ * Re-score (glossary): applies the ACTIVE config to open jobs (new/notified),
+ * WRITING score/track/verdict/score_breakdown for changed rows. Batches of 50
+ * (CPU limit), driven by the /config/rescore runner page. Unlike Replay, this
+ * materializes — verdicts are otherwise frozen at ingestion (2026-07-18 audit).
+ */
+app.post('/api/rescore-batch', async (c) => {
+  const cursor = Math.max(0, Math.floor(Number(c.req.query('cursor')) || 0));
+  const BATCH = 50;
+  const config = await loadScoringConfig(c.env);
+  const total = await c.env.DB.prepare(
+    "SELECT COUNT(*) n FROM jobs WHERE status IN ('new','notified') AND description_text IS NOT NULL",
+  ).first<{ n: number }>();
+
+  const rows = (
+    await c.env.DB.prepare(
+      `SELECT j.url_hash, j.title, j.location, j.description_text, j.score, j.verdict, j.track, co.name company
+       FROM jobs j JOIN companies co ON co.id = j.company_id
+       WHERE j.status IN ('new','notified') AND j.description_text IS NOT NULL
+       ORDER BY j.first_seen DESC, j.url_hash LIMIT ? OFFSET ?`,
+    ).bind(BATCH, cursor).all<Record<string, string | number | null>>()
+  ).results;
+
+  const ts = new Date().toISOString();
+  const writes = [];
+  const changes = [];
+  for (const r of rows) {
+    const job: Job = {
+      id: '', company: String(r.company), title: String(r.title), location: String(r.location ?? ''),
+      url: '', description: String(r.description_text ?? ''), posted_at: null,
+      ats: 'greenhouse', raw: null,
+    };
+    const res = scoreJob(job, config);
+    const changed =
+      res.best.verdict !== String(r.verdict) ||
+      (res.best.track ?? null) !== (r.track ?? null) ||
+      res.best.adjusted_score !== Number(r.score);
+    if (!changed) continue;
+    writes.push(
+      c.env.DB.prepare('UPDATE jobs SET score = ?, track = ?, verdict = ?, score_breakdown = ? WHERE url_hash = ?')
+        .bind(res.best.adjusted_score, res.best.track, res.best.verdict, JSON.stringify(res), r.url_hash),
+    );
+    if (res.best.verdict !== String(r.verdict) || (res.best.track ?? null) !== (r.track ?? null)) {
+      writes.push(
+        c.env.DB.prepare('INSERT INTO job_events (url_hash, ts, actor, event, detail) VALUES (?,?,?,?,?)')
+          .bind(r.url_hash, ts, 'system', 'rescored',
+            `${r.track ?? '—'}/${r.verdict} ${r.score} → ${res.best.track ?? '—'}/${res.best.verdict} ${res.best.adjusted_score}`),
+      );
+      changes.push({
+        title: String(r.title).slice(0, 60), company: r.company,
+        old: `${r.track ?? '—'}/${r.verdict}`, new: `${res.best.track ?? '—'}/${res.best.verdict}`,
+        old_score: Number(r.score), new_score: res.best.adjusted_score,
+      });
+    }
+  }
+  if (writes.length) await c.env.DB.batch(writes);
+
+  const processed = cursor + rows.length;
+  return c.json({
+    changes,
+    updated: writes.length,
+    next_cursor: processed,
+    processed_total: processed,
+    total_open: total?.n ?? 0,
+    done: rows.length === 0,
+  });
+});
+
 app.get('/api/dry-run', async (c) => {
   const token = c.req.query('company');
   const ats = (c.req.query('ats') ?? 'greenhouse') as Ats;
@@ -161,10 +229,24 @@ async function preview(job: Job, config: ScoringConfig | null): Promise<PreviewR
   return row;
 }
 
+/** Hour of day in US Eastern time (DST-aware) — the cron window is owner-local. */
+function easternHour(d: Date): number {
+  return Number(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(d),
+  );
+}
+
 export default {
   fetch: app.fetch,
 
   async scheduled(_controller: ScheduledController, env: ConsoleEnv, ctx: ExecutionContext): Promise<void> {
+    // Cron fires hourly over a UTC superset (0,13-23); run ONLY 9am–7pm Eastern,
+    // exact year-round despite DST (owner decision 2026-07-18).
+    const h = easternHour(new Date());
+    if (h < 9 || h > 19) {
+      console.log(`cron skipped: ${h}:00 ET outside the 9-19 window`);
+      return;
+    }
     ctx.waitUntil(
       runPipeline(env, 'cron').then((stats) => {
         console.log(

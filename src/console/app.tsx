@@ -56,34 +56,34 @@ export function consoleApp(): App {
   /** Shared field set for the add (b undefined) and edit (b prefilled) block forms. */
   function blockFields(anchors: AnchorOpt[], b?: BlockEdit) {
     return (
-      <>
-        <div class="field"><label>Section</label>
+      <div class="formgrid">
+        <div class="field f-section"><label>Section</label>
           <select name="section" required>
             {SECTIONS.map((s) => <option value={s} selected={b?.section === s}>{s}</option>)}
           </select></div>
-        <div class="field"><label>Role / anchor (experience &amp; projects only)</label>
+        <div class="field f-anchor"><label>Role / anchor (experience &amp; projects only)</label>
           <select name="anchor_id">
             <option value="" selected={!b?.anchor_id}>(none)</option>
             {anchors.map((a) => <option value={a.id} selected={b?.anchor_id === a.id}>{a.id} — {a.company ?? '—'} ({a.kind})</option>)}
           </select></div>
-        <div class="field"><label>Angle (experience emphasis)</label>
+        <div class="field f-angle"><label>Angle (experience emphasis)</label>
           <select name="angle">
             <option value="" selected={!b?.angle}>(none)</option>
             {ANGLES.map((a) => <option value={a} selected={b?.angle === a}>{a}</option>)}
           </select></div>
-        <div class="field"><label>Text — English (required)</label>
+        <div class="field f-en"><label>Text — English (required)</label>
           <textarea name="text_en" required>{b?.text_en ?? ''}</textarea></div>
-        <div class="field"><label>Text — Spanish (parity)</label>
+        <div class="field f-es"><label>Text — Spanish (parity)</label>
           <textarea name="text_es">{b?.text_es ?? ''}</textarea></div>
-        <div class="field"><label>Tags — for a skill use skcat:technical | methodologies | academic | emerging</label>
+        <div class="field f-tags"><label>Tags — for a skill use skcat:technical | methodologies | academic | emerging</label>
           <input type="text" name="tags" value={b?.tags ?? ''} /></div>
-        <div class="field"><label>fact_key (optional — groups phrasings of one fact)</label>
+        <div class="field f-factkey"><label>fact_key (optional — groups phrasings of one fact)</label>
           <input type="text" name="fact_key" value={b?.fact_key ?? ''} /></div>
-        <div class="field"><label>Evidence</label>
+        <div class="field f-evidence"><label>Evidence</label>
           <input type="text" name="evidence" value={b?.evidence ?? ''} /></div>
-        <div class="field"><label>Source</label>
+        <div class="field f-source"><label>Source</label>
           <input type="text" name="source" value={b?.source ?? ''} /></div>
-      </>
+      </div>
     );
   }
 
@@ -220,6 +220,7 @@ export function consoleApp(): App {
         </div>
         <h2>Triage</h2>
         {pendingTotal === 0 ? <div class="card">Triage up to date ✓</div> : null}
+        <div class="twoup">
         {rows.map((j) => (
           <div class="card">
             <div>
@@ -251,6 +252,7 @@ export function consoleApp(): App {
             </div>
           </div>
         ))}
+        </div>
         {pager('/', pg, hasNext, {})}
       </>
     ));
@@ -312,7 +314,7 @@ export function consoleApp(): App {
 
     return page(c, 'Jobs', (
       <>
-        <form method="get" action="/jobs" class="card actions">
+        <form method="get" action="/jobs" class="card actions filterbar">
           {sel('track', ['canada_coop', 'colombia_perm', 'contractor_usd'], q.track)}
           {sel('verdict', ['Apply', 'Stretch-worth-it', 'Skip'], q.verdict)}
           {sel('status', ['new', 'notified', 'closed', 'skipped'], q.status)}
@@ -322,11 +324,10 @@ export function consoleApp(): App {
           <a href="/jobs?status=notified">Notified</a>
         </form>
         <div class="table-wrap"><table>
-          <tr><th>title</th><th class="hide-sm">company</th><th class="hide-sm">track</th><th>score</th><th>verdict</th><th class="hide-sm">status</th><th class="hide-sm">stage</th><th class="hide-sm">seen</th></tr>
+          <tr><th>title</th><th class="hide-sm">track</th><th>score</th><th>verdict</th><th class="hide-sm">status</th><th class="hide-sm">stage</th><th class="hide-sm">seen</th></tr>
           {rows.map((j) => (
             <tr>
               <td><a href={`/jobs/${j.url_hash}`}>{j.title}</a><div class="muted">{j.company} · {j.location}</div></td>
-              <td class="hide-sm">{j.company}</td>
               <td class="hide-sm">{j.track ?? '—'}</td>
               <td>{j.score}</td>
               <td class={`v-${j.verdict}`}>{j.verdict}</td>
@@ -518,40 +519,47 @@ export function consoleApp(): App {
 
     return page(c, 'Calibration', (
       <>
-        <div class="card actions"><a href="/contact">Contact profile →</a> <span class="muted">phone / location filled into CV templates per track</span></div>
         <form method="post" action="/config/quick" class="card actions">
           <label>Apply ≥ <input type="number" name="apply" value={String(thresholds.apply)} style="width:70px" /></label>
           <label>Stretch ≥ <input type="number" name="stretch" value={String(thresholds.stretch)} style="width:70px" /></label>
           <label>Freshness days <input type="number" name="freshness" value={cfg.FRESHNESS_MAX_DAYS ?? '3'} style="width:60px" /></label>
           <label>Weekly goal <input type="number" name="goal" value={cfg.weekly_goal ?? '5'} style="width:60px" /></label>
           <button type="submit" class="primary">Save</button>
+          <a href="/contact">Contact profile →</a>
         </form>
-        <form method="post" action="/config/scoring" class="card">
-          <h2 style="margin-top:0">Scoring config (full JSON — advanced)</h2>
-          <textarea name="scoring" rows={22}>{cfg.scoring ?? ''}</textarea>
-          <div class="actions" style="margin-top:8px">
-            <button type="submit" class="primary">Validate and save</button>
-            <button type="submit" formaction="/config/replay">🔬 Simulate with Replay before saving</button>
-            <label>against last <input type="number" name="n" value="200" min="50" max="1000" style="width:80px" /> jobs</label>
+        <form method="post" action="/config/rescore" class="card actions"
+          onsubmit="return confirm('Re-score ALL open jobs with the ACTIVE config? This rewrites score/track/verdict on changed rows (history kept in job events).')">
+          <button type="submit">♻️ Re-score open jobs with the active config</button>
+          <span class="muted">applies config fixes to already-stored jobs (verdicts are otherwise frozen at ingestion)</span>
+        </form>
+        <div class="cols-2 main-side">
+          <form method="post" action="/config/scoring" class="card">
+            <h2 style="margin-top:0">Scoring config (full JSON — advanced)</h2>
+            <textarea name="scoring" rows={22}>{cfg.scoring ?? ''}</textarea>
+            <div class="actions" style="margin-top:8px">
+              <button type="submit" class="primary">Validate and save</button>
+              <button type="submit" formaction="/config/replay">🔬 Simulate with Replay before saving</button>
+              <label>against last <input type="number" name="n" value="200" min="50" max="1000" style="width:80px" /> jobs</label>
+            </div>
+          </form>
+          <div class="card">
+            <h2 style="margin-top:0">History</h2>
+            <div class="table-wrap"><table>
+              {history.map((h) => (
+                <tr>
+                  <td class="muted">{fmt(h.ts)}</td>
+                  <td>{h.key}</td>
+                  <td class="muted">{h.replay_summary ? 'with replay' : ''}</td>
+                  <td>
+                    <form class="inline" method="post" action="/config/revert">
+                      <input type="hidden" name="id" value={String(h.id)} />
+                      <button type="submit">revert to previous version</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </table></div>
           </div>
-        </form>
-        <div class="card">
-          <h2 style="margin-top:0">History</h2>
-          <div class="table-wrap"><table>
-            {history.map((h) => (
-              <tr>
-                <td class="muted">{fmt(h.ts)}</td>
-                <td>{h.key}</td>
-                <td class="muted">{h.replay_summary ? 'with replay' : ''}</td>
-                <td>
-                  <form class="inline" method="post" action="/config/revert">
-                    <input type="hidden" name="id" value={String(h.id)} />
-                    <button type="submit">revert to previous version</button>
-                  </form>
-                </td>
-              </tr>
-            ))}
-          </table></div>
         </div>
       </>
     ));
@@ -594,9 +602,9 @@ export function consoleApp(): App {
     const str = (v: unknown) => (typeof v === 'string' ? v : '');
     const addr = (k: 'address_ca' | 'address_co') => (profile[k] && typeof profile[k] === 'object' ? profile[k] as Record<string, string> : {});
     const field = (name: string, label: string, value: string) => (
-      <div style="margin-bottom:10px">
-        <label style="display:block; font-size:13px; color:var(--muted)">{label}</label>
-        <input type="text" name={name} value={value} style="width:100%; max-width:520px" />
+      <div class="field">
+        <label>{label}</label>
+        <input type="text" name={name} value={value} />
       </div>
     );
     return page(c, 'Contact profile', (
@@ -605,12 +613,18 @@ export function consoleApp(): App {
           <p class="muted">Private data — stored only in D1, never in the repo. The CV header uses <code>{'{{phone}}'}</code> and <code>{'{{location}}'}</code> filled per track (name/email/LinkedIn are hardcoded in the template). The structured addresses below are stored only for step-8 application forms and never shown in the CV.</p>
         </div>
         <form method="post" action="/contact" class="card">
-          <h2 style="margin-top:0">🇨🇴 Colombia</h2>
-          {SIMPLE_CO.map(([key, label]) => field(key, label, str(profile[key])))}
-          {ADDR_CO.map(([key, label]) => field(`address_co__${key}`, label, addr('address_co')[key] ?? ''))}
-          <h2>🇨🇦 Canada</h2>
-          {SIMPLE_CA.map(([key, label]) => field(key, label, str(profile[key])))}
-          {ADDR_CA.map(([key, label]) => field(`address_ca__${key}`, label, addr('address_ca')[key] ?? ''))}
+          <div class="cols-2">
+            <div>
+              <h2 style="margin-top:0">🇨🇴 Colombia</h2>
+              {SIMPLE_CO.map(([key, label]) => field(key, label, str(profile[key])))}
+              {ADDR_CO.map(([key, label]) => field(`address_co__${key}`, label, addr('address_co')[key] ?? ''))}
+            </div>
+            <div>
+              <h2 style="margin-top:0">🇨🇦 Canada</h2>
+              {SIMPLE_CA.map(([key, label]) => field(key, label, str(profile[key])))}
+              {ADDR_CA.map(([key, label]) => field(`address_ca__${key}`, label, addr('address_ca')[key] ?? ''))}
+            </div>
+          </div>
           <button type="submit" class="primary">Save contact profile</button>
         </form>
       </>
@@ -900,6 +914,55 @@ export function consoleApp(): App {
     return c.redirect('/config?m=draft discarded');
   });
 
+  // ---------- Re-score (materialized; unlike Replay it WRITES) ----------
+  app.post('/config/rescore', async (c) => c.redirect('/config/rescore'));
+
+  app.get('/config/rescore', async (c) => {
+    const runner = `
+(async () => {
+  const tbody = document.getElementById('changes');
+  const bar = document.getElementById('bar');
+  let cursor = 0, changed = 0, updated = 0;
+  for (;;) {
+    const r = await fetch('/api/rescore-batch?cursor=' + cursor, { method: 'POST' });
+    if (!r.ok) { bar.textContent = 'error: ' + r.status; return; }
+    const d = await r.json();
+    updated += d.updated;
+    for (const row of d.changes) {
+      changed++;
+      // titles/companies are third-party text: ONLY textContent, never innerHTML
+      const tr = document.createElement('tr');
+      const td = (parent) => parent.appendChild(document.createElement('td'));
+      const t1 = td(tr); t1.textContent = row.title;
+      const sub = document.createElement('div'); sub.className = 'muted';
+      sub.textContent = row.company; t1.appendChild(sub);
+      td(tr).textContent = row.old_score + ' -> ' + row.new_score;
+      td(tr).textContent = row.old;
+      td(tr).textContent = row.new;
+      tbody.appendChild(tr);
+    }
+    cursor = d.next_cursor;
+    bar.textContent = 'processed ' + d.processed_total + ' / ' + d.total_open +
+      ' open jobs · ' + changed + ' track/verdict changes';
+    if (d.done) break;
+  }
+  bar.textContent = 'done: ' + changed + ' track/verdict changes (see the table); rows rewritten in place.';
+})();`;
+    return page(c, 'Re-score (active config)', (
+      <>
+        <div class="card">
+          <p>Re-scoring every open job (new/notified) with the ACTIVE config. <strong id="bar">starting…</strong></p>
+          <p class="muted">Changed rows get their score/track/verdict rewritten and a job event; unchanged rows are untouched. <a href="/config">back to Calibration</a> · <a href="/jobs">see Jobs</a></p>
+        </div>
+        <div class="table-wrap"><table>
+          <tr><th>job</th><th>score</th><th>before</th><th>after</th></tr>
+          <tbody id="changes" />
+        </table></div>
+        <script dangerouslySetInnerHTML={{ __html: runner }} />
+      </>
+    ));
+  });
+
   app.post('/config/revert', async (c) => {
     const b = await c.req.parseBody();
     const row = await c.env.DB.prepare('SELECT key, old_value FROM config_history WHERE id = ?')
@@ -960,42 +1023,42 @@ export function consoleApp(): App {
 
     return page(c, 'Blocks bank', (
       <>
-        <div class="statgrid">
+        <div class="controls">
           <div class="stat"><div class="n">{counts?.approved ?? 0}/{counts?.total ?? 0}</div><div class="l">approved blocks</div></div>
           <div class="stat"><div class="n">{counts?.es_ok ?? 0}/{counts?.total ?? 0}</div><div class="l">ES parity approved</div></div>
-        </div>
-        <form method="get" action="/blocks" class="card">
-          <div class="field">
-            <label for="secsel">Section</label>
-            <select id="secsel" name="section" onchange="this.form.submit()">
-              <option value="" selected={!q.section}>All sections</option>
-              {SECTIONS.map((s) => <option value={s} selected={q.section === s}>{s}</option>)}
-            </select>
-          </div>
-          <details>
-            <summary>More filters</summary>
-            <div class="actions" style="margin-top:10px">
-              {sel('anchor_id', anchors, q.anchor_id)}
-              {sel('angle', angles, q.angle)}
-              {sel('status', ['draft', 'review', 'approved', 'retired'], q.status)}
-              {sel('es_status', ['missing', 'draft', 'approved'], q.es_status)}
-              <button type="submit" class="primary">Apply filters</button>
-              <a href="/blocks">Clear</a>
+          <form method="get" action="/blocks" class="card">
+            <div class="field">
+              <label for="secsel">Section</label>
+              <select id="secsel" name="section" onchange="this.form.submit()">
+                <option value="" selected={!q.section}>All sections</option>
+                {SECTIONS.map((s) => <option value={s} selected={q.section === s}>{s}</option>)}
+              </select>
             </div>
+            <details>
+              <summary>More filters</summary>
+              <div class="actions" style="margin-top:10px">
+                {sel('anchor_id', anchors, q.anchor_id)}
+                {sel('angle', angles, q.angle)}
+                {sel('status', ['draft', 'review', 'approved', 'retired'], q.status)}
+                {sel('es_status', ['missing', 'draft', 'approved'], q.es_status)}
+                <button type="submit" class="primary">Apply filters</button>
+                <a href="/blocks">Clear</a>
+              </div>
+            </details>
+          </form>
+          <details class="card">
+            <summary><strong>+ Add block</strong></summary>
+            <form method="post" action="/blocks/create" style="margin-top:10px">
+              {blockFields(allAnchors)}
+              <button type="submit" class="primary">Add as draft</button>
+            </form>
           </details>
-        </form>
-        <details class="card">
-          <summary><strong>+ Add block</strong></summary>
-          <form method="post" action="/blocks/create" style="margin-top:10px">
-            {blockFields(allAnchors)}
-            <button type="submit" class="primary">Add as draft</button>
-          </form>
-        </details>
-        <div class="card actions">
-          <form class="inline" method="post" action="/blocks/approve-all">
-            <button type="submit" class="primary">Approve the ENTIRE bank (EN + ES)</button>
-          </form>
-          <span class="muted">Light review: look at the SAMPLE CVs in /cvs; if they represent you, approve everything here.</span>
+          <div class="card">
+            <form class="inline" method="post" action="/blocks/approve-all">
+              <button type="submit" class="primary">Approve the ENTIRE bank (EN + ES)</button>
+            </form>
+            <div class="muted">Light review: look at the SAMPLE CVs in /cvs; if they represent you, approve everything here.</div>
+          </div>
         </div>
         {[...bySection.entries()].map(([section, brows]) => (
           <>
@@ -1168,6 +1231,15 @@ export function consoleApp(): App {
           <select name="lang"><option value="en">EN</option><option value="es">ES</option></select>
           <button type="submit" class="primary">Generate (uses draft blocks — review only)</button>
         </form>
+        <form method="post" action="/cvs/real" class="card actions"
+          onsubmit="return confirm('Queue a REAL CV for this job? It renders from APPROVED blocks only, on the next pipeline run.')">
+          <strong>Queue REAL CV</strong>
+          <select name="hash">
+            {candidates.map((j) => <option value={j.url_hash}>{`${j.title!.slice(0, 50)} @ ${j.company}`}</option>)}
+          </select>
+          <button type="submit">Queue for the next run</button>
+          <span class="muted">needs an approved bank; the pipeline builds one CV per run</span>
+        </form>
         {cvs.length === 0 ? <div class="card"><p>No CVs generated yet.</p></div> : (
           <div class="table-wrap"><table>
             <tr><th>#</th><th>job</th><th>language</th><th>type</th><th>doc</th><th>selection</th><th>verifier tweaks</th><th>date</th></tr>
@@ -1206,7 +1278,30 @@ export function consoleApp(): App {
       posted_at: null, ats: (j.ats ?? 'greenhouse') as 'greenhouse', raw: null,
       url_hash: hash, track: j.track ?? null,
     }, lang, true);
-    return c.redirect(`/cvs?m=${encodeURIComponent(fx.ok ? `sample generated: review it in Drive` : `FAILED: ${fx.error}`)}`);
+    // Honest flash: exactly what filled, what stayed blank, what was not understood.
+    let msg: string;
+    if (fx.ok) {
+      const f = fx.fill;
+      const parts = [`sample generated · ${f?.filled.length ?? 0} slots filled`];
+      if (f?.blanked.length) parts.push(`${f.blanked.length} blank: ${f.blanked.slice(0, 6).join(', ')}${f.blanked.length > 6 ? '…' : ''}`);
+      if (f?.unrecognized.length) parts.push(`⚠ unknown tokens: ${f.unrecognized.slice(0, 6).join(', ')}`);
+      if (f?.unplaced_blocks.length) parts.push(`${f.unplaced_blocks.length} selected blocks had no slot`);
+      if (fx.contact_missing) parts.push('⚠ contact profile not set (empty phone/location)');
+      msg = parts.join(' · ');
+    } else {
+      msg = `FAILED: ${fx.error}`;
+    }
+    return c.redirect(`/cvs?m=${encodeURIComponent(msg)}`);
+  });
+
+  app.post('/cvs/real', async (c) => {
+    const b = await c.req.parseBody();
+    const hash = String(b.hash ?? '');
+    const j = await c.env.DB.prepare("SELECT url_hash FROM jobs WHERE url_hash = ? AND status IN ('new','notified')")
+      .bind(hash).first();
+    if (!j) return c.redirect('/cvs?m=job not found or closed');
+    await c.env.DB.prepare('UPDATE jobs SET cv_pending = 1 WHERE url_hash = ?').bind(hash).run();
+    return c.redirect('/cvs?m=queued: the next pipeline run builds the REAL CV (approved blocks only)');
   });
 
   // ---------- Health ----------

@@ -40,16 +40,30 @@ export function normalizeBlockInput(
   if (!text_en) return { error: 'text_en is required' };
   const angle = s('angle');
   if (angle && !(ANGLES as readonly string[]).includes(angle)) return { error: 'invalid angle' };
+  const anchor_id = s('anchor_id') || null;
+  const tags = s('tags');
+  // Guardrails against silently-invisible content (2026-07-18 audit): an
+  // experience/project bullet without a role, or a skill without a category,
+  // is accepted by the DB but can never be placed in a CV slot.
+  if ((section === 'experience' || section === 'projects') && !anchor_id) {
+    return { error: `${section} blocks need a role/anchor (otherwise they can never appear in a CV)` };
+  }
+  if (section === 'skills' && !/skcat:(technical|methodologies|academic|emerging)\b/.test(tags)) {
+    return { error: 'skills need a category tag: skcat:technical | methodologies | academic | emerging' };
+  }
+  if (section === 'summary' && anchor_id) {
+    return { error: 'summary lines are not tied to a role — leave the anchor empty' };
+  }
   const text_es = s('text_es') || null;
   return {
     section,
-    anchor_id: s('anchor_id') || null,
+    anchor_id,
     angle: angle || null,
     fact_key: s('fact_key'),
     text_en,
     text_es,
     es_status: text_es ? 'draft' : 'missing',
-    tags: s('tags'),
+    tags,
     evidence: s('evidence'),
     source: s('source'),
   };

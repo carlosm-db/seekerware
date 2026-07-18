@@ -30,7 +30,7 @@ a { color:var(--accent); text-decoration:none } a:hover { text-decoration:underl
 .drawer a .badge, .topbar .badge { background:var(--accent); color:#fff; border-radius:9px;
   font-size:11px; padding:1px 7px; margin-left:6px }
 
-main { padding:16px; max-width:1040px; margin:0 auto }
+main { padding:16px }
 h1 { font-size:20px; margin:0 0 14px } h2 { font-size:16px; margin:20px 0 8px }
 
 /* ---- tables: scroll inside their box on narrow screens ---- */
@@ -65,7 +65,6 @@ textarea { width:100%; font-family:ui-monospace, monospace; font-size:13px; min-
 .field { display:block; margin-bottom:10px }
 .field label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px }
 .field select, .field input, .field textarea { width:100% }
-#secsel { max-width:460px }
 
 /* ---- responsive grids: single column on phone, multi on desktop ---- */
 .statgrid, .cardgrid { display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:16px }
@@ -78,6 +77,11 @@ textarea { width:100%; font-family:ui-monospace, monospace; font-size:13px; min-
 .panelcard .pn { font-size:20px; font-weight:700; margin:4px 0 2px }
 .panelcard .pl { color:var(--muted); font-size:14px }
 .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+/* Distribution primitives: single column on phone (inert), side-by-side on desktop */
+.controls { display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:16px }
+.controls > * { margin-bottom:0 }
+.formgrid { display:block }
+.cols-2, .twoup { display:block }
 .kanban { display:flex; flex-direction:column; gap:14px }
 .kancol { min-width:0 }
 .pager { display:flex; gap:10px; align-items:center; margin:12px 0 }
@@ -100,6 +104,22 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
   .hide-sm { display:table-cell }
   .kanban { flex-direction:row; align-items:flex-start; overflow-x:auto }
   .kancol { flex:1; min-width:230px }
+}
+
+/* ---- desktop: DISTRIBUTE the width (never cap/center the page) ---- */
+@media (min-width:1024px) {
+  .controls { grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); align-items:stretch }
+  .controls > details[open], .controls > *:has(details[open]) { grid-column:1 / -1 }
+  .formgrid { display:grid; grid-template-columns:1fr 1fr; column-gap:18px;
+    grid-template-areas: "sec anc" "ang tags" "en es" "fk ev" "src src" }
+  .f-section { grid-area:sec } .f-anchor { grid-area:anc } .f-angle { grid-area:ang }
+  .f-en { grid-area:en } .f-es { grid-area:es } .f-tags { grid-area:tags }
+  .f-factkey { grid-area:fk } .f-evidence { grid-area:ev } .f-source { grid-area:src }
+  .cols-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start }
+  .cols-2.main-side { grid-template-columns:3fr 2fr }
+  .twoup { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start }
+  .twoup > .card { margin-bottom:0 }
+  .filterbar input[type=text] { flex:1 1 240px }
 }
 `;
 

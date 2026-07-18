@@ -73,11 +73,12 @@ export async function cvSelector(
   return callGemini<Selection>(env, {
     temperature: 0.3,
     instruction:
-      'You are the cv_selector. Choose the most relevant block IDs for this job, prioritizing the ' +
-      'angle the job calls for (data/compliance/operations/leadership). The template has fixed slots ' +
-      'the render will fill in your order: pick up to ~7 summary bullets; the strongest responsibilities ' +
-      'for EACH experience role (group naturally by role — the render places them under the right role); ' +
-      'and relevant skills spread across their categories. Select ONLY IDs from the catalog. ' +
+      'You are the cv_selector. Choose the most relevant block IDs for this job, prioritizing what ' +
+      'the job calls for. The template has fixed slots the render will fill in your order: pick up to ' +
+      '~7 summary bullets; the strongest responsibilities for EACH experience role (group naturally by ' +
+      'role — the render places them under the right role); and relevant skills spread across their ' +
+      'categories. Never select two phrasings of the same achievement. Projects are static in the ' +
+      'template: always return an empty projects array. Select ONLY IDs from the catalog. ' +
       'In rationale, explain the chosen approach in 1 sentence.',
     input: `CATALOG:\n${catalogText}\n\nJOB (title: ${job.title})\n` + wrapUntrusted(job.description.slice(0, 6000)),
     responseSchema: {
@@ -87,7 +88,8 @@ export async function cvSelector(
         summary: { type: 'ARRAY', items: enumOrNull(idsBySection('summary')), minItems: 1, maxItems: 8 },
         skills: { type: 'ARRAY', items: enumOrNull(idsBySection('skills')), maxItems: 16 },
         experience: { type: 'ARRAY', items: enumOrNull(idsBySection('experience')), maxItems: 24 },
-        projects: { type: 'ARRAY', items: enumOrNull(idsBySection('projects')), maxItems: 2 },
+        // Projects are static in the template (v1) — the selector must not spend picks on them.
+        projects: { type: 'ARRAY', items: enumOrNull(idsBySection('projects')), maxItems: 0 },
         rationale: { type: 'STRING' },
       },
     },

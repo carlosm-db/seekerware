@@ -74,6 +74,8 @@ async function gapi(
 export async function copyTemplate(
   env: Env, token: string, name: string, doFetch: Fetcher = fetch,
 ): Promise<{ id: string; url: string }> {
+  if (!env.CV_TEMPLATE_DOC_ID) throw new Error('CV_TEMPLATE_DOC_ID not configured');
+  if (!env.DRIVE_FOLDER_ID) throw new Error('DRIVE_FOLDER_ID not configured');
   const res = await gapi(token, doFetch,
     `https://www.googleapis.com/drive/v3/files/${env.CV_TEMPLATE_DOC_ID}/copy?supportsAllDrives=true`,
     { method: 'POST', body: JSON.stringify({ name, parents: [env.DRIVE_FOLDER_ID] }) },
@@ -115,21 +117,32 @@ function collectDocText(content: DocEl[] | undefined, out: { s: string }): void 
   }
 }
 
+export interface DocToken {
+  /** Trimmed inner name, e.g. 'phone', 'sum_1', 'BNS1R1'. */
+  name: string;
+  /** EXACT literal as typed in the Doc, e.g. '{{ phone }}' — replaceAllText must target this. */
+  raw: string;
+}
+
 /**
- * Reads the Doc and returns the set of inner placeholder names present
- * (e.g. 'phone', 'sum_1', 'BNS1R1'). All body text (including table cells) is
- * concatenated first, so a token split across text runs is still detected.
+ * Reads the Doc and returns every {{...}} token present, as {name, raw} pairs
+ * deduplicated by raw literal. Keeping the RAW form is what lets a hand-typed
+ * '{{ phone }}' (padded) still be replaced — replaceAllText matches literals.
+ * All body text (including table cells) is concatenated first, so a token
+ * split across text runs is still detected.
  */
 export async function readPlaceholders(
   token: string, docId: string, doFetch: Fetcher = fetch,
-): Promise<Set<string>> {
+): Promise<DocToken[]> {
   const res = await gapi(token, doFetch, `https://docs.googleapis.com/v1/documents/${docId}?fields=body`);
   const doc = (await res.json()) as { body?: { content?: DocEl[] } };
   const out = { s: '' };
   collectDocText(doc.body?.content, out);
-  const names = new Set<string>();
-  for (const m of out.s.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) names.add(m[1]!.trim());
-  return names;
+  const byRaw = new Map<string, DocToken>();
+  for (const m of out.s.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
+    if (!byRaw.has(m[0])) byRaw.set(m[0], { name: m[1]!.trim(), raw: m[0] });
+  }
+  return [...byRaw.values()];
 }
 
 /** Inserts plain text at the end of the Doc (index 1 = freshly copied/empty document: we insert at the start of the body). */
@@ -171,6 +184,7 @@ export async function exportAndArchivePdf(
 let archiveFolderCache: string | null = null;
 
 async function ensureArchiveFolder(env: Env, token: string, doFetch: Fetcher): Promise<string> {
+  if (!env.DRIVE_FOLDER_ID) throw new Error('DRIVE_FOLDER_ID not configured');
   if (archiveFolderCache) return archiveFolderCache;
   const q = encodeURIComponent(`name = 'archive' and '${env.DRIVE_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`);
   const res = await gapi(token, doFetch, `https://www.googleapis.com/drive/v3/files?q=${q}&supportsAllDrives=true&includeItemsFromAllDrives=true`);

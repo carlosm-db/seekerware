@@ -31,27 +31,44 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
     const maxNewPerRun = Number((await getConfigValue(env, 'max_new_jobs_per_run')) ?? '100');
     const observability = JSON.parse((await getConfigValue(env, 'observability')) ?? '{}') as {
       maintenance_fail_streak?: number;
+      cv_pending_max?: number;
     };
     const failStreak = observability.maintenance_fail_streak ?? 3;
+    const cvPendingMax = observability.cv_pending_max ?? 5;
 
-    // CV factory: builds ONE pending item per run (the oldest notified one)
+    // CV factory: builds ONE pending item per run (oldest first). status also
+    // accepts 'new' so the console "Generate REAL CV" action can queue any job.
     if (env.GOOGLE_SA_KEY) {
       const pending = await env.DB.prepare(
         `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, c.name company
          FROM jobs j JOIN companies c ON c.id = j.company_id
-         WHERE j.cv_pending = 1 AND j.status = 'notified' ORDER BY j.notified_at LIMIT 1`,
+         WHERE j.cv_pending = 1 AND j.status IN ('new','notified')
+         ORDER BY j.notified_at, j.first_seen LIMIT 1`,
       ).first<Record<string, string | null>>();
       if (pending) {
-        const fx = await generateCv(env, {
-          id: String(pending.ext_id ?? ''), company: String(pending.company), title: String(pending.title),
-          location: String(pending.location ?? ''), url: String(pending.url),
-          description: String(pending.description_text ?? ''), posted_at: null,
-          ats: (pending.ats ?? 'greenhouse') as Job['ats'], raw: null,
-          url_hash: String(pending.url_hash), track: pending.track ?? null,
-        }, 'en', false, doFetch);
-        stats.geminiCalls += fx.gemini_calls;
-        if (!fx.ok) {
-          stats.event({ type: 'gdocs_fail', severity: 'warn', url_hash: String(pending.url_hash), detail: fx.error });
+        // Retry budget: a broken build (e.g. template not shared with the SA)
+        // must not burn 2 Gemini calls every run forever (2026-07-18 audit).
+        const fails = await env.DB.prepare(
+          "SELECT COUNT(*) n FROM events WHERE type = 'gdocs_fail' AND url_hash = ?",
+        ).bind(pending.url_hash).first<{ n: number }>();
+        if ((fails?.n ?? 0) >= cvPendingMax) {
+          await env.DB.prepare('UPDATE jobs SET cv_pending = 0 WHERE url_hash = ?').bind(pending.url_hash).run();
+          stats.event({
+            type: 'cv_retries_exhausted', severity: 'warn', url_hash: String(pending.url_hash),
+            detail: `gave up after ${fails?.n} failed builds (cv_pending_max=${cvPendingMax}); re-queue from /cvs once fixed`,
+          });
+        } else {
+          const fx = await generateCv(env, {
+            id: String(pending.ext_id ?? ''), company: String(pending.company), title: String(pending.title),
+            location: String(pending.location ?? ''), url: String(pending.url),
+            description: String(pending.description_text ?? ''), posted_at: null,
+            ats: (pending.ats ?? 'greenhouse') as Job['ats'], raw: null,
+            url_hash: String(pending.url_hash), track: pending.track ?? null,
+          }, 'en', false, doFetch);
+          stats.geminiCalls += fx.gemini_calls;
+          if (!fx.ok) {
+            stats.event({ type: 'gdocs_fail', severity: 'warn', url_hash: String(pending.url_hash), detail: fx.error });
+          }
         }
       }
     }

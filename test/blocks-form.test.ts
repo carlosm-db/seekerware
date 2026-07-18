@@ -32,7 +32,7 @@ describe('normalizeBlockInput', () => {
   });
 
   it('trims text and fact_key (route fills empty fact_key with the id)', () => {
-    const r = ok(normalizeBlockInput({ section: 'skills', text_en: '  Python  ', fact_key: '  ' }));
+    const r = ok(normalizeBlockInput({ section: 'skills', text_en: '  Python  ', fact_key: '  ', tags: 'skcat:technical' }));
     expect(r.text_en).toBe('Python');
     expect(r.fact_key).toBe('');
   });
@@ -42,10 +42,26 @@ describe('normalizeBlockInput', () => {
   });
 
   it('rejects blank text_en', () => {
-    expect(normalizeBlockInput({ section: 'skills', text_en: '   ' })).toEqual({ error: 'text_en is required' });
+    expect(normalizeBlockInput({ section: 'skills', text_en: '   ', tags: 'skcat:technical' })).toEqual({ error: 'text_en is required' });
   });
 
   it('rejects an angle outside the enum', () => {
-    expect(normalizeBlockInput({ section: 'experience', text_en: 'x', angle: 'wrong' })).toEqual({ error: 'invalid angle' });
+    expect(normalizeBlockInput({ section: 'experience', text_en: 'x', angle: 'wrong', anchor_id: 'BNS1' })).toEqual({ error: 'invalid angle' });
+  });
+
+  // Guardrails against silently-invisible content (2026-07-18 audit)
+  it('rejects an experience bullet without a role (it could never render)', () => {
+    const r = normalizeBlockInput({ section: 'experience', text_en: 'Led X' });
+    expect('error' in r && r.error).toMatch(/need a role/);
+  });
+
+  it('rejects a skill without a category (it would vanish from CVs)', () => {
+    const r = normalizeBlockInput({ section: 'skills', text_en: 'SQL' });
+    expect('error' in r && r.error).toMatch(/category/);
+  });
+
+  it('rejects a summary line tied to a role', () => {
+    const r = normalizeBlockInput({ section: 'summary', text_en: 'Hi', anchor_id: 'BNS1' });
+    expect('error' in r && r.error).toMatch(/leave the anchor empty/);
   });
 });

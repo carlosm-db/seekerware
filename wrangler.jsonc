@@ -1,11 +1,13 @@
-// Config del worker. Secretos NUNCA aqui (van en Worker secrets, ver TRD §9).
+// Worker config. Secrets NEVER here (they live in Worker secrets, see TRD §9).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "seekerware",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
   "observability": { "enabled": true },
-  "triggers": { "crons": ["*/30 * * * *"] },
+  // Hourly 9am-7pm US Eastern: UTC superset (13-23 = EDT window, 0 = 7pm EST in
+  // winter); scheduled() guards the exact ET hours, so DST never shifts the window.
+  "triggers": { "crons": ["0 0,13-23 * * *"] },
   "d1_databases": [
     {
       "binding": "DB",
