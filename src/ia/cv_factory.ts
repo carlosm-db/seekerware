@@ -11,15 +11,32 @@ type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respons
 /**
  * Private contact profile (D1 config['contact_profile'], never in the repo).
  * The CV template header uses {{phone}} and {{location}}, filled per track.
- * Address fields are stored for step-8 application forms, never shown in the CV.
+ * The structured address objects are stored for step-8 application forms only,
+ * never shown in the CV.
  */
+export interface AddressCA {
+  country?: string;
+  province?: string;
+  city?: string;
+  address?: string;
+  zip?: string;
+}
+export interface AddressCO {
+  country?: string;
+  department?: string;
+  municipality?: string;
+  neighbourhood?: string;
+  address?: string;
+  detail?: string;
+  zip?: string;
+}
 export interface ContactProfile {
   phone_ca?: string;
   phone_co?: string;
   location_ca?: string;
   location_co?: string;
-  address_ca?: string;
-  address_co?: string;
+  address_ca?: AddressCA;
+  address_co?: AddressCO;
 }
 
 /** Per-track fill map: canada_coop -> CA values; colombia_perm & contractor_usd -> CO values. */

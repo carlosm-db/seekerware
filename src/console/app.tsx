@@ -513,31 +513,48 @@ export function consoleApp(): App {
   }
 
   // ---------- Contact profile (private; fills CV template placeholders) ----------
+  // Top-level simple fields (phone/location feed the CV header per track).
   const CONTACT_FIELDS: Array<[string, string]> = [
     ['phone_ca', 'Canadian phone (canada_coop)'],
     ['phone_co', 'Colombian phone (colombia_perm & contractor_usd)'],
-    ['location_ca', 'Canada location (e.g. Vancouver, BC, Canada)'],
-    ['location_co', 'Colombia location (e.g. Medellín, Colombia)'],
-    ['address_ca', 'Canada address (application forms only — not in the CV)'],
-    ['address_co', 'Colombia address (application forms only — not in the CV)'],
+    ['location_ca', 'Canada location for CV header (e.g. Vancouver, BC, Canada)'],
+    ['location_co', 'Colombia location for CV header (e.g. Medellín, Colombia)'],
+  ];
+  // Structured addresses (application forms only — never in the CV).
+  const ADDR_CA: Array<[string, string]> = [
+    ['country', 'Country'], ['province', 'Province'], ['city', 'City'],
+    ['address', 'Address'], ['zip', 'Postal code'],
+  ];
+  const ADDR_CO: Array<[string, string]> = [
+    ['country', 'Country'], ['department', 'Department'], ['municipality', 'Municipality'],
+    ['neighbourhood', 'Neighbourhood'], ['address', 'Address'],
+    ['detail', 'Detail (apt / tower / interior)'], ['zip', 'Postal code'],
   ];
 
   app.get('/contact', async (c) => {
     const row = await c.env.DB.prepare("SELECT value FROM config WHERE key='contact_profile'").first<{ value: string }>();
-    let profile: Record<string, string> = {};
+    let profile: Record<string, unknown> = {};
     try { profile = row ? JSON.parse(row.value) : {}; } catch { /* invalid */ }
+    const str = (v: unknown) => (typeof v === 'string' ? v : '');
+    const addr = (k: 'address_ca' | 'address_co') => (profile[k] && typeof profile[k] === 'object' ? profile[k] as Record<string, string> : {});
+    const field = (name: string, label: string, value: string) => (
+      <div style="margin-bottom:10px">
+        <label style="display:block; font-size:13px; color:var(--muted)">{label}</label>
+        <input type="text" name={name} value={value} style="width:100%; max-width:520px" />
+      </div>
+    );
     return page(c, 'Contact profile', (
       <>
         <div class="card">
-          <p class="muted">Private data — stored only in D1, never in the repo. The CV template header uses two placeholders the factory fills per track: <code>{'{{phone}}'}</code> and <code>{'{{location}}'}</code> (name/email/LinkedIn are hardcoded in the template). Address is stored only for step-8 application forms and never shown in the CV.</p>
+          <p class="muted">Private data — stored only in D1, never in the repo. The CV header uses <code>{'{{phone}}'}</code> and <code>{'{{location}}'}</code> filled per track (name/email/LinkedIn are hardcoded in the template). The structured addresses below are stored only for step-8 application forms and never shown in the CV.</p>
         </div>
         <form method="post" action="/contact" class="card">
-          {CONTACT_FIELDS.map(([key, label]) => (
-            <div style="margin-bottom:10px">
-              <label style="display:block; font-size:13px; color:var(--muted)">{label}</label>
-              <input type="text" name={key} value={profile[key] ?? ''} style="width:100%; max-width:520px" />
-            </div>
-          ))}
+          <h2 style="margin-top:0">Phone & CV location</h2>
+          {CONTACT_FIELDS.map(([key, label]) => field(key, label, str(profile[key])))}
+          <h2>Canada address (forms)</h2>
+          {ADDR_CA.map(([key, label]) => field(`address_ca__${key}`, label, addr('address_ca')[key] ?? ''))}
+          <h2>Colombia address (forms)</h2>
+          {ADDR_CO.map(([key, label]) => field(`address_co__${key}`, label, addr('address_co')[key] ?? ''))}
           <button type="submit" class="primary">Save contact profile</button>
         </form>
       </>
@@ -546,8 +563,15 @@ export function consoleApp(): App {
 
   app.post('/contact', async (c) => {
     const b = await c.req.parseBody();
-    const profile: Record<string, string> = {};
+    const profile: Record<string, unknown> = {};
     for (const [key] of CONTACT_FIELDS) profile[key] = String(b[key] ?? '').trim();
+    const buildAddr = (prefix: string, fields: Array<[string, string]>) => {
+      const obj: Record<string, string> = {};
+      for (const [key] of fields) obj[key] = String(b[`${prefix}__${key}`] ?? '').trim();
+      return obj;
+    };
+    profile.address_ca = buildAddr('address_ca', ADDR_CA);
+    profile.address_co = buildAddr('address_co', ADDR_CO);
     await saveConfig(c.env, 'contact_profile', JSON.stringify(profile));
     return c.redirect('/contact?m=contact profile saved');
   });

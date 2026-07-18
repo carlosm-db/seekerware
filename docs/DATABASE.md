@@ -396,7 +396,9 @@ Written on every save from the console; enables "revert to this version".
   `observability` (alert thresholds, Monday digest ~06:00 America/Bogota,
   retention), `weekly_goal` (weekly application target, initially 5),
   `contact_profile` (PRIVATE JSON, owner-entered via the console `/contact`
-  page; fills the CV template header placeholders per track — shape
-  `{ phone_ca, phone_co, location_ca, location_co, address_ca, address_co }`;
-  `{{phone}}`/`{{location}}` come from CA vs CO by track, address is
-  application-forms-only and never rendered in the CV; never in the repo).
+  page; never in the repo). Shape: `{ phone_ca, phone_co, location_ca,
+  location_co, address_ca:{country,province,city,address,zip},
+  address_co:{country,department,municipality,neighbourhood,address,detail,
+  zip} }`. `{{phone}}`/`{{location}}` fill the CV header from CA vs CO by
+  track; the structured `address_*` objects are application-forms-only
+  (step 8) and never rendered in the CV.

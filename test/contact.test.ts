@@ -5,7 +5,8 @@ import { replacePlaceholders } from '../src/gdocs';
 const profile: ContactProfile = {
   phone_ca: '+1-604-555-0001', phone_co: '+57-300-555-0002',
   location_ca: 'Vancouver, BC, Canada', location_co: 'Medellín, Colombia',
-  address_ca: '123 CA St', address_co: 'Calle 10 CO',
+  address_ca: { country: 'Canada', province: 'BC', city: 'Vancouver', address: '123 CA St', zip: 'V6B 1V9' },
+  address_co: { country: 'Colombia', department: 'Antioquia', municipality: 'Medellín', neighbourhood: 'El Poblado', address: 'Calle 10', detail: 'Apto 501', zip: '050021' },
 };
 
 describe('contactPlaceholders (per-track fill)', () => {
