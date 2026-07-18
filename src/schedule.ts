@@ -37,10 +37,12 @@ export function normalizeSchedule(raw: unknown): ScheduleCfg {
   const tz = typeof r.timezone === 'string' && (SCHEDULE_TIMEZONES as readonly string[]).includes(r.timezone)
     ? r.timezone : DEFAULT_SCHEDULE.timezone;
   const start = int(r.start_hour, 0, 23, DEFAULT_SCHEDULE.start_hour);
+  const end = int(r.end_hour, 0, 23, DEFAULT_SCHEDULE.end_hour);
   return {
     every_hours: int(r.every_hours, 1, 12, DEFAULT_SCHEDULE.every_hours),
     start_hour: start,
-    end_hour: int(r.end_hour, start, 23, Math.max(start, DEFAULT_SCHEDULE.end_hour)),
+    // end below start clamps TO start (a one-hour window), never silently jumps.
+    end_hour: Math.max(start, end),
     timezone: tz,
   };
 }

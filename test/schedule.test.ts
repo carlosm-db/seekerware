@@ -42,9 +42,9 @@ describe('normalizeSchedule', () => {
       .toEqual(DEFAULT_SCHEDULE);
   });
 
-  it('keeps valid values and clamps end >= start', () => {
+  it('keeps valid values and clamps end below start TO start', () => {
     expect(normalizeSchedule({ every_hours: 2, start_hour: 8, end_hour: 6, timezone: 'UTC' }))
-      .toEqual({ every_hours: 2, start_hour: 8, end_hour: 9, timezone: 'UTC' });
+      .toEqual({ every_hours: 2, start_hour: 8, end_hour: 8, timezone: 'UTC' });
   });
 });
 
