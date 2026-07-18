@@ -7,6 +7,7 @@ import { Layout, type FooterStatus } from './layout';
 import { authMiddleware, createSession, setSessionCookie, verifyPassword, type ConsoleEnv } from './auth';
 import { validateScoringConfig } from '../config-store';
 import { SECTIONS, SKCATS, newBlockId, normalizeBlockInput } from './blocks-form';
+import { tokensOfRole, validateRoleCode } from './roles';
 import * as greenhouse from '../connectors/greenhouse';
 import type { Company } from '../types';
 import type { ScoreResult } from '../scoring';
@@ -1198,6 +1199,81 @@ export function consoleApp(): App {
     const b = await c.req.parseBody();
     await c.env.DB.prepare('DELETE FROM blocks WHERE id = ?').bind(String(b.id ?? '')).run();
     return c.redirect('/blocks?m=block deleted permanently');
+  });
+
+  // ---------- Roles (anchors) — the missing write path (2026-07-18) ----------
+  app.post('/roles/create', async (c) => {
+    const b = await c.req.parseBody();
+    const code = String(b.code ?? '').trim().toUpperCase();
+    const kind = String(b.kind ?? 'role') === 'project' ? 'project' : 'role';
+    const company = String(b.company ?? '').trim();
+    if (!company) return c.redirect('/blocks?m=add role failed: company/name is required');
+    const existing = ((await c.env.DB.prepare('SELECT id FROM anchors').all<{ id: string }>()).results).map((a) => a.id);
+    const err = validateRoleCode(code, existing);
+    if (err) return c.redirect(`/blocks?m=${encodeURIComponent(`add role failed: ${err}`)}`);
+    await c.env.DB.prepare("INSERT INTO anchors (id, kind, company, status) VALUES (?,?,?,'active')")
+      .bind(code, kind, company).run();
+    return c.redirect(`/blocks?m=${encodeURIComponent(
+      `role ${code} added — now paste {{${code}R1}}, {{${code}R2}}, … lines into your CV template Doc (with its static header) and run Check template`,
+    )}`);
+  });
+
+  app.post('/roles/update', async (c) => {
+    const b = await c.req.parseBody();
+    const id = String(b.id ?? '');
+    const company = String(b.company ?? '').trim();
+    const newCode = String(b.new_code ?? '').trim().toUpperCase();
+    const row = await c.env.DB.prepare('SELECT id, kind, company FROM anchors WHERE id = ?')
+      .bind(id).first<{ id: string; kind: string; company: string | null }>();
+    if (!row) return c.redirect('/blocks?m=role not found');
+    if (!newCode || newCode === id) {
+      // Company/name rename only — safe, no template coupling.
+      await c.env.DB.prepare('UPDATE anchors SET company = ? WHERE id = ?').bind(company || row.company, id).run();
+      return c.redirect('/blocks?m=role updated');
+    }
+    // CODE rename: template-coupled. Refuse while {{OLD…}} tokens remain in the
+    // Doc; abort on any Google failure (safe default — never rename blind).
+    const existing = ((await c.env.DB.prepare('SELECT id FROM anchors WHERE id != ?').bind(id).all<{ id: string }>()).results).map((a) => a.id);
+    const err = validateRoleCode(newCode, existing);
+    if (err) return c.redirect(`/blocks?m=${encodeURIComponent(`rename failed: ${err}`)}`);
+    try {
+      if (!c.env.CV_TEMPLATE_DOC_ID) throw new Error('CV_TEMPLATE_DOC_ID not configured');
+      const { googleAccessToken, readPlaceholders } = await import('../gdocs');
+      const token = await googleAccessToken(c.env);
+      const docTokens = await readPlaceholders(token, c.env.CV_TEMPLATE_DOC_ID);
+      const leftovers = tokensOfRole(id, docTokens.map((t) => t.name));
+      if (leftovers.length) {
+        return c.redirect(`/blocks?m=${encodeURIComponent(
+          `rename refused: the template still contains ${leftovers.slice(0, 3).join(', ')}${leftovers.length > 3 ? '…' : ''} — update the Doc to {{${newCode}R…}} first`,
+        )}`);
+      }
+    } catch (err2) {
+      return c.redirect(`/blocks?m=${encodeURIComponent(
+        `rename aborted (cannot verify the template): ${err2 instanceof Error ? err2.message : 'Google unreachable'}`,
+      )}`);
+    }
+    // FK-safe transaction: insert new id, repoint blocks, delete old id.
+    await c.env.DB.batch([
+      c.env.DB.prepare("INSERT INTO anchors (id, kind, company, status) VALUES (?,?,?,'active')")
+        .bind(newCode, row.kind, company || row.company),
+      c.env.DB.prepare('UPDATE blocks SET anchor_id = ? WHERE anchor_id = ?').bind(newCode, id),
+      c.env.DB.prepare('DELETE FROM anchors WHERE id = ?').bind(id),
+    ]);
+    return c.redirect(`/blocks?m=${encodeURIComponent(`role renamed ${id} → ${newCode} (bullets repointed)`)}`);
+  });
+
+  app.post('/roles/retire', async (c) => {
+    const b = await c.req.parseBody();
+    await c.env.DB.prepare("UPDATE anchors SET status='retired', retired_at=? WHERE id=?")
+      .bind(now(), String(b.id ?? '')).run();
+    return c.redirect('/blocks?m=role retired (kept for history — reactivate anytime)');
+  });
+
+  app.post('/roles/reactivate', async (c) => {
+    const b = await c.req.parseBody();
+    await c.env.DB.prepare("UPDATE anchors SET status='active', retired_at=NULL WHERE id=?")
+      .bind(String(b.id ?? '')).run();
+    return c.redirect('/blocks?m=role reactivated');
   });
 
   // ---------- CVs ----------
