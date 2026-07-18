@@ -333,6 +333,46 @@ system's — the one-writer-per-column rule is preserved by splitting tables).
 The human ALWAYS submits the application (CLAUDE.md §7.8); these tables record
 their process, not submissions by the system.
 
+### Step 8 (migration 0008): `profile_answers` + `application_kits`
+
+```sql
+-- The owner's approved answers to recurring form questions. Selection-only:
+-- kits pick from here; chat replies enter as DRAFT until console-approved.
+CREATE TABLE profile_answers (
+  id             INTEGER PRIMARY KEY,
+  question_norm  TEXT NOT NULL UNIQUE,   -- normalized for matching
+  question_label TEXT NOT NULL,
+  answer_en      TEXT,
+  answer_es      TEXT,
+  tags           TEXT,
+  status         TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','approved')),
+  updated_at     TEXT NOT NULL
+);
+
+-- One kit per Apply job: positioning inputs + matched answers + red questions
+-- + EEOC-flagged questions (NEVER auto-answered) + CV artifacts + deep link.
+CREATE TABLE application_kits (
+  url_hash       TEXT PRIMARY KEY REFERENCES jobs(url_hash),
+  positioning    TEXT,  -- JSON {why_it_fits, positioning_lead}
+  answers        TEXT,  -- JSON [{question, answer, source:'bank'|'chat', red}]
+  red_questions  TEXT,  -- JSON [string]
+  eeoc_questions TEXT,  -- JSON [string]
+  cv_doc_url     TEXT,
+  cv_pdf_id      TEXT,
+  deep_link      TEXT,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+```
+
+Question detection: Greenhouse `?questions=true` public API; Lever public
+apply-page HTML (the one approved scraping exception); Ashby not publicly
+readable (kit says so). Matching is conservative (exact normalized, then
+long-containment) — a wrong auto-match is worse than a red question. The
+Telegram webhook (`/tg/<secret>`, `TELEGRAM_WEBHOOK_TOKEN`) powers the
+"View kit" / "I applied" buttons and the one-question-at-a-time red-question
+chat flow; `config['tg_pending']` holds the in-flight question.
+
 ```sql
 CREATE TABLE applications (
   url_hash      TEXT PRIMARY KEY REFERENCES jobs(url_hash),

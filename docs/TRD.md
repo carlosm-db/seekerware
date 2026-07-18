@@ -13,7 +13,9 @@ the source of truth ([`../CLAUDE.md`](../CLAUDE.md)).
 this repo, deployed via GitHub Actions. A single worker with two handlers:
 
 - `scheduled()` — the pipeline, triggered by a Cron Trigger every 30-60 min.
-- `fetch()` — dashboard + `/api/*` routes, behind login (§8).
+- `fetch()` — dashboard + `/api/*` routes, behind login (§8). The single
+  exception is `POST /tg/<TELEGRAM_WEBHOOK_TOKEN>` (step 8 Telegram webhook):
+  gated by its own secret path token + chat-id check, not by the cookie.
 
 Bindings: `DB` (D1, [`DATABASE.md`](DATABASE.md)) and secrets (§9).
 

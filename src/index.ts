@@ -157,6 +157,22 @@ app.post('/api/rescore-batch', async (c) => {
   });
 });
 
+// Telegram webhook (step 8): authenticated by the secret path token — the
+// auth middleware lets /tg/* through and THIS check is the gate.
+app.post('/tg/:token', async (c) => {
+  if (!c.env.TELEGRAM_WEBHOOK_TOKEN || c.req.param('token') !== c.env.TELEGRAM_WEBHOOK_TOKEN) {
+    return c.notFound();
+  }
+  const { handleTelegramUpdate } = await import('./tg');
+  try {
+    const update = await c.req.json();
+    await handleTelegramUpdate(c.env, update);
+  } catch (err) {
+    console.log(`tg webhook error: ${err instanceof Error ? err.message : 'unknown'}`);
+  }
+  return c.json({ ok: true }); // always 200 — Telegram retries otherwise
+});
+
 app.get('/api/dry-run', async (c) => {
   const token = c.req.query('company');
   const ats = (c.req.query('ats') ?? 'greenhouse') as Ats;

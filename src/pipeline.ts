@@ -300,7 +300,9 @@ async function processCompany(
             whyItFits: texts.whyItFits, gapToAddress: texts.gapToAddress,
             positioningLead: texts.positioningLead, ruleBased,
           });
-          const sent = await sendTelegram(env, msg, doFetch);
+          // Step-8 buttons: View kit / I applied (two-way bot).
+          const { kitButtons } = await import('./tg');
+          const sent = await sendTelegram(env, msg, doFetch, kitButtons(hash));
           stats.notifications.push({
             url_hash: hash, kind: 'job', status: sent.ok ? 'sent' : 'fail',
             tg_message_id: sent.message_id, error: sent.error,
@@ -310,7 +312,9 @@ async function processCompany(
             notifiedAt = nowIso;
             stats.notified++;
             // CV factory only for verdict Apply: leaves cv_pending=1 and the
-            // run's startup builds it (1 build/run, fixed budget).
+            // run's startup builds it (1 build/run, fixed budget). The kit is
+            // NOT pre-built here — the job row flushes at run end, so the
+            // Telegram "View kit" button builds it on demand instead.
             if (result.best.verdict === 'Apply') cvPending = 1;
           } else {
             stats.event({ type: 'telegram_fail', severity: 'error', url_hash: hash, detail: sent.error });

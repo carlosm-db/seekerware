@@ -1790,6 +1790,175 @@ export function consoleApp(): App {
     return c.redirect(`${back}?m=${encodeURIComponent(msg)}`);
   });
 
+  // ---------- Applications (step 8: kit queue + answers bank) ----------
+  app.get('/applications', async (c) => {
+    const rows = (
+      await c.env.DB.prepare(
+        `SELECT j.url_hash, j.title, j.track, j.score, j.url, co.name company,
+                a.stage, k.answers, k.red_questions, k.eeoc_questions, k.cv_doc_url kit_cv, k.deep_link, k.updated_at kit_at
+         FROM jobs j JOIN companies co ON co.id = j.company_id
+         LEFT JOIN applications a ON a.url_hash = j.url_hash
+         LEFT JOIN application_kits k ON k.url_hash = j.url_hash
+         WHERE j.verdict = 'Apply' AND j.status IN ('new','notified')
+         ORDER BY j.score DESC LIMIT 100`,
+      ).all<Record<string, string | number | null>>()
+    ).results;
+    const answersBank = (
+      await c.env.DB.prepare(
+        'SELECT id, question_label, answer_en, status FROM profile_answers ORDER BY status, question_label LIMIT 200',
+      ).all<Record<string, string | number | null>>()
+    ).results;
+    // Question census: which unanswered questions recur across kits.
+    const census = new Map<string, number>();
+    for (const r of rows) {
+      try {
+        for (const q of JSON.parse(String(r.red_questions ?? '[]')) as string[]) {
+          census.set(q, (census.get(q) ?? 0) + 1);
+        }
+      } catch { /* bad json */ }
+    }
+    const censusTop = [...census.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+    return page(c, 'Applications', (
+      <>
+        <p class="muted">Your Apply-verdict queue. The kit assembles everything to submit in minutes — <strong>the submit click is always yours</strong>.</p>
+        {rows.length === 0 ? <div class="card">No Apply-verdict jobs open right now.</div> : rows.map((r) => {
+          const answers = (() => { try { return JSON.parse(String(r.answers ?? '[]')) as Array<{ question: string; answer: string | null; red: boolean }>; } catch { return []; } })();
+          const red = (() => { try { return JSON.parse(String(r.red_questions ?? '[]')) as string[]; } catch { return []; } })();
+          const eeoc = (() => { try { return JSON.parse(String(r.eeoc_questions ?? '[]')) as string[]; } catch { return []; } })();
+          const hasKit = r.kit_at != null;
+          return (
+            <div class="card">
+              <div class="actions">
+                <a href={`/jobs/${r.url_hash}`}><strong>{r.title}</strong></a>
+                <span class="muted">{r.company}</span>
+                <span class="chip">{r.track}</span>
+                <span class={r.stage === 'applied' ? 'ok' : 'muted'}>{r.stage ?? 'pending'}</span>
+                {!hasKit ? (
+                  <form class="inline" method="post" action="/applications/build">
+                    <input type="hidden" name="hash" value={String(r.url_hash)} />
+                    <button type="submit" class="primary">Build kit</button>
+                  </form>
+                ) : null}
+                {r.stage !== 'applied' ? (
+                  <form class="inline" method="post" action="/tracker/update">
+                    <input type="hidden" name="hash" value={String(r.url_hash)} />
+                    <input type="hidden" name="stage" value="applied" />
+                    <button type="submit">I applied ✓</button>
+                  </form>
+                ) : null}
+              </div>
+              {hasKit ? (
+                <details style="margin-top:6px">
+                  <summary>Kit — {answers.filter((a) => !a.red).length} matched · {red.length} red · {eeoc.length} EEOC</summary>
+                  <div style="margin-top:8px">
+                    <div>{r.kit_cv ? <a href={String(r.kit_cv)} target="_blank" rel="noreferrer">CV Doc ↗</a> : <span class="warn">no CV yet — Generate CV on the job page</span>}{' · '}
+                      <a href={String(r.deep_link ?? r.url)} target="_blank" rel="noreferrer">application form ↗</a></div>
+                    {answers.filter((a) => !a.red).map((a) => (
+                      <div class="bullet"><div class="muted">{a.question}</div><div>{a.answer}</div></div>
+                    ))}
+                    {red.length ? (
+                      <div style="margin-top:6px"><strong class="warn">Unanswered:</strong>
+                        {red.map((q) => <div class="muted">🔴 {q}</div>)}
+                        <div class="muted">answer them from the Telegram kit message, or add answers below</div>
+                      </div>
+                    ) : null}
+                    {eeoc.length ? (
+                      <div style="margin-top:6px" class="muted">⚖️ EEOC ({eeoc.length}) — never auto-answered: {eeoc.map((q) => <div>· {q}</div>)}</div>
+                    ) : null}
+                    <div class="muted" style="margin-top:6px">Checklist: open the form → autofill from this kit → attach the PDF → review EVERYTHING → you click submit.</div>
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          );
+        })}
+
+        {censusTop.length ? (
+          <>
+            <h2>Recurring unanswered questions</h2>
+            <div class="card">
+              {censusTop.map(([q, n]) => <div class="bullet"><span class="chip">{n}×</span> {q}</div>)}
+              <p class="muted">Add an answer once below — every future kit matches it automatically.</p>
+            </div>
+          </>
+        ) : null}
+
+        <h2>Answers bank ({answersBank.length})</h2>
+        <div class="card">
+          <form method="post" action="/applications/answer-add">
+            <div class="field"><label>Question (as forms ask it)</label><input type="text" name="label" required /></div>
+            <div class="field"><label>Your answer</label><textarea name="answer" required /></div>
+            <div class="actions">
+              <button type="submit" class="primary">Add as draft</button>
+              <a href="/applications">Cancel</a>
+            </div>
+          </form>
+        </div>
+        {answersBank.map((a) => (
+          <div class="card">
+            <div class="muted">{a.question_label}</div>
+            <div>{a.answer_en}</div>
+            <div class="actions" style="margin-top:4px">
+              <span class={a.status === 'approved' ? 'ok' : 'warn'}>{a.status}</span>
+              {a.status !== 'approved' ? (
+                <form class="inline" method="post" action="/applications/answer-approve">
+                  <input type="hidden" name="id" value={String(a.id)} />
+                  <button type="submit">approve</button>
+                </form>
+              ) : null}
+              <form class="inline" method="post" action="/applications/answer-delete"
+                onsubmit="return confirm('Delete this answer permanently?')">
+                <input type="hidden" name="id" value={String(a.id)} />
+                <button type="submit" class="chipx">✕ delete</button>
+              </form>
+            </div>
+          </div>
+        ))}
+      </>
+    ));
+  });
+
+  app.post('/applications/build', async (c) => {
+    const b = await c.req.parseBody();
+    const { buildKit } = await import('../kit/kit');
+    const r = await buildKit(c.env, String(b.hash ?? ''));
+    const msg = r.ok
+      ? (r.detectable
+        ? `kit built: ${r.matched} matched · ${r.red} red · ${r.eeoc} EEOC-flagged`
+        : `kit built (this ATS does not expose its form publicly — open the form to see the questions)${r.error ? ` · ${r.error}` : ''}`)
+      : `kit failed: ${r.error}`;
+    return c.redirect(`/applications?m=${encodeURIComponent(msg)}`);
+  });
+
+  app.post('/applications/answer-add', async (c) => {
+    const b = await c.req.parseBody();
+    const label = String(b.label ?? '').trim();
+    const answer = String(b.answer ?? '').trim();
+    if (!label || !answer) return c.redirect('/applications?m=question and answer are required');
+    const { normalizeQuestion } = await import('../kit/questions');
+    await c.env.DB.prepare(
+      `INSERT INTO profile_answers (question_norm, question_label, answer_en, status, updated_at)
+       VALUES (?,?,?,'draft',?)
+       ON CONFLICT(question_norm) DO UPDATE SET question_label=excluded.question_label,
+         answer_en=excluded.answer_en, status='draft', updated_at=excluded.updated_at`,
+    ).bind(normalizeQuestion(label), label, answer, now()).run();
+    return c.redirect('/applications?m=answer saved as draft — approve it to use in kits');
+  });
+
+  app.post('/applications/answer-approve', async (c) => {
+    const b = await c.req.parseBody();
+    await c.env.DB.prepare("UPDATE profile_answers SET status='approved', updated_at=? WHERE id=?")
+      .bind(now(), Number(b.id)).run();
+    return c.redirect('/applications?m=answer approved');
+  });
+
+  app.post('/applications/answer-delete', async (c) => {
+    const b = await c.req.parseBody();
+    await c.env.DB.prepare('DELETE FROM profile_answers WHERE id=?').bind(Number(b.id)).run();
+    return c.redirect('/applications?m=answer deleted');
+  });
+
   // ---------- Health ----------
   app.get('/health', async (c) => {
     const pg = pageNum(c);

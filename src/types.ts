@@ -40,4 +40,6 @@ export interface Env {
   GOOGLE_SA_KEY?: string;
   DRIVE_FOLDER_ID?: string;
   CV_TEMPLATE_DOC_ID?: string;
+  /** Secret path segment of the Telegram webhook (step 8 two-way bot). */
+  TELEGRAM_WEBHOOK_TOKEN?: string;
 }

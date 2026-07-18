@@ -116,17 +116,22 @@ row-by-row review).
   funnel, govern the bank) is comfortable from the console; the owner validates
   it in real use.
 
-## 10. Step 8 — Application kit + two-way bot
+## 10. Step 8 — Application kit + two-way bot · CODE DONE 2026-07-18
 
-- **Deliverables**: migration `0006` (answers table + kit); Telegram webhook
-  (`TELEGRAM_WEBHOOK_TOKEN`) with buttons (View kit / Mark applied) and a
-  conversational question flow (owner's replies -> kit -> optionally save to
-  the `answers` bank); question detection (Greenhouse `?questions=true`; Lever
-  public HTML — approved exception); /applications; weekly question census;
-  the owner's contact details as a private `config` key.
-- **Acceptance**: from the go-ahead in Telegram to the ready-to-submit form in
-  < 5 minutes, with every answer coming from the approved bank or the owner's
-  chat; ZERO submissions by the system (auditable).
+- **Delivered**: migration `0008` (`profile_answers` + `application_kits`);
+  Telegram webhook `/tg/<TELEGRAM_WEBHOOK_TOKEN>` with inline buttons on every
+  job notification (📋 View kit / ✅ I applied) and a one-question-at-a-time
+  red-question chat flow (owner replies become DRAFT bank answers, approved in
+  the console before reuse); question detection (Greenhouse `?questions=true`;
+  Lever public apply-page HTML — the approved exception; Ashby flagged as not
+  publicly readable); EEOC questions flagged, NEVER auto-answered;
+  `/applications` console page (kit queue + per-kit view + recurring-question
+  census + answers-bank management). Kit builds on demand (webhook/console) —
+  jobs flush at run end, so no pre-build in the notify path.
+- **Acceptance** (owner, at final testing): from the Telegram go-ahead to the
+  ready-to-submit form in < 5 minutes, every answer from the approved bank or
+  the owner's chat; ZERO submissions by the system (auditable). Owner setup:
+  `TELEGRAM_WEBHOOK_TOKEN` secret + one setWebhook call (final notes).
 
 ## 11. Backlog (post step 8, with a data gate)
 

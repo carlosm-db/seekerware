@@ -64,6 +64,9 @@ export function setSessionCookie(c: Context, token: string): void {
 export function authMiddleware() {
   return async (c: Context<{ Bindings: ConsoleEnv }>, next: Next) => {
     if (c.req.path === '/login') return next();
+    // Telegram webhook (step 8): authenticated by its own secret path token,
+    // validated inside the handler — cookies/bearer don't apply to Telegram.
+    if (c.req.path.startsWith('/tg/')) return next();
     const bearerOk =
       !!c.env.API_TOKEN && c.req.header('authorization') === `Bearer ${c.env.API_TOKEN}`;
     const cookieOk = await validSession(c.env, getCookie(c, COOKIE));

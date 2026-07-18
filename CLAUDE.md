@@ -128,4 +128,4 @@ repo.
 | 5 | Lever + Ashby connectors | Done 2026-07-17 (25 active companies; first organic notifications the same day) |
 | 6 | Blocks bank + CV factory + PDF + Drive archive | Code done and deployed 2026-07-17 (bank seeded 9 anchors/69 blocks; Gemini + Google auth tested live); BLOCKED at runtime: the service account cannot access the template (share the Doc with the SA) |
 | 7 | Console v2 (Tracker, Replay, Bank, CVs, Week) | Done 2026-07-17 (core: Tracker, Replay, Week, Monday digest, similar-jobs radar; /blocks and /cvs in empty state until step 6) |
-| 8 | Application kit + bidirectional bot + answers bank | Pending |
+| 8 | Application kit + bidirectional bot + answers bank | Code done 2026-07-18 (migration 0008, /applications, /tg webhook with buttons + red-question chat flow, EEOC never auto-answered); owner setup pending: TELEGRAM_WEBHOOK_TOKEN secret + setWebhook (final notes) |

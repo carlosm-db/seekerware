@@ -18,6 +18,7 @@ export async function sendTelegram(
   env: Env,
   text: string,
   doFetch: Fetcher = fetch,
+  replyMarkup?: unknown,
 ): Promise<TelegramResult> {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
     return { ok: false, error: 'TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not configured' };
@@ -31,6 +32,7 @@ export async function sendTelegram(
         text,
         parse_mode: 'HTML',
         disable_web_page_preview: true,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       }),
     });
     const body = (await res.json()) as { ok: boolean; result?: { message_id: number }; description?: string };

@@ -144,7 +144,7 @@ export interface FooterStatus {
 }
 
 const NAV_GROUPS: Array<[string, Array<[string, string]>]> = [
-  ['Operate', [['/', 'Today'], ['/tracker', 'Tracker'], ['/jobs', 'Jobs']]],
+  ['Operate', [['/', 'Today'], ['/applications', 'Applications'], ['/tracker', 'Tracker'], ['/jobs', 'Jobs']]],
   ['Profile & setup', [['/contact', 'Contact'], ['/companies', 'Companies'], ['/config', 'Calibration'], ['/blocks', 'Bank']]],
   ['Output', [['/cvs', 'CVs']]],
   ['System', [['/week', 'Week'], ['/health', 'Health']]],
