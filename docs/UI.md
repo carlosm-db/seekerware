@@ -85,20 +85,24 @@ Writers per page (extends the one-writer-per-column rule): `jobs` system only
 Name: `CV — {company} — {title} — {yyyy-mm-dd}`, in the shared folder
 (`DRIVE_FOLDER_ID`).
 
-Structure (from template `CV_TEMPLATE_DOC_ID`, placeholders `{{...}}`):
+Structure (fill-in-place: the template `CV_TEMPLATE_DOC_ID` is the fixed
+skeleton; the factory fills the `{{...}}` tokens it finds — see TRD §6):
 
-1. Header with contact details — name/email/LinkedIn are hardcoded in the
-   template; `{{phone}}` and `{{location}}` are filled per track from the
-   private `config['contact_profile']` (owner-entered via the `/contact`
-   console page). Never from the repo.
-2. Professional summary — 1 selected block.
-3. Skills — N selected blocks.
-4. Experience — per real anchor, with the blocks selected for this job.
-5. Education / certifications — from the template.
-6. **"Suggested tweaks" appendix** (gray background, to delete before
-   submitting): cv_verifier suggestions — never applied automatically — and the
-   selection rationale. The notes are ALSO persisted in D1 (`cvs` table), so
-   they survive when the owner deletes the appendix.
+1. Header — name/email/LinkedIn hardcoded in the template; `{{phone}}` and
+   `{{location}}` filled per track from the private `config['contact_profile']`
+   (owner-entered via the `/contact` console page). Never from the repo.
+2. Summary — `{{sum_1}}…{{sum_N}}`, one selected block per bullet slot.
+3. Skills — `{{skills_<methodologies|technical|academic|emerging>}}`, each line
+   filled with the selected skills of that category (joined). Languages is
+   static in the template.
+4. Experience — role headers are static; responsibilities are `{{<CODE>R<N>}}`
+   (role codes `DLAB1/BNS2/BNS1/UPS1/BAC1`), each filled with a selected block.
+5. Projects & Education — static in the template (AI-selected projects: Phase 2).
+6. **"Suggested tweaks" appendix** (to delete before submitting): cv_verifier
+   suggestions — never applied automatically — and the selection rationale. Also
+   persisted in D1 (`cvs` table), so they survive deleting the appendix.
+
+Unfilled or unrecognized tokens resolve to '' — no raw `{{...}}` ever leaks.
 
 Doc language = job language (`text_en` or `text_es` blocks; ES render requires
 approved parity). The PDF exported for the kit and the R2 file use a CLEAN copy

@@ -156,8 +156,14 @@ accuracy of this bank.
 |--------|------|--------|-------------|
 | id | TEXT PK | user | e.g. `scotiatech-2021`, `prj-chequeguardai` |
 | kind | TEXT enum `role\|project` | user | Anchor type |
-| company / dates | TEXT | user | Render metadata |
-| titles | TEXT JSON | user | Titles shown per market: `{internal, market_canada, market_colombia, contractor}` — the anchor is neutral; the title is a projection |
+| company / dates | TEXT | user | Render metadata (console display) |
+| titles | TEXT JSON | user | Retained for the console; NOT used for CV rendering since the 2026-07-18 fill-in-place model (role headers are static in the template) |
+
+**Role codes (canonical `id`, 2026-07-18).** Since the fill-in-place CV model,
+each experience role's `anchors.id` is its short code — also used verbatim as
+the `{{<CODE>R<N>}}` responsibility placeholder in the template: `DLAB1`
+(DiversoLab), `BNS2` (Scotiabank branch), `BNS1` (Scotiatech), `UPS1` (UPS),
+`BAC1` (Banco Agrario). One term per concept across DB, code, and template.
 
 ```sql
 CREATE TABLE anchors (
@@ -173,14 +179,14 @@ CREATE TABLE anchors (
 
 | Column | Type | Writer | Description |
 |--------|------|--------|-------------|
-| id | TEXT PK | user | `{sec}-{anchor\|topic}-{nn}[-{angle}]`, e.g. `exp-scotiatech-01-data` |
+| id | TEXT PK | user | `{sec}-{anchor\|topic}-{nn}[-{angle}]`, e.g. `exp-BNS1-01-data` |
 | section | TEXT enum `summary\|skills\|experience\|projects` | user | CV section |
-| anchor_id | TEXT FK -> anchors | user | Null in summary/skills |
+| anchor_id | TEXT FK -> anchors | user | Experience: the role code (`DLAB1`…) driving `{{<CODE>R<N>}}`. Null in summary/skills |
 | fact_key | TEXT | user | Groups all phrasings/languages of the same fact |
 | angle | TEXT enum `data\|compliance\|operations\|leadership` or NULL | user | The projection this phrasing serves |
 | text_en / text_es | TEXT | user | Phrasings of the SAME fact in each language (parity required) |
 | es_status | TEXT enum `missing\|draft\|approved` | user | ES parity status |
-| tags | TEXT csv | user | Controlled vocabulary SHARED with `config` (domain/tool/signal families + track-fit) |
+| tags | TEXT csv | user | Controlled vocabulary SHARED with `config` (domain/tool/signal families + track-fit). Skills also carry `skcat:<methodologies\|technical\|academic\|emerging>` — the category whose `{{skills_<cat>}}` line the item fills (Languages is static, not a category) |
 | evidence | TEXT | user | Real verifiable fact backing the claim |
 | source | TEXT | user | Provenance (CV variant, portfolio case, project) |
 | status | TEXT enum `draft\|review\|approved\|retired` | user | Lifecycle; only `approved` enters the cv_selector enum; `retired` is never deleted (audit trail) |

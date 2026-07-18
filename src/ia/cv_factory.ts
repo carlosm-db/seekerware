@@ -1,10 +1,11 @@
-// CV factory (docs/TRD.md §6): selection-only + deterministic render.
-// The Doc body contains EXCLUSIVELY block text (verifiable by
-// diff); the AI selects and suggests, NEVER writes CV content.
+// CV factory (docs/TRD.md §6): selection-only, template-driven fill.
+// The owner's template is the fixed skeleton; the factory fills its named
+// {{...}} tokens with EXACT approved-block text. The AI selects IDs and
+// suggests tweaks, NEVER writes CV content.
 
 import type { Env, Job } from '../types';
 import { cvSelector, cvVerifier, type CatalogBlock, type Selection } from './agents';
-import { appendDocText, copyTemplate, exportAndArchivePdf, googleAccessToken, replacePlaceholders } from '../gdocs';
+import { appendDocText, copyTemplate, exportAndArchivePdf, googleAccessToken, readPlaceholders, replacePlaceholders } from '../gdocs';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -70,21 +71,6 @@ interface BlockRow {
   status: string;
 }
 
-interface AnchorRow {
-  id: string;
-  kind: string;
-  company: string | null;
-  dates: string | null;
-  titles: string | null;
-}
-
-const SECTION_HEADING: Record<string, { en: string; es: string }> = {
-  summary: { en: 'SUMMARY', es: 'RESUMEN PROFESIONAL' },
-  skills: { en: 'SKILLS', es: 'HABILIDADES' },
-  experience: { en: 'PROFESSIONAL EXPERIENCE', es: 'EXPERIENCIA PROFESIONAL' },
-  projects: { en: 'PROJECTS', es: 'PROYECTOS' },
-};
-
 export async function generateCv(
   env: Env,
   job: Job & { url_hash: string; track: string | null },
@@ -123,39 +109,40 @@ export async function generateCv(
     if (!sel.ok || !sel.data) return { ok: false, gemini_calls: geminiCalls, error: `cv_selector: ${sel.error}` };
     const selection = sel.data;
 
-    // 3) Deterministic render (zero AI): EXACT text from the blocks
-    const anchors = new Map(
-      ((await env.DB.prepare('SELECT id, kind, company, dates, titles FROM anchors').all<AnchorRow>()).results)
-        .map((a) => [a.id, a]),
-    );
+    // 3) Catalog lookup + valid role codes (experience anchor ids)
     const byId = new Map(catalog.map((b) => [b.id, b]));
-    const body = renderBody(job, lang, selection, byId, anchors);
+    const roleCodes = ((await env.DB.prepare('SELECT id FROM anchors').all<{ id: string }>()).results).map((a) => a.id);
 
-    // 4) Verifier (temp 0) over the rendered body
-    const ver = await cvVerifier(env, job, body, doFetch);
+    // 4) Verifier (temp 0) over the selected content
+    const ver = await cvVerifier(env, job, verifierText(selection, byId), doFetch);
     geminiCalls += ver.calls;
     const tweaks = ver.ok && ver.data ? ver.data.tweaks : [];
 
-    // 5) Google: copy template -> fill contact placeholders per track ->
-    //    body -> CLEAN PDF -> appendix to the Doc
+    // 5) Google: copy template -> read its {{...}} tokens -> fill every slot
+    //    (contact per track + summary + skills-by-category + responsibilities
+    //    per role) with EXACT block text -> CLEAN PDF -> tweaks appendix.
     const token = await googleAccessToken(env, doFetch);
     const today = new Date().toISOString().slice(0, 10);
     const name = `${sample ? 'SAMPLE — ' : ''}CV — ${job.company} — ${job.title.slice(0, 60)} — ${today}`;
     const doc = await copyTemplate(env, token, name, doFetch);
-    // Fill {{phone}}/{{location}} from the private contact profile (empty when
-    // unset, so no raw {{...}} leaks). address is forms-only (step 8), not here.
+
+    // Private contact profile (empty when unset -> slot resolves to '', never a
+    // raw {{...}}). Structured address is forms-only (step 8), not in the CV.
     const contactRow = await env.DB.prepare("SELECT value FROM config WHERE key = 'contact_profile'").first<{ value: string }>();
     let contactMissing = false;
     let profile: ContactProfile = {};
     try { profile = contactRow ? (JSON.parse(contactRow.value) as ContactProfile) : {}; } catch { /* invalid json */ }
     if (!contactRow) contactMissing = true;
-    await replacePlaceholders(token, doc.id, contactPlaceholders(job.track, profile), doFetch);
-    await appendDocText(token, doc.id, body, doFetch);
+
+    const tokens = await readPlaceholders(token, doc.id, doFetch);
+    const slotMap = buildSlotMap(tokens, selection, byId, roleCodes, contactPlaceholders(job.track, profile));
+    await replacePlaceholders(token, doc.id, slotMap, doFetch);
+
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').slice(0, 12);
     const pdfId = await exportAndArchivePdf(env, token, doc.id, `${stamp} — ${job.company} — generated.pdf`, doFetch);
     const appendix = [
       '\n\n────────────────────────────────',
-      lang === 'es' ? 'SUGGESTED TWEAKS (delete before sending)' : 'SUGGESTED TWEAKS (delete before sending)',
+      'SUGGESTED TWEAKS (delete before sending)',
       `Selection: ${selection.rationale}`,
       ...tweaks.map((t) => `• ${t}`),
     ].join('\n');
@@ -180,50 +167,72 @@ export async function generateCv(
   }
 }
 
-function renderBody(
-  job: { track: string | null },
-  lang: 'en' | 'es',
-  sel: Selection,
+/** Parses the skcat:<category> tag from a block's tags; '' when absent. */
+function skcatOf(tags: string): string {
+  for (const t of tags.split(/[\s,]+/)) if (t.startsWith('skcat:')) return t.slice(6);
+  return '';
+}
+
+/**
+ * Deterministic slot fill (zero AI): maps every {{...}} token PRESENT in the
+ * template to selected block text. Recognized tokens:
+ *   - {{phone}} / {{location}}  -> contact map (per track)
+ *   - {{sum_N}}                 -> Nth selected summary block
+ *   - {{skills_<cat>}}          -> selected skills tagged skcat:<cat>, joined
+ *   - {{<CODE>R<N>}}            -> Nth selected responsibility for role <CODE>
+ * `selection` order is preserved within each role/category. Slots with no
+ * matching block, and any UNRECOGNIZED token, resolve to '' so a raw {{...}}
+ * never leaks into a CV.
+ */
+export function buildSlotMap(
+  tokens: Set<string>,
+  selection: Selection,
   byId: Map<string, CatalogBlock>,
-  anchors: Map<string, { company: string | null; dates: string | null; titles: string | null }>,
-): string {
-  const text = (id: string) => byId.get(id)?.text ?? '';
-  const lines: string[] = ['\n'];
+  roleCodes: string[],
+  contact: Record<string, string>,
+): Record<string, string> {
+  const text = (id: string | undefined) => (id ? byId.get(id)?.text ?? '' : '');
 
-  const displayTitle = (anchorId: string): string => {
-    const a = anchors.get(anchorId);
-    if (!a?.titles) return anchorId;
-    try {
-      const t = JSON.parse(a.titles) as Record<string, string>;
-      const key = job.track === 'colombia_perm' ? 'market_colombia'
-        : job.track === 'contractor_usd' ? 'contractor' : 'market_canada';
-      return t[key] || t.market_canada || t.internal || anchorId;
-    } catch { return anchorId; }
-  };
-
-  lines.push(SECTION_HEADING.summary![lang], '');
-  for (const id of sel.summary) lines.push(text(id));
-
-  lines.push('', SECTION_HEADING.skills![lang], '');
-  for (const id of sel.skills) lines.push(`• ${text(id)}`);
-
-  lines.push('', SECTION_HEADING.experience![lang], '');
-  const expByAnchor = new Map<string, string[]>();
-  for (const id of sel.experience) {
-    const anchorId = byId.get(id)?.anchor_id ?? '';
-    if (!expByAnchor.has(anchorId)) expByAnchor.set(anchorId, []);
-    expByAnchor.get(anchorId)!.push(id);
+  const expByRole = new Map<string, string[]>();
+  for (const id of selection.experience) {
+    const code = byId.get(id)?.anchor_id ?? '';
+    const arr = expByRole.get(code) ?? [];
+    arr.push(id);
+    expByRole.set(code, arr);
   }
-  for (const [anchorId, ids] of expByAnchor) {
-    const a = anchors.get(anchorId);
-    lines.push(`${displayTitle(anchorId)}${a?.company ? ` — ${a.company}` : ''}${a?.dates ? ` (${a.dates})` : ''}`);
-    for (const id of ids) lines.push(`• ${text(id)}`);
-    lines.push('');
+  const skillsByCat = new Map<string, string[]>();
+  for (const id of selection.skills) {
+    const cat = skcatOf(byId.get(id)?.tags ?? '');
+    if (!cat) continue;
+    const arr = skillsByCat.get(cat) ?? [];
+    arr.push(text(id));
+    skillsByCat.set(cat, arr);
   }
 
-  if (sel.projects.length) {
-    lines.push(SECTION_HEADING.projects![lang], '');
-    for (const id of sel.projects) lines.push(`• ${text(id)}`);
+  const map: Record<string, string> = {};
+  for (const name of tokens) {
+    const full = `{{${name}}}`;
+    if (full in contact) { map[full] = contact[full]!; continue; }
+    let m = /^sum_(\d+)$/.exec(name);
+    if (m) { map[full] = text(selection.summary[Number(m[1]) - 1]); continue; }
+    m = /^skills_(.+)$/.exec(name);
+    if (m) { map[full] = (skillsByCat.get(m[1]!) ?? []).join(', '); continue; }
+    m = /^(.+)R(\d+)$/.exec(name);
+    if (m && roleCodes.includes(m[1]!)) {
+      map[full] = text((expByRole.get(m[1]!) ?? [])[Number(m[2]) - 1]);
+      continue;
+    }
+    map[full] = '';
   }
-  return lines.join('\n');
+  return map;
+}
+
+/** Plain-text view of the selection for the verifier (labels help it reason). */
+function verifierText(selection: Selection, byId: Map<string, CatalogBlock>): string {
+  const t = (id: string) => byId.get(id)?.text ?? '';
+  return [
+    'SUMMARY', ...selection.summary.map(t),
+    '', 'SKILLS', ...selection.skills.map(t),
+    '', 'EXPERIENCE', ...selection.experience.map(t),
+  ].join('\n');
 }

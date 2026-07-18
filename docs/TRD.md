@@ -137,18 +137,35 @@ output_key}`, sequential runner, wrapper with:
 survivor Apply
   -> cv_selector (IDs per section/angle from the job's matched tags;
      language per the job — ES render requires es_status approved)
-  -> deterministic render via Google REST APIs:
+  -> template-driven fill via Google REST APIs (zero AI in this step):
        Drive files.copy of CV_TEMPLATE_DOC_ID into DRIVE_FOLDER_ID,
-       Docs documents.batchUpdate (replaceAllText) fills the contact header
-       placeholders {{phone}}/{{location}} per track from the private
-       config['contact_profile'] (canada_coop -> CA values; colombia_perm &
-       contractor_usd -> CO/Medellín values; empty when unset so no raw
-       {{...}} leaks), then inserts the EXACT block text as the body
-       (zero AI in this step)
+       documents.get reads the copy's {{...}} tokens (the template is the
+       source of truth for structure), then documents.batchUpdate
+       (replaceAllText) fills EVERY present token with EXACT block text:
+         {{phone}}/{{location}} -> contact per track (canada_coop -> CA;
+           colombia_perm & contractor_usd -> CO/Medellín; empty when unset)
+         {{sum_N}}              -> Nth selected summary block
+         {{skills_<cat>}}       -> selected skills tagged skcat:<cat>, joined
+         {{<CODE>R<N>}}         -> Nth selected responsibility for role <CODE>
+       Unrecognized/unfilled tokens resolve to '' so no raw {{...}} leaks.
+       Role headers, projects, education and Languages are STATIC in the
+       template. See the placeholder convention below.
   -> cv_verifier (temp 0): consistency against bank and job;
      writes the "Suggested tweaks" appendix at the end of the Doc
   -> cv_doc_url to the store and to the Telegram message
 ```
+
+**Placeholder convention.** The owner's template is a fully-formatted skeleton;
+the factory only fills the `{{...}}` tokens it finds. Experience roles use
+canonical codes (also the `anchors.id` and `blocks.anchor_id`): `DLAB1`
+(DiversoLab), `BNS2` (Scotiabank branch, Customer Experience Associate), `BNS1`
+(Scotiatech, Business Solutions Associate), `UPS1` (UPS), `BAC1` (Banco
+Agrario). Responsibilities are `{{<CODE>R<N>}}` (e.g. `{{BNS1R1}}`). Summary
+bullets are `{{sum_N}}`; skills lines are `{{skills_methodologies|technical|
+academic|emerging}}` (Languages is fixed static text — it doesn't change per
+job). The AI only SELECTS which approved blocks fill each slot; it never writes
+text. Projects are static in v1; AI-selected projects (with formatted title +
+tech-stack lines) are a fast-follow.
 
 Authentication against Google: **service account** from an own GCP project
 (free). The data account shares the Drive folder and the template as editor

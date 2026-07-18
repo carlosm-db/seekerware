@@ -101,6 +101,37 @@ export async function replacePlaceholders(
   });
 }
 
+interface DocEl {
+  paragraph?: { elements?: Array<{ textRun?: { content?: string } }> };
+  table?: { tableRows?: Array<{ tableCells?: Array<{ content?: DocEl[] }> }> };
+}
+
+function collectDocText(content: DocEl[] | undefined, out: { s: string }): void {
+  for (const el of content ?? []) {
+    for (const pe of el.paragraph?.elements ?? []) out.s += pe.textRun?.content ?? '';
+    for (const row of el.table?.tableRows ?? []) {
+      for (const cell of row.tableCells ?? []) collectDocText(cell.content, out);
+    }
+  }
+}
+
+/**
+ * Reads the Doc and returns the set of inner placeholder names present
+ * (e.g. 'phone', 'sum_1', 'BNS1R1'). All body text (including table cells) is
+ * concatenated first, so a token split across text runs is still detected.
+ */
+export async function readPlaceholders(
+  token: string, docId: string, doFetch: Fetcher = fetch,
+): Promise<Set<string>> {
+  const res = await gapi(token, doFetch, `https://docs.googleapis.com/v1/documents/${docId}?fields=body`);
+  const doc = (await res.json()) as { body?: { content?: DocEl[] } };
+  const out = { s: '' };
+  collectDocText(doc.body?.content, out);
+  const names = new Set<string>();
+  for (const m of out.s.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) names.add(m[1]!.trim());
+  return names;
+}
+
 /** Inserts plain text at the end of the Doc (index 1 = freshly copied/empty document: we insert at the start of the body). */
 export async function appendDocText(
   token: string, docId: string, text: string, doFetch: Fetcher = fetch,

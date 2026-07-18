@@ -91,10 +91,18 @@ row-by-row review).
   the Drive `archive/` subfolder (R2 dropped 2026-07-17: requires a card) +
   generated/submitted snapshots; migration `0005` (cvs table,
   jobs.cv_pdf_key).
-- **Acceptance**: an Apply generates a Doc whose body contains ONLY text from
-  approved blocks (verifiable diff), a clean PDF archived in R2, verifier notes
-  persisted in `cvs`; ES render blocked without approved parity.
-- **Inputs**: R2 bucket (owner); lightweight bank review.
+- **Render model (revised 2026-07-18)**: fill-in-place, not append. The owner's
+  template is the fixed skeleton; the factory reads its `{{...}}` tokens
+  (`readPlaceholders`) and fills each with EXACT block text via `buildSlotMap`
+  (`{{sum_N}}`, `{{skills_<cat>}}`, `{{<CODE>R<N>}}`, contact). Projects,
+  education and Languages are static in the template (v1). See TRD §6.
+- **Acceptance**: an Apply generates a Doc whose filled slots contain ONLY text
+  from approved blocks (verifiable diff), no raw `{{...}}` leaks, a clean PDF
+  archived in Drive `archive/`, verifier notes persisted in `cvs`; ES render
+  blocked without approved parity.
+- **Inputs**: owner builds the placeholder template + shares it with the SA;
+  skills re-authored as individual `skcat:`-tagged items (owner-approved);
+  lightweight bank review.
 
 ## 9. Step 7 — Console v2 (the complete instrument)
 
@@ -137,9 +145,10 @@ row-by-row review).
 | Telegram bot + chat_id | Step 3 | ✓ 2026-07-17 |
 | GEMINI_API_KEY, GOOGLE_SA_KEY, DRIVE_FOLDER_ID, CV_TEMPLATE_DOC_ID | Step 6 | ✓ 2026-07-17 |
 | Login password (hash) | Step 4 | pending (guided command) |
-| R2 bucket `CV_ARCHIVE` | Step 6 | pending (1 click) |
+| R2 bucket `CV_ARCHIVE` | Step 6 | dropped 2026-07-17 (needs a card) → Drive `archive/` |
 | Lightweight blocks-bank review | Step 6 | parked by decision |
-| Contact header in the Docs template | Step 6 | pending (the owner adds it by hand to the Doc) |
+| Fill-in-place template + share with SA | Step 6 | pending (owner builds it with the named `{{...}}` placeholders and shares the Doc with the service account) |
+| Skills re-authored as `skcat:`-tagged items | Step 6 | pending (owner approves the drafts) |
 
 ## 13. Decision log
 
@@ -194,3 +203,17 @@ row-by-row review).
   "contact only in the Docs template" and "contact in D1 for the kit" notes.
   Owner enters values via the console `/contact` page; address is
   application-forms-only (step 8), never in the CV.
+- **2026-07-18** — **Fill-in-place CV factory**: the owner's template is the
+  source of truth for structure; the factory reads its `{{...}}` tokens and
+  fills each with EXACT approved-block text (contact, `{{sum_N}}`,
+  `{{skills_<cat>}}`, `{{<CODE>R<N>}}`), replacing the old "append a generated
+  body with its own headings" render. The AI still only SELECTS block IDs.
+  **Role codes** `DLAB1/BNS2/BNS1/UPS1/BAC1` become the canonical `anchors.id`
+  and `blocks.anchor_id` (one term per concept), used verbatim in the
+  `{{<CODE>R<N>}}` responsibility placeholders. **Skills** re-authored as
+  individual items tagged `skcat:<methodologies|technical|academic|emerging>`;
+  the AI selects a job-relevant subset per category. **Languages, projects,
+  education** are static in the template (Languages fixed; AI-selected projects
+  are a Phase-2 fast-follow needing formatted title lines). Owner rebuilds the
+  template with the named placeholders and shares it with the SA. Supersedes the
+  body-append render in TRD §6.
