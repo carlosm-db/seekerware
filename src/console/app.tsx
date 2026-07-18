@@ -245,6 +245,15 @@ export function consoleApp(): App {
     ).results;
     let breakdown: ScoreResult | null = null;
     try { breakdown = JSON.parse(String(j.score_breakdown ?? '')) as ScoreResult; } catch { /* sin breakdown */ }
+    const similares = j.title_norm
+      ? (
+          await c.env.DB.prepare(
+            `SELECT j2.url_hash, j2.title, j2.verdict, j2.score, c2.name company
+             FROM jobs j2 JOIN companies c2 ON c2.id = j2.company_id
+             WHERE j2.title_norm = ? AND j2.url_hash != ? LIMIT 6`,
+          ).bind(j.title_norm, hash).all<Record<string, string | number>>()
+        ).results
+      : [];
 
     return page(c, String(j.title), (
       <>
@@ -285,6 +294,17 @@ export function consoleApp(): App {
         <div class="card">
           <details><summary>descripcion completa</summary><p>{j.description_text}</p></details>
         </div>
+        {similares.length > 0 ? (
+          <div class="card">
+            <h2 style="margin-top:0">Radar de similares ({similares.length})</h2>
+            {similares.map((s) => (
+              <div>
+                <a href={`/jobs/${s.url_hash}`}>{s.title}</a> @ {s.company} ·{' '}
+                <span class={`v-${s.verdict}`}>{s.verdict}</span> · {s.score}
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div class="card">
           <h2 style="margin-top:0">Historial</h2>
           {events.length === 0 ? <p class="muted">sin eventos</p> : (
@@ -380,7 +400,8 @@ export function consoleApp(): App {
     let thresholds = { apply: 75, stretch: 55 };
     try { thresholds = (JSON.parse(cfg.scoring ?? '{}') as { thresholds: typeof thresholds }).thresholds ?? thresholds; } catch { /* raw */ }
     const history = (
-      await c.env.DB.prepare('SELECT ts, key FROM config_history ORDER BY id DESC LIMIT 10').all<{ ts: string; key: string }>()
+      await c.env.DB.prepare('SELECT id, ts, key, replay_summary FROM config_history ORDER BY id DESC LIMIT 10')
+        .all<{ id: number; ts: string; key: string; replay_summary: string | null }>()
     ).results;
 
     return page(c, 'Calibracion', (
@@ -395,11 +416,29 @@ export function consoleApp(): App {
         <form method="post" action="/config/scoring" class="card">
           <h2 style="margin-top:0">Config de scoring (JSON completo — avanzado)</h2>
           <textarea name="scoring" rows={22}>{cfg.scoring ?? ''}</textarea>
-          <div style="margin-top:8px"><button type="submit" class="primary">Validar y guardar</button> <span class="muted">el Replay contra el historico llega en v2 (paso 7)</span></div>
+          <div class="actions" style="margin-top:8px">
+            <button type="submit" class="primary">Validar y guardar</button>
+            <button type="submit" formaction="/config/replay">🔬 Simular con Replay antes de guardar</button>
+            <label>contra ultimos <input type="number" name="n" value="200" min="50" max="1000" style="width:80px" /> jobs</label>
+          </div>
         </form>
         <div class="card">
           <h2 style="margin-top:0">Historial</h2>
-          {history.map((h) => <div class="muted">{fmt(h.ts)} · {h.key}</div>)}
+          <table>
+            {history.map((h) => (
+              <tr>
+                <td class="muted">{fmt(h.ts)}</td>
+                <td>{h.key}</td>
+                <td class="muted">{h.replay_summary ? 'con replay' : ''}</td>
+                <td>
+                  <form class="inline" method="post" action="/config/revert">
+                    <input type="hidden" name="id" value={String(h.id)} />
+                    <button type="submit">revertir a la version anterior</button>
+                  </form>
+                </td>
+              </tr>
+            ))}
+          </table>
         </div>
       </>
     ));
@@ -439,6 +478,274 @@ export function consoleApp(): App {
       return c.redirect(`/config?m=${encodeURIComponent(`ERROR: ${err instanceof Error ? err.message : 'invalido'}`)}`);
     }
   });
+
+  // ---------- Tracker ----------
+  const STAGES = ['prepared', 'applied', 'interview', 'offer', 'rejected'] as const;
+  const STAGE_LABEL: Record<string, string> = {
+    prepared: 'Preparado', applied: 'Aplicado', interview: 'Entrevista',
+    offer: 'Oferta', rejected: 'Rechazado', dismissed: 'Descartado',
+  };
+
+  app.get('/tracker', async (c) => {
+    const nowIso = now();
+    const rows = (
+      await c.env.DB.prepare(
+        `SELECT a.url_hash, a.stage, a.applied_at, a.follow_up_at, a.notes, a.updated_at,
+                j.title, j.track, j.score, c2.name company
+         FROM applications a JOIN jobs j ON j.url_hash = a.url_hash
+         JOIN companies c2 ON c2.id = j.company_id
+         WHERE a.stage != 'dismissed' ORDER BY a.updated_at DESC`,
+      ).all<Record<string, string | number | null>>()
+    ).results;
+    const due = rows.filter((r) => r.follow_up_at && String(r.follow_up_at) <= nowIso);
+    const daysIn = (iso: string | number | null | undefined) =>
+      iso ? Math.floor((Date.now() - new Date(String(iso)).getTime()) / 86400000) : 0;
+
+    return page(c, 'Tracker', (
+      <>
+        {due.length > 0 ? (
+          <div class="card">
+            <h2 style="margin-top:0">Seguimientos vencidos</h2>
+            {due.map((r) => <div><a href={`/jobs/${r.url_hash}`}>{r.title}</a> @ {r.company} — seguimiento {String(r.follow_up_at).slice(0, 10)}</div>)}
+          </div>
+        ) : null}
+        <div style="display:flex; gap:14px; align-items:flex-start; overflow-x:auto">
+          {STAGES.map((stage) => {
+            const col = rows.filter((r) => r.stage === stage);
+            return (
+              <div style="min-width:230px; flex:1">
+                <h2 style="margin-top:0">{STAGE_LABEL[stage]} <span class="muted">({col.length})</span></h2>
+                {col.map((r) => (
+                  <div class="card">
+                    <a href={`/jobs/${r.url_hash}`}><strong>{r.title}</strong></a>
+                    <div class="muted">{r.company} · <span class="chip">{r.track}</span> · {daysIn(r.updated_at)}d en etapa</div>
+                    {r.notes ? <div class="muted">📝 {String(r.notes).slice(0, 80)}</div> : null}
+                    <form method="post" action="/tracker/update" style="margin-top:6px; display:grid; gap:4px">
+                      <input type="hidden" name="hash" value={String(r.url_hash)} />
+                      <div class="actions">
+                        <select name="stage">
+                          {[...STAGES, 'dismissed'].map((s) => <option value={s} selected={s === stage}>{STAGE_LABEL[s]}</option>)}
+                        </select>
+                        <input type="date" name="follow_up" value={r.follow_up_at ? String(r.follow_up_at).slice(0, 10) : ''} />
+                      </div>
+                      <input type="text" name="note" placeholder="nota (opcional)" />
+                      <button type="submit">Actualizar</button>
+                    </form>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      </>
+    ));
+  });
+
+  app.post('/tracker/update', async (c) => {
+    const b = await c.req.parseBody();
+    const hash = String(b.hash ?? '');
+    const stage = String(b.stage ?? '');
+    if (!hash || !STAGE_LABEL[stage]) return c.redirect('/tracker?m=invalido');
+    const ts = now();
+    const followUp = b.follow_up ? `${String(b.follow_up)}T12:00:00Z` : null;
+    const note = String(b.note ?? '').trim();
+    const stamp =
+      stage === 'applied' ? 'applied_at' : stage === 'interview' ? 'interview_at'
+      : stage === 'offer' || stage === 'rejected' ? 'outcome_at' : null;
+    await c.env.DB.prepare(
+      `UPDATE applications SET stage = ?, follow_up_at = ?, updated_at = ?,
+         notes = CASE WHEN ? != '' THEN COALESCE(notes || char(10), '') || ? ELSE notes END
+         ${stamp ? `, ${stamp} = COALESCE(${stamp}, ?)` : ''}
+       WHERE url_hash = ?`,
+    ).bind(...(stamp ? [stage, followUp, ts, note, note, ts, hash] : [stage, followUp, ts, note, note, hash])).run();
+    await jobEvent(c.env, hash, `stage:${stage}`, note);
+    return c.redirect('/tracker?m=actualizado');
+  });
+
+  // ---------- Semana ----------
+  app.get('/semana', async (c) => {
+    const win = async (from: string, to: string) =>
+      (await c.env.DB.prepare(
+        `SELECT
+          (SELECT COUNT(*) FROM jobs WHERE first_seen >= ? AND first_seen < ?) nuevos,
+          (SELECT COUNT(*) FROM jobs WHERE first_seen >= ? AND first_seen < ? AND verdict != 'Skip') survivors,
+          (SELECT COUNT(*) FROM jobs WHERE notified_at >= ? AND notified_at < ?) notificados,
+          (SELECT COUNT(*) FROM applications WHERE applied_at >= ? AND applied_at < ?) aplicadas,
+          (SELECT COUNT(*) FROM applications WHERE interview_at >= ? AND interview_at < ?) entrevistas`,
+      ).bind(from, to, from, to, from, to, from, to, from, to).first<Record<string, number>>())!;
+    const nowMs = Date.now();
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const cur = await win(iso(nowMs - 7 * 86400000), iso(nowMs + 1));
+    const prev = await win(iso(nowMs - 14 * 86400000), iso(nowMs - 7 * 86400000));
+    const goal = Number((await c.env.DB.prepare("SELECT value FROM config WHERE key='weekly_goal'").first<{ value: string }>())?.value ?? 5);
+    const tta = (
+      await c.env.DB.prepare(
+        `SELECT j.notified_at, a.applied_at FROM applications a JOIN jobs j ON j.url_hash = a.url_hash
+         WHERE a.applied_at >= ? AND j.notified_at IS NOT NULL`,
+      ).bind(iso(nowMs - 30 * 86400000)).all<{ notified_at: string; applied_at: string }>()
+    ).results.map((r) => (new Date(r.applied_at).getTime() - new Date(r.notified_at).getTime()) / 3600000).sort((a, b) => a - b);
+    const median = tta.length ? tta[Math.floor(tta.length / 2)]!.toFixed(1) : null;
+    const aging = await c.env.DB.prepare(
+      `SELECT COUNT(*) n FROM applications WHERE stage IN ('prepared','applied') AND updated_at < ?`,
+    ).bind(iso(nowMs - 7 * 86400000)).first<{ n: number }>();
+
+    const stagesRow = (label: string, w: Record<string, number>, max: number) => (
+      <tr>
+        <th>{label}</th>
+        {(['nuevos', 'survivors', 'notificados', 'aplicadas', 'entrevistas'] as const).map((k) => (
+          <td>
+            <div>{w[k]}</div>
+            <div style={`height:6px;border-radius:3px;background:var(--accent);width:${max > 0 ? Math.max(2, (Number(w[k]) / max) * 100) : 2}%`} />
+          </td>
+        ))}
+      </tr>
+    );
+    const maxVal = Math.max(1, ...Object.values(cur).map(Number), ...Object.values(prev).map(Number));
+
+    return page(c, 'Semana', (
+      <>
+        <div class="statgrid">
+          <div class="stat"><div class="n">{cur.aplicadas}/{goal}</div><div class="l">aplicadas vs objetivo</div></div>
+          <div class="stat"><div class="n">{median ?? '—'}{median ? 'h' : ''}</div><div class="l">time-to-apply mediano (30d)</div></div>
+          <div class="stat"><div class="n">{aging?.n ?? 0}</div><div class="l">estancadas &gt;7d</div></div>
+        </div>
+        <div class="card">
+          <table>
+            <tr><th>semana</th><th>nuevos</th><th>survivors</th><th>notificadas</th><th>aplicadas</th><th>entrevistas</th></tr>
+            {stagesRow('esta', cur, maxVal)}
+            {stagesRow('anterior', prev, maxVal)}
+          </table>
+        </div>
+        <p class="muted">El digest de los lunes a Telegram resume estos mismos numeros.</p>
+      </>
+    ));
+  });
+
+  // ---------- Replay ----------
+  app.post('/config/replay', async (c) => {
+    const b = await c.req.parseBody();
+    try {
+      const parsed = JSON.parse(String(b.scoring ?? ''));
+      validateScoringConfig(parsed);
+      await c.env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring_draft', ?)")
+        .bind(JSON.stringify(parsed)).run();
+      const n = Math.min(1000, Math.max(50, Number(b.n ?? 200)));
+      return c.redirect(`/config/replay?n=${n}`);
+    } catch (err) {
+      return c.redirect(`/config?m=${encodeURIComponent(`borrador invalido: ${err instanceof Error ? err.message : ''}`)}`);
+    }
+  });
+
+  app.get('/config/replay', async (c) => {
+    const n = Math.min(1000, Math.max(50, Number(c.req.query('n') ?? 200)));
+    const runner = `
+(async () => {
+  const tbody = document.getElementById('diffs');
+  const bar = document.getElementById('bar');
+  const sum = { total: 0, changed: 0, up: 0, down: 0, byVerdict: {} };
+  let cursor = 0;
+  for (;;) {
+    const r = await fetch('/api/replay-batch?cursor=' + cursor + '&n=${n}');
+    if (!r.ok) { bar.textContent = 'error: ' + r.status; return; }
+    const d = await r.json();
+    sum.total = d.total_target;
+    for (const row of d.diffs) {
+      sum.changed++;
+      const key = row.old_verdict + '→' + row.new_verdict;
+      sum.byVerdict[key] = (sum.byVerdict[key] || 0) + 1;
+      if (row.new_score > row.old_score) sum.up++; else sum.down++;
+      // titulos/empresas son texto de terceros: SOLO textContent, jamas innerHTML
+      const tr = document.createElement('tr');
+      const td = (parent) => parent.appendChild(document.createElement('td'));
+      const t1 = td(tr); t1.textContent = row.title;
+      const sub = document.createElement('div'); sub.className = 'muted';
+      sub.textContent = row.company; t1.appendChild(sub);
+      td(tr).textContent = row.old_score + ' -> ' + row.new_score;
+      const t3 = td(tr); t3.textContent = row.old_verdict; t3.className = 'v-' + row.old_verdict;
+      const t4 = td(tr); t4.textContent = row.new_verdict; t4.className = 'v-' + row.new_verdict;
+      tbody.appendChild(tr);
+    }
+    cursor = d.next_cursor;
+    bar.textContent = 'procesados ' + d.processed_total + ' / ' + d.total_target +
+      ' · cambian ' + sum.changed;
+    if (d.done) break;
+  }
+  const parts = Object.entries(sum.byVerdict).map(([k, v]) => v + ' ' + k).join(' · ');
+  bar.textContent = 'listo: ' + sum.changed + ' de ' + sum.total + ' cambian de verdict' +
+    (parts ? ' (' + parts + ')' : '');
+  document.getElementById('summary-input').value = JSON.stringify(sum);
+  document.getElementById('apply-form').style.display = 'block';
+})();`;
+    return page(c, 'Replay (simulacion)', (
+      <>
+        <div class="card">
+          <p>Simulando el borrador contra los ultimos {n} jobs almacenados. <strong id="bar">iniciando…</strong></p>
+          <div id="apply-form" style="display:none">
+            <form method="post" action="/config/replay/apply" class="inline">
+              <input type="hidden" name="summary" id="summary-input" />
+              <button type="submit" class="primary">Guardar y activar</button>
+            </form>{' '}
+            <form method="post" action="/config/replay/discard" class="inline">
+              <button type="submit">Descartar borrador</button>
+            </form>
+          </div>
+        </div>
+        <table>
+          <tr><th>job</th><th>score</th><th>antes</th><th>despues</th></tr>
+          <tbody id="diffs" />
+        </table>
+        <script dangerouslySetInnerHTML={{ __html: runner }} />
+      </>
+    ));
+  });
+
+  app.post('/config/replay/apply', async (c) => {
+    const b = await c.req.parseBody();
+    const draft = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
+    if (!draft) return c.redirect('/config?m=sin borrador');
+    const old = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
+    await c.env.DB.batch([
+      c.env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring', ?)").bind(draft.value),
+      c.env.DB.prepare("DELETE FROM config WHERE key='scoring_draft'"),
+      c.env.DB.prepare('INSERT INTO config_history (ts, key, old_value, new_value, replay_summary) VALUES (?, ?, ?, ?, ?)')
+        .bind(now(), 'scoring', old?.value ?? null, draft.value, String(b.summary ?? '')),
+    ]);
+    return c.redirect('/config?m=borrador activado (replay guardado en historial)');
+  });
+
+  app.post('/config/replay/discard', async (c) => {
+    await c.env.DB.prepare("DELETE FROM config WHERE key='scoring_draft'").run();
+    return c.redirect('/config?m=borrador descartado');
+  });
+
+  app.post('/config/revert', async (c) => {
+    const b = await c.req.parseBody();
+    const row = await c.env.DB.prepare('SELECT key, old_value FROM config_history WHERE id = ?')
+      .bind(Number(b.id)).first<{ key: string; old_value: string | null }>();
+    if (!row?.old_value) return c.redirect('/config?m=nada que revertir');
+    await saveConfig(c.env, row.key, row.old_value);
+    return c.redirect(`/config?m=${encodeURIComponent(`revertido: ${row.key}`)}`);
+  });
+
+  // ---------- Banco / CVs (estados vacios hasta el paso 6) ----------
+  app.get('/blocks', async (c) => {
+    const n = await c.env.DB.prepare('SELECT COUNT(*) n FROM blocks').first<{ n: number }>();
+    return page(c, 'Banco de blocks', (
+      <div class="card">
+        <p>{(n?.n ?? 0) === 0
+          ? 'El banco vive aun en el documento maestro privado (OneDrive). Se siembra a la base en el paso 6, tras tu revision ligera — esta pagina se convertira en el gestor completo (aprobaciones, cola de sugerencias, cobertura, paridad EN/ES).'
+          : `${n?.n} blocks en la base.`}</p>
+      </div>
+    ));
+  });
+
+  app.get('/cvs', async (c) =>
+    page(c, 'Biblioteca de CVs', (
+      <div class="card">
+        <p>Los CVs generados apareceran aqui cuando la fabrica arranque (paso 6): Doc editable + PDF archivado en Drive (generado y enviado), blocks usados, notas del verificador, regenerar, y export CSV del historico.</p>
+      </div>
+    )),
+  );
 
   // ---------- Salud ----------
   app.get('/salud', async (c) => {

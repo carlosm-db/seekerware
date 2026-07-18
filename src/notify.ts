@@ -83,6 +83,31 @@ export function formatMaintenance(detail: string): string {
   return `⚠️ MANTENIMIENTO\n${escapeHtml(detail)}`;
 }
 
+export interface DigestData {
+  runsTotal: number;
+  runsOk: number;
+  vistos: number;
+  nuevos: number;
+  survivors: number;
+  notificados: number;
+  aplicadas: number;
+  goal: number;
+  topCompany: string | null;
+  rotas: number;
+}
+
+/** Digest semanal de los lunes (UI.md §1): resumen compacto del funnel. */
+export function formatDigest(d: DigestData): string {
+  const lines = [
+    '📊 <b>Semana Seekerware</b>',
+    `runs: ${d.runsOk}/${d.runsTotal} OK · vistos ${d.vistos} · nuevos ${d.nuevos}`,
+    `survivors ${d.survivors} · notificadas ${d.notificados} · aplicadas <b>${d.aplicadas}/${d.goal}</b>`,
+  ];
+  if (d.topCompany) lines.push(`top empresa: ${escapeHtml(d.topCompany)}`);
+  if (d.rotas > 0) lines.push(`⚠️ ${d.rotas} empresa(s) con fallos — revisar /companies`);
+  return lines.join('\n');
+}
+
 /** Textos rule-based (TRD §3.5): plantillas desde las categorias disparadas; el enricher llega en paso 6. */
 export function ruleBasedTexts(result: ScoreResult): {
   whyItFits: string;

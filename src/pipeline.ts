@@ -7,7 +7,7 @@ import { urlHash } from './connectors/common';
 import { loadScoringConfig } from './config-store';
 import { normalizeTitle, scoreJob, type ScoringConfig } from './scoring';
 import { checkFreshness } from './freshness';
-import { formatJobMessage, formatMaintenance, ruleBasedTexts, sendTelegram } from './notify';
+import { formatDigest, formatJobMessage, formatMaintenance, ruleBasedTexts, sendTelegram } from './notify';
 import { RunStats, trackedFetch } from './runstats';
 import { RunBatch, getCompaniesPage, getCompanyJobs, getConfigValue, openRun, type StoredCompany } from './store';
 
@@ -62,6 +62,60 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
 
     batch.setConfig('poll_cursor', String(nextCursor));
     if (stats.companiesFail > 0) runStatus = 'partial';
+
+    // Cuota: aviso si el pico de subrequests roza el limite por invocacion
+    const obsCfg = JSON.parse((await getConfigValue(env, 'observability')) ?? '{}') as {
+      subrequests_warn?: number;
+      retention_days?: { runs?: number; events?: number; notifications?: number };
+      digest?: { dow?: number; hour_utc?: number };
+    };
+    if (stats.subrequests > (obsCfg.subrequests_warn ?? 40)) {
+      stats.event({ type: 'quota_warn', severity: 'warn', detail: `subrequests ${stats.subrequests} > ${obsCfg.subrequests_warn ?? 40}` });
+    }
+
+    // Retencion: el primer run de cada dia poda las tablas de observabilidad.
+    // Cutoffs en ISO de JS (los timestamps almacenados son toISOString(); compararlos
+    // contra datetime() de SQLite incluye de mas el dia frontera: 'T' > ' ').
+    // Orden FK-seguro: primero los HIJOS (events/notifications, incluidos los que
+    // referencian runs por podar), despues runs — si no, DELETE FROM runs viola la FK.
+    const today = nowIso.slice(0, 10);
+    if ((await getConfigValue(env, 'prune_last')) !== today) {
+      const ret = obsCfg.retention_days ?? {};
+      const isoDaysAgo = (d: number) => new Date(Date.now() - d * 86400000).toISOString();
+      const runsCutoff = isoDaysAgo(ret.runs ?? 400);
+      const results = await env.DB.batch([
+        env.DB.prepare('DELETE FROM events WHERE ts < ? OR run_id IN (SELECT id FROM runs WHERE started_at < ?)')
+          .bind(isoDaysAgo(ret.events ?? 90), runsCutoff),
+        env.DB.prepare('DELETE FROM notifications WHERE ts < ? OR run_id IN (SELECT id FROM runs WHERE started_at < ?)')
+          .bind(isoDaysAgo(ret.notifications ?? 180), runsCutoff),
+        env.DB.prepare('DELETE FROM runs WHERE started_at < ?').bind(runsCutoff),
+      ]);
+      for (const r of results) stats.d1(r.meta);
+      batch.setConfig('prune_last', today);
+      const changes = results.map((r) => r.meta.changes ?? 0);
+      stats.event({ type: 'prune', severity: 'info', detail: `events:${changes[0]} notifications:${changes[1]} runs:${changes[2]}` });
+    }
+
+    // Digest semanal: primer run tras el dia/hora configurados (lunes ~06:00 Bogota)
+    const digestCfg = obsCfg.digest ?? { dow: 1, hour_utc: 11 };
+    const nowDate = new Date(nowIso);
+    const weekKey = `${nowDate.getUTCFullYear()}-W${isoWeek(nowDate)}`;
+    if (
+      nowDate.getUTCDay() === (digestCfg.dow ?? 1) &&
+      nowDate.getUTCHours() >= (digestCfg.hour_utc ?? 11) &&
+      (await getConfigValue(env, 'digest_last_sent')) !== weekKey
+    ) {
+      // Claim-first (escritura INMEDIATA, no en el batch final): garantiza
+      // at-most-once aunque un run manual y el cron se solapen o el run muera
+      // despues del envio. Si el envio falla, se pierde el digest de esa
+      // semana (tolerable, queda el evento) — jamas se duplica.
+      await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('digest_last_sent', ?)")
+        .bind(weekKey).run();
+      const digest = await buildDigest(env);
+      const sent = await sendTelegram(env, formatDigest(digest), doFetch);
+      stats.notifications.push({ kind: 'digest', status: sent.ok ? 'sent' : 'fail', tg_message_id: sent.message_id, error: sent.error });
+      stats.event({ type: 'digest_sent', severity: sent.ok ? 'info' : 'warn', detail: `${weekKey}${sent.ok ? '' : ` FALLO: ${sent.error}`}` });
+    }
   } catch (err) {
     runStatus = 'fail';
     stats.event({
@@ -73,6 +127,48 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
     await batch.flush(runId, stats, runStatus, new Date().toISOString(), startedMs);
   }
   return stats;
+}
+
+function isoWeek(d: Date): number {
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
+
+async function buildDigest(env: Env) {
+  // Cutoff en ISO de JS: mismos numeros exactos que /semana (los timestamps
+  // guardados son toISOString(); datetime() de SQLite no compara bien contra ellos).
+  const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
+  const wk = await env.DB.prepare(
+    `SELECT
+      (SELECT COUNT(*) FROM runs WHERE started_at >= ?1) runs_total,
+      (SELECT COUNT(*) FROM runs WHERE started_at >= ?1 AND status='ok') runs_ok,
+      (SELECT COALESCE(SUM(jobs_seen),0) FROM runs WHERE started_at >= ?1) vistos,
+      (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1) nuevos,
+      (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1 AND verdict != 'Skip') survivors,
+      (SELECT COUNT(*) FROM jobs WHERE notified_at >= ?1) notificados,
+      (SELECT COUNT(*) FROM applications WHERE applied_at >= ?1) aplicadas,
+      (SELECT COALESCE(value,'5') FROM config WHERE key='weekly_goal') goal,
+      (SELECT COUNT(*) FROM companies WHERE active=1 AND fail_count > 0) rotas`,
+  ).bind(cutoff).first<Record<string, number | string>>();
+  const top = await env.DB.prepare(
+    `SELECT c.name FROM jobs j JOIN companies c ON c.id=j.company_id
+     WHERE j.first_seen >= ? AND j.verdict != 'Skip'
+     GROUP BY c.id ORDER BY COUNT(*) DESC LIMIT 1`,
+  ).bind(cutoff).first<{ name: string }>();
+  return {
+    runsTotal: Number(wk?.runs_total ?? 0),
+    runsOk: Number(wk?.runs_ok ?? 0),
+    vistos: Number(wk?.vistos ?? 0),
+    nuevos: Number(wk?.nuevos ?? 0),
+    survivors: Number(wk?.survivors ?? 0),
+    notificados: Number(wk?.notificados ?? 0),
+    aplicadas: Number(wk?.aplicadas ?? 0),
+    goal: Number(wk?.goal ?? 5),
+    topCompany: top?.name ?? null,
+    rotas: Number(wk?.rotas ?? 0),
+  };
 }
 
 async function processCompany(

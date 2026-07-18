@@ -68,9 +68,13 @@ export const Layout: FC<{
 }> = ({ title, path, pendingTriage, footer, flash, children }) => {
   const links: Array<[string, string]> = [
     ['/', 'Hoy'],
+    ['/tracker', 'Tracker'],
     ['/jobs', 'Vacantes'],
     ['/companies', 'Empresas'],
     ['/config', 'Calibracion'],
+    ['/blocks', 'Banco'],
+    ['/cvs', 'CVs'],
+    ['/semana', 'Semana'],
     ['/salud', 'Salud'],
   ];
   return (

@@ -33,6 +33,62 @@ app.post('/api/notify-test', async (c) => {
   return c.json(sent, sent.ok ? 200 : 502);
 });
 
+/** Replay (glosario): re-score simulado por lotes de 50; NUNCA escribe en jobs. */
+app.get('/api/replay-batch', async (c) => {
+  const cursor = Math.max(0, Math.floor(Number(c.req.query('cursor')) || 0));
+  const target = Math.min(1000, Math.max(50, Math.floor(Number(c.req.query('n')) || 200)));
+  const BATCH = 50;
+  // LIMIT jamas negativo (en SQLite, LIMIT negativo = SIN limite -> reventaria CPU/lecturas)
+  const limit = Math.max(0, Math.min(BATCH, target - cursor));
+  if (limit === 0) {
+    return c.json({ diffs: [], next_cursor: cursor, processed_total: cursor, total_target: target, done: true });
+  }
+  const draftRow = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'")
+    .first<{ value: string }>();
+  if (!draftRow) return c.json({ error: 'sin borrador de scoring' }, 400);
+  const draft = JSON.parse(draftRow.value) as ScoringConfig;
+
+  const rows = (
+    await c.env.DB.prepare(
+      `SELECT j.url_hash, j.title, j.location, j.description_text, j.score, j.verdict, co.name company
+       FROM jobs j JOIN companies co ON co.id = j.company_id
+       WHERE j.description_text IS NOT NULL
+       ORDER BY j.first_seen DESC, j.url_hash LIMIT ? OFFSET ?`,
+    ).bind(limit, cursor).all<Record<string, string | number | null>>()
+  ).results;
+
+  const diffs = [];
+  for (const r of rows) {
+    const job: Job = {
+      id: '', company: String(r.company), title: String(r.title), location: String(r.location ?? ''),
+      url: '', description: String(r.description_text ?? ''), posted_at: null,
+      ats: 'greenhouse', raw: null,
+    };
+    const res = scoreJob(job, draft);
+    const oldVerdict = String(r.verdict);
+    const oldScore = Number(r.score);
+    if (res.best.verdict !== oldVerdict || Math.abs(res.best.adjusted_score - oldScore) >= 8) {
+      diffs.push({
+        url_hash: r.url_hash,
+        title: String(r.title).slice(0, 60),
+        company: r.company,
+        old_score: oldScore,
+        new_score: res.best.adjusted_score,
+        old_verdict: oldVerdict,
+        new_verdict: res.best.verdict,
+      });
+    }
+  }
+  const processed = cursor + rows.length;
+  return c.json({
+    diffs,
+    next_cursor: processed,
+    processed_total: processed,
+    total_target: target,
+    done: rows.length === 0 || processed >= target,
+  });
+});
+
 app.get('/api/dry-run', async (c) => {
   const token = c.req.query('company');
   const ats = (c.req.query('ats') ?? 'greenhouse') as Ats;
