@@ -406,6 +406,7 @@ export function consoleApp(): App {
 
     return page(c, 'Calibration', (
       <>
+        <div class="card actions"><a href="/contact">Contact profile →</a> <span class="muted">phone / location filled into CV templates per track</span></div>
         <form method="post" action="/config/quick" class="card actions">
           <label>Apply ≥ <input type="number" name="apply" value={String(thresholds.apply)} style="width:70px" /></label>
           <label>Stretch ≥ <input type="number" name="stretch" value={String(thresholds.stretch)} style="width:70px" /></label>
@@ -452,6 +453,46 @@ export function consoleApp(): App {
         .bind(now(), key, old?.value ?? null, value),
     ]);
   }
+
+  // ---------- Contact profile (private; fills CV template placeholders) ----------
+  const CONTACT_FIELDS: Array<[string, string]> = [
+    ['phone_ca', 'Canadian phone (canada_coop)'],
+    ['phone_co', 'Colombian phone (colombia_perm & contractor_usd)'],
+    ['location_ca', 'Canada location (e.g. Vancouver, BC, Canada)'],
+    ['location_co', 'Colombia location (e.g. Medellín, Colombia)'],
+    ['address_ca', 'Canada address (application forms only — not in the CV)'],
+    ['address_co', 'Colombia address (application forms only — not in the CV)'],
+  ];
+
+  app.get('/contact', async (c) => {
+    const row = await c.env.DB.prepare("SELECT value FROM config WHERE key='contact_profile'").first<{ value: string }>();
+    let profile: Record<string, string> = {};
+    try { profile = row ? JSON.parse(row.value) : {}; } catch { /* invalid */ }
+    return page(c, 'Contact profile', (
+      <>
+        <div class="card">
+          <p class="muted">Private data — stored only in D1, never in the repo. The CV template header uses two placeholders the factory fills per track: <code>{'{{phone}}'}</code> and <code>{'{{location}}'}</code> (name/email/LinkedIn are hardcoded in the template). Address is stored only for step-8 application forms and never shown in the CV.</p>
+        </div>
+        <form method="post" action="/contact" class="card">
+          {CONTACT_FIELDS.map(([key, label]) => (
+            <div style="margin-bottom:10px">
+              <label style="display:block; font-size:13px; color:var(--muted)">{label}</label>
+              <input type="text" name={key} value={profile[key] ?? ''} style="width:100%; max-width:520px" />
+            </div>
+          ))}
+          <button type="submit" class="primary">Save contact profile</button>
+        </form>
+      </>
+    ));
+  });
+
+  app.post('/contact', async (c) => {
+    const b = await c.req.parseBody();
+    const profile: Record<string, string> = {};
+    for (const [key] of CONTACT_FIELDS) profile[key] = String(b[key] ?? '').trim();
+    await saveConfig(c.env, 'contact_profile', JSON.stringify(profile));
+    return c.redirect('/contact?m=contact profile saved');
+  });
 
   app.post('/config/quick', async (c) => {
     const b = await c.req.parseBody();
@@ -825,8 +866,15 @@ export function consoleApp(): App {
          ORDER BY j.score DESC LIMIT 30`,
       ).all<Record<string, string>>()
     ).results;
+    const contactSet = await c.env.DB.prepare("SELECT 1 FROM config WHERE key='contact_profile'").first();
     return page(c, 'CV library', (
       <>
+        {!contactSet ? (
+          <div class="card" style="border-color:var(--warn)">
+            ⚠️ No contact profile set — generated CVs will have empty phone/location.{' '}
+            <a href="/contact">Set it now →</a>
+          </div>
+        ) : null}
         <form method="post" action="/cvs/sample" class="card actions">
           <strong>Generate SAMPLE CV</strong>
           <select name="hash">

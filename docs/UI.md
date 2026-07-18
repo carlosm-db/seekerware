@@ -87,8 +87,10 @@ Name: `CV — {company} — {title} — {yyyy-mm-dd}`, in the shared folder
 
 Structure (from template `CV_TEMPLATE_DOC_ID`, placeholders `{{...}}`):
 
-1. Header with contact details — they come from the template (private
-   resource), never from the repo or the system.
+1. Header with contact details — name/email/LinkedIn are hardcoded in the
+   template; `{{phone}}` and `{{location}}` are filled per track from the
+   private `config['contact_profile']` (owner-entered via the `/contact`
+   console page). Never from the repo.
 2. Professional summary — 1 selected block.
 3. Skills — N selected blocks.
 4. Experience — per real anchor, with the blocks selected for this job.

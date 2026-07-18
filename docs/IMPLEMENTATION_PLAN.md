@@ -183,3 +183,14 @@ row-by-row review).
 - **2026-07-17** — `applications` table = the user's tracker (stages); the
   approved/submitted submission machinery is NOT built (consistent with the
   rejection of L2b/L3).
+- **2026-07-18** — **Project language = English**: full retro-rewrite of docs,
+  code comments, console UI, and Telegram labels; code/identifiers/SQL/enum
+  values/blocks-bank EN+ES content preserved.
+- **2026-07-18** — **Per-market CV contact**: ONE Docs template with
+  `{{phone}}`/`{{location}}` placeholders filled per track from the private
+  `config['contact_profile']` (canada_coop -> Vancouver + CA phone;
+  colombia_perm & contractor_usd -> Medellín + CO phone, LATAM orientation);
+  name/email/LinkedIn hardcoded in the template. Supersedes the earlier
+  "contact only in the Docs template" and "contact in D1 for the kit" notes.
+  Owner enters values via the console `/contact` page; address is
+  application-forms-only (step 8), never in the CV.

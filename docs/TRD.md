@@ -139,8 +139,12 @@ survivor Apply
      language per the job — ES render requires es_status approved)
   -> deterministic render via Google REST APIs:
        Drive files.copy of CV_TEMPLATE_DOC_ID into DRIVE_FOLDER_ID,
-       Docs documents.batchUpdate (replaceAllText) with the EXACT text
-       of the blocks into the {{section}} placeholders (zero AI in this step)
+       Docs documents.batchUpdate (replaceAllText) fills the contact header
+       placeholders {{phone}}/{{location}} per track from the private
+       config['contact_profile'] (canada_coop -> CA values; colombia_perm &
+       contractor_usd -> CO/Medellín values; empty when unset so no raw
+       {{...}} leaks), then inserts the EXACT block text as the body
+       (zero AI in this step)
   -> cv_verifier (temp 0): consistency against bank and job;
      writes the "Suggested tweaks" appendix at the end of the Doc
   -> cv_doc_url to the store and to the Telegram message

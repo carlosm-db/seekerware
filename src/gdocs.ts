@@ -82,6 +82,25 @@ export async function copyTemplate(
   return { id: body.id, url: `https://docs.google.com/document/d/${body.id}/edit` };
 }
 
+/**
+ * Fills template placeholders (e.g. {{phone}}, {{location}}) via one
+ * replaceAllText request per entry. Values with no match are simply no-ops;
+ * always call with every placeholder (empty string when unset) so no raw
+ * {{...}} token ever leaks into a CV.
+ */
+export async function replacePlaceholders(
+  token: string, docId: string, map: Record<string, string>, doFetch: Fetcher = fetch,
+): Promise<void> {
+  const requests = Object.entries(map).map(([find, replace]) => ({
+    replaceAllText: { containsText: { text: find, matchCase: true }, replaceText: replace },
+  }));
+  if (requests.length === 0) return;
+  await gapi(token, doFetch, `https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`, {
+    method: 'POST',
+    body: JSON.stringify({ requests }),
+  });
+}
+
 /** Inserts plain text at the end of the Doc (index 1 = freshly copied/empty document: we insert at the start of the body). */
 export async function appendDocText(
   token: string, docId: string, text: string, doFetch: Fetcher = fetch,
