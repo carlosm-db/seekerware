@@ -86,25 +86,25 @@ export function formatMaintenance(detail: string): string {
 export interface DigestData {
   runsTotal: number;
   runsOk: number;
-  vistos: number;
-  nuevos: number;
+  seen: number;
+  newJobs: number;
   survivors: number;
-  notificados: number;
-  aplicadas: number;
+  notified: number;
+  applied: number;
   goal: number;
   topCompany: string | null;
-  rotas: number;
+  failing: number;
 }
 
 /** Weekly Monday digest (UI.md §1): compact funnel summary. */
 export function formatDigest(d: DigestData): string {
   const lines = [
     '📊 <b>Seekerware week</b>',
-    `runs: ${d.runsOk}/${d.runsTotal} OK · seen ${d.vistos} · new ${d.nuevos}`,
-    `survivors ${d.survivors} · notified ${d.notificados} · applied <b>${d.aplicadas}/${d.goal}</b>`,
+    `runs: ${d.runsOk}/${d.runsTotal} OK · seen ${d.seen} · new ${d.newJobs}`,
+    `survivors ${d.survivors} · notified ${d.notified} · applied <b>${d.applied}/${d.goal}</b>`,
   ];
   if (d.topCompany) lines.push(`top company: ${escapeHtml(d.topCompany)}`);
-  if (d.rotas > 0) lines.push(`⚠️ ${d.rotas} company(ies) failing — check /companies`);
+  if (d.failing > 0) lines.push(`⚠️ ${d.failing} company(ies) failing — check /companies`);
   return lines.join('\n');
 }
 

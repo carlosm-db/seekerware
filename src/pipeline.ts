@@ -168,13 +168,13 @@ async function buildDigest(env: Env) {
     `SELECT
       (SELECT COUNT(*) FROM runs WHERE started_at >= ?1) runs_total,
       (SELECT COUNT(*) FROM runs WHERE started_at >= ?1 AND status='ok') runs_ok,
-      (SELECT COALESCE(SUM(jobs_seen),0) FROM runs WHERE started_at >= ?1) vistos,
-      (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1) nuevos,
+      (SELECT COALESCE(SUM(jobs_seen),0) FROM runs WHERE started_at >= ?1) seen,
+      (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1) new_jobs,
       (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1 AND verdict != 'Skip') survivors,
-      (SELECT COUNT(*) FROM jobs WHERE notified_at >= ?1) notificados,
-      (SELECT COUNT(*) FROM applications WHERE applied_at >= ?1) aplicadas,
+      (SELECT COUNT(*) FROM jobs WHERE notified_at >= ?1) notified,
+      (SELECT COUNT(*) FROM applications WHERE applied_at >= ?1) applied,
       (SELECT COALESCE(value,'5') FROM config WHERE key='weekly_goal') goal,
-      (SELECT COUNT(*) FROM companies WHERE active=1 AND fail_count > 0) rotas`,
+      (SELECT COUNT(*) FROM companies WHERE active=1 AND fail_count > 0) failing`,
   ).bind(cutoff).first<Record<string, number | string>>();
   const top = await env.DB.prepare(
     `SELECT c.name FROM jobs j JOIN companies c ON c.id=j.company_id
@@ -184,14 +184,14 @@ async function buildDigest(env: Env) {
   return {
     runsTotal: Number(wk?.runs_total ?? 0),
     runsOk: Number(wk?.runs_ok ?? 0),
-    vistos: Number(wk?.vistos ?? 0),
-    nuevos: Number(wk?.nuevos ?? 0),
+    seen: Number(wk?.seen ?? 0),
+    newJobs: Number(wk?.new_jobs ?? 0),
     survivors: Number(wk?.survivors ?? 0),
-    notificados: Number(wk?.notificados ?? 0),
-    aplicadas: Number(wk?.aplicadas ?? 0),
+    notified: Number(wk?.notified ?? 0),
+    applied: Number(wk?.applied ?? 0),
     goal: Number(wk?.goal ?? 5),
     topCompany: top?.name ?? null,
-    rotas: Number(wk?.rotas ?? 0),
+    failing: Number(wk?.failing ?? 0),
   };
 }
 

@@ -20,6 +20,28 @@ export function consoleApp(): App {
   const now = () => new Date().toISOString();
   const fmt = (iso: string | null | undefined) => (iso ? iso.slice(5, 16).replace('T', ' ') : '—');
 
+  // Pagination: 50/page. Query with `LIMIT PAGE+1 OFFSET pg*PAGE`, then if
+  // more than PAGE rows came back there's a next page (drop the extra row).
+  const PAGE = 50;
+  const pageNum = (c: Context<{ Bindings: ConsoleEnv }>) => Math.max(0, Math.floor(Number(c.req.query('page')) || 0));
+  function pager(base: string, pg: number, hasNext: boolean, params: Record<string, string | undefined>) {
+    const qs = (p: number) => {
+      const u = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) if (v) u.set(k, v);
+      if (p > 0) u.set('page', String(p));
+      const s = u.toString();
+      return s ? `${base}?${s}` : base;
+    };
+    if (pg === 0 && !hasNext) return null;
+    return (
+      <div class="pager">
+        {pg > 0 ? <a href={qs(pg - 1)}>← Prev</a> : <span class="muted">← Prev</span>}
+        <span class="muted">page {pg + 1}</span>
+        {hasNext ? <a href={qs(pg + 1)}>Next →</a> : <span class="muted">Next →</span>}
+      </div>
+    );
+  }
+
   async function footer(env: ConsoleEnv): Promise<FooterStatus> {
     const r = await env.DB.prepare(
       'SELECT finished_at, companies_ok, errors FROM runs ORDER BY id DESC LIMIT 1',
@@ -108,6 +130,29 @@ export function consoleApp(): App {
     const health = strip?.run_status === 'ok' ? <span class="ok">green</span>
       : strip?.run_status ? <span class="warn">{strip.run_status}</span> : <span class="muted">no runs</span>;
 
+    // Control-panel counts (one cheap aggregate query)
+    const panel = await c.env.DB.prepare(
+      `SELECT
+        (SELECT COUNT(*) FROM applications WHERE stage NOT IN ('dismissed','rejected')) tracker_active,
+        (SELECT COUNT(*) FROM companies WHERE active=1) companies_active,
+        (SELECT COUNT(*) FROM companies) companies_total,
+        (SELECT COUNT(*) FROM jobs) jobs_total,
+        (SELECT COUNT(*) FROM blocks WHERE status='approved') blocks_approved,
+        (SELECT COUNT(*) FROM blocks) blocks_total,
+        (SELECT COUNT(*) FROM cvs) cvs_total,
+        (SELECT COUNT(*) FROM config WHERE key='contact_profile') contact_set`,
+    ).first<Record<string, number>>();
+    const cards: Array<[string, string, string, string]> = [
+      ['Operate', '/tracker', `${panel?.tracker_active ?? 0}`, 'active applications'],
+      ['Operate', '/jobs', `${panel?.jobs_total ?? 0}`, 'jobs seen'],
+      ['Profile & setup', '/companies', `${panel?.companies_active ?? 0}/${panel?.companies_total ?? 0}`, 'companies active'],
+      ['Profile & setup', '/blocks', `${panel?.blocks_approved ?? 0}/${panel?.blocks_total ?? 0}`, 'blocks approved'],
+      ['Profile & setup', '/contact', panel?.contact_set ? 'set ✓' : 'not set', 'contact profile'],
+      ['Output', '/cvs', `${panel?.cvs_total ?? 0}`, 'CVs generated'],
+      ['System', '/week', `${strip?.applied_week ?? 0}/${strip?.goal ?? '5'}`, 'applied this week'],
+      ['System', '/health', strip?.run_status ?? '—', 'last run'],
+    ];
+
     return page(c, 'Today', (
       <>
         <div class="statgrid">
@@ -115,6 +160,16 @@ export function consoleApp(): App {
           <div class="stat"><div class="n">{strip?.applied_week ?? 0}/{strip?.goal ?? '5'}</div><div class="l">applied this week</div></div>
           <div class="stat"><div class="n">{health}</div><div class="l">system health</div></div>
         </div>
+        <div class="cardgrid">
+          {cards.map(([group, href, n, label]) => (
+            <a class="panelcard" href={href}>
+              <div class="pg">{group}</div>
+              <div class="pn">{n}</div>
+              <div class="pl">{label} →</div>
+            </a>
+          ))}
+        </div>
+        <h2>Triage</h2>
         {rows.length === 0 ? <div class="card">Triage up to date ✓</div> : null}
         {rows.map((j) => (
           <div class="card">
@@ -184,6 +239,7 @@ export function consoleApp(): App {
     if (q.verdict) { where.push('j.verdict = ?'); binds.push(q.verdict); }
     if (q.status) { where.push('j.status = ?'); binds.push(q.status); }
     if (q.q) { where.push('j.title LIKE ?'); binds.push(`%${q.q}%`); }
+    const pg = pageNum(c);
     const rows = (
       await c.env.DB.prepare(
         `SELECT j.url_hash, j.title, j.location, j.track, j.verdict, j.score, j.status, j.posted_at,
@@ -191,9 +247,11 @@ export function consoleApp(): App {
          FROM jobs j JOIN companies c ON c.id = j.company_id
          LEFT JOIN applications a ON a.url_hash = j.url_hash
          WHERE ${where.join(' AND ')}
-         ORDER BY j.first_seen DESC, j.score DESC LIMIT 100`,
+         ORDER BY j.first_seen DESC, j.score DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
       ).bind(...binds).all<Record<string, string | number | null>>()
     ).results;
+    const hasNext = rows.length > PAGE;
+    if (hasNext) rows.pop();
 
     const sel = (name: string, opts: string[], current?: string) => (
       <select name={name}>
@@ -213,22 +271,22 @@ export function consoleApp(): App {
           <a href="/jobs?verdict=Apply&status=new">Apply pending</a>
           <a href="/jobs?status=notified">Notified</a>
         </form>
-        <table>
-          <tr><th>title</th><th>company</th><th>track</th><th>score</th><th>verdict</th><th>status</th><th>stage</th><th>seen</th></tr>
+        <div class="table-wrap"><table>
+          <tr><th>title</th><th class="hide-sm">company</th><th class="hide-sm">track</th><th>score</th><th>verdict</th><th class="hide-sm">status</th><th class="hide-sm">stage</th><th class="hide-sm">seen</th></tr>
           {rows.map((j) => (
             <tr>
-              <td><a href={`/jobs/${j.url_hash}`}>{j.title}</a><div class="muted">{j.location}</div></td>
-              <td>{j.company}</td>
-              <td>{j.track ?? '—'}</td>
+              <td><a href={`/jobs/${j.url_hash}`}>{j.title}</a><div class="muted">{j.company} · {j.location}</div></td>
+              <td class="hide-sm">{j.company}</td>
+              <td class="hide-sm">{j.track ?? '—'}</td>
               <td>{j.score}</td>
               <td class={`v-${j.verdict}`}>{j.verdict}</td>
-              <td class={`s-${j.status}`}>{j.status}</td>
-              <td>{j.stage ?? '—'}</td>
-              <td class="muted">{fmt(String(j.first_seen))}</td>
+              <td class={`hide-sm s-${j.status}`}>{j.status}</td>
+              <td class="hide-sm">{j.stage ?? '—'}</td>
+              <td class="hide-sm muted">{fmt(String(j.first_seen))}</td>
             </tr>
           ))}
-        </table>
-        <p class="muted">{rows.length} rows (max 100)</p>
+        </table></div>
+        {pager('/jobs', pg, hasNext, { track: q.track, verdict: q.verdict, status: q.status, q: q.q })}
       </>
     ));
   });
@@ -265,7 +323,7 @@ export function consoleApp(): App {
         {breakdown ? (
           <div class="card">
             <h2 style="margin-top:0">Score breakdown</h2>
-            <table>
+            <div class="table-wrap"><table>
               <tr><th>category</th><th>matches</th><th>norm</th><th>points</th></tr>
               {Object.entries(breakdown.breakdown).map(([cat, b]) => (
                 <tr>
@@ -275,9 +333,9 @@ export function consoleApp(): App {
                   <td>{b.points.toFixed(1)}</td>
                 </tr>
               ))}
-            </table>
+            </table></div>
             <h2>Gates by track</h2>
-            <table>
+            <div class="table-wrap"><table>
               <tr><th>track</th><th>verdict</th><th>adj. score</th><th>gates</th></tr>
               {Object.entries(breakdown.tracks).map(([t, r]) => (
                 <tr>
@@ -287,7 +345,7 @@ export function consoleApp(): App {
                   <td>{r.gates.map((g) => <div class={g.passed ? 'ok' : 'bad'}>{g.passed ? '✓' : '✗'} {g.id} <span class="muted">({g.evidence})</span></div>)}</td>
                 </tr>
               ))}
-            </table>
+            </table></div>
             {breakdown.near_miss_reason ? <p class="warn">why not: {breakdown.near_miss_reason}</p> : null}
           </div>
         ) : null}
@@ -308,7 +366,7 @@ export function consoleApp(): App {
         <div class="card">
           <h2 style="margin-top:0">History</h2>
           {events.length === 0 ? <p class="muted">no events</p> : (
-            <table>{events.map((e) => <tr><td class="muted">{fmt(e.ts)}</td><td>{e.actor}</td><td>{e.event}</td><td class="muted">{e.detail}</td></tr>)}</table>
+            <div class="table-wrap"><table>{events.map((e) => <tr><td class="muted">{fmt(e.ts)}</td><td>{e.actor}</td><td>{e.event}</td><td class="muted">{e.detail}</td></tr>)}</table></div>
           )}
         </div>
       </>
@@ -337,7 +395,7 @@ export function consoleApp(): App {
           <input type="text" name="notes" placeholder="notes" />
           <button type="submit" class="primary">Add and test</button>
         </form>
-        <table>
+        <div class="table-wrap"><table>
           <tr><th>company</th><th>ats</th><th>token</th><th>active</th><th>health</th><th>jobs 90d</th><th>survivors</th><th>yield</th></tr>
           {rows.map((r) => (
             <tr>
@@ -356,7 +414,7 @@ export function consoleApp(): App {
               <td>{Number(r.jobs_seen) > 0 ? `${((Number(r.survivors ?? 0) / Number(r.jobs_seen)) * 100).toFixed(1)}%` : '—'}</td>
             </tr>
           ))}
-        </table>
+        </table></div>
       </>
     ));
   });
@@ -425,7 +483,7 @@ export function consoleApp(): App {
         </form>
         <div class="card">
           <h2 style="margin-top:0">History</h2>
-          <table>
+          <div class="table-wrap"><table>
             {history.map((h) => (
               <tr>
                 <td class="muted">{fmt(h.ts)}</td>
@@ -439,7 +497,7 @@ export function consoleApp(): App {
                 </td>
               </tr>
             ))}
-          </table>
+          </table></div>
         </div>
       </>
     ));
@@ -550,11 +608,11 @@ export function consoleApp(): App {
             {due.map((r) => <div><a href={`/jobs/${r.url_hash}`}>{r.title}</a> @ {r.company} — follow-up {String(r.follow_up_at).slice(0, 10)}</div>)}
           </div>
         ) : null}
-        <div style="display:flex; gap:14px; align-items:flex-start; overflow-x:auto">
+        <div class="kanban">
           {STAGES.map((stage) => {
             const col = rows.filter((r) => r.stage === stage);
             return (
-              <div style="min-width:230px; flex:1">
+              <div class="kancol">
                 <h2 style="margin-top:0">{STAGE_LABEL[stage]} <span class="muted">({col.length})</span></h2>
                 {col.map((r) => (
                   <div class="card">
@@ -604,15 +662,15 @@ export function consoleApp(): App {
   });
 
   // ---------- Week ----------
-  app.get('/semana', async (c) => {
+  app.get('/week', async (c) => {
     const win = async (from: string, to: string) =>
       (await c.env.DB.prepare(
         `SELECT
-          (SELECT COUNT(*) FROM jobs WHERE first_seen >= ? AND first_seen < ?) nuevos,
+          (SELECT COUNT(*) FROM jobs WHERE first_seen >= ? AND first_seen < ?) new_jobs,
           (SELECT COUNT(*) FROM jobs WHERE first_seen >= ? AND first_seen < ? AND verdict != 'Skip') survivors,
-          (SELECT COUNT(*) FROM jobs WHERE notified_at >= ? AND notified_at < ?) notificados,
-          (SELECT COUNT(*) FROM applications WHERE applied_at >= ? AND applied_at < ?) aplicadas,
-          (SELECT COUNT(*) FROM applications WHERE interview_at >= ? AND interview_at < ?) entrevistas`,
+          (SELECT COUNT(*) FROM jobs WHERE notified_at >= ? AND notified_at < ?) notified,
+          (SELECT COUNT(*) FROM applications WHERE applied_at >= ? AND applied_at < ?) applied,
+          (SELECT COUNT(*) FROM applications WHERE interview_at >= ? AND interview_at < ?) interviews`,
       ).bind(from, to, from, to, from, to, from, to, from, to).first<Record<string, number>>())!;
     const nowMs = Date.now();
     const iso = (ms: number) => new Date(ms).toISOString();
@@ -633,7 +691,7 @@ export function consoleApp(): App {
     const stagesRow = (label: string, w: Record<string, number>, max: number) => (
       <tr>
         <th>{label}</th>
-        {(['nuevos', 'survivors', 'notificados', 'aplicadas', 'entrevistas'] as const).map((k) => (
+        {(['new_jobs', 'survivors', 'notified', 'applied', 'interviews'] as const).map((k) => (
           <td>
             <div>{w[k]}</div>
             <div style={`height:6px;border-radius:3px;background:var(--accent);width:${max > 0 ? Math.max(2, (Number(w[k]) / max) * 100) : 2}%`} />
@@ -646,16 +704,16 @@ export function consoleApp(): App {
     return page(c, 'Week', (
       <>
         <div class="statgrid">
-          <div class="stat"><div class="n">{cur.aplicadas}/{goal}</div><div class="l">applied vs goal</div></div>
+          <div class="stat"><div class="n">{cur.applied}/{goal}</div><div class="l">applied vs goal</div></div>
           <div class="stat"><div class="n">{median ?? '—'}{median ? 'h' : ''}</div><div class="l">median time-to-apply (30d)</div></div>
           <div class="stat"><div class="n">{aging?.n ?? 0}</div><div class="l">stalled &gt;7d</div></div>
         </div>
         <div class="card">
-          <table>
+          <div class="table-wrap"><table>
             <tr><th>week</th><th>new</th><th>survivors</th><th>notified</th><th>applied</th><th>interviews</th></tr>
             {stagesRow('this', cur, maxVal)}
             {stagesRow('previous', prev, maxVal)}
-          </table>
+          </table></div>
         </div>
         <p class="muted">The Monday digest to Telegram summarizes these same numbers.</p>
       </>
@@ -731,10 +789,10 @@ export function consoleApp(): App {
             </form>
           </div>
         </div>
-        <table>
+        <div class="table-wrap"><table>
           <tr><th>job</th><th>score</th><th>before</th><th>after</th></tr>
           <tbody id="diffs" />
-        </table>
+        </table></div>
         <script dangerouslySetInnerHTML={{ __html: runner }} />
       </>
     ));
@@ -770,59 +828,105 @@ export function consoleApp(): App {
 
   // ---------- Bank ----------
   app.get('/blocks', async (c) => {
-    const rows = (
-      await c.env.DB.prepare(
-        'SELECT id, section, anchor_id, angle, status, es_status, tags, text_en FROM blocks ORDER BY section, anchor_id, id',
-      ).all<Record<string, string | null>>()
-    ).results;
-    if (rows.length === 0) {
+    const total = await c.env.DB.prepare('SELECT COUNT(*) n FROM blocks').first<{ n: number }>();
+    if ((total?.n ?? 0) === 0) {
       return page(c, 'Blocks bank', (
         <div class="card"><p>The bank is not yet seeded in the database (step 6 seeds).</p></div>
       ));
     }
-    const counts = {
-      total: rows.length,
-      approved: rows.filter((r) => r.status === 'approved').length,
-      esOk: rows.filter((r) => r.es_status === 'approved').length,
-    };
+    const q = c.req.query();
+    const where: string[] = ['1=1'];
+    const binds: unknown[] = [];
+    for (const f of ['section', 'anchor_id', 'angle', 'status', 'es_status'] as const) {
+      if (q[f]) { where.push(`${f} = ?`); binds.push(q[f]); }
+    }
+    // Filter option lists (distinct values)
+    const distinct = async (col: string) =>
+      (await c.env.DB.prepare(`SELECT DISTINCT ${col} v FROM blocks WHERE ${col} IS NOT NULL ORDER BY ${col}`).all<{ v: string }>())
+        .results.map((r) => r.v);
+    const [anchors, angles] = await Promise.all([distinct('anchor_id'), distinct('angle')]);
+
+    const counts = await c.env.DB.prepare(
+      "SELECT COUNT(*) total, SUM(status='approved') approved, SUM(es_status='approved') es_ok FROM blocks",
+    ).first<{ total: number; approved: number; es_ok: number }>();
+
+    const pg = pageNum(c);
+    const rows = (
+      await c.env.DB.prepare(
+        `SELECT id, section, anchor_id, angle, status, es_status, tags, text_en FROM blocks
+         WHERE ${where.join(' AND ')} ORDER BY section, anchor_id, id LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
+      ).bind(...binds).all<Record<string, string | null>>()
+    ).results;
+    const hasNext = rows.length > PAGE;
+    if (hasNext) rows.pop();
+
+    const sel = (name: string, opts: string[], current?: string) => (
+      <select name={name}>
+        <option value="">({name})</option>
+        {opts.map((o) => <option value={o} selected={o === current}>{o}</option>)}
+      </select>
+    );
+    // Group visible rows by section for readability
+    const bySection = new Map<string, typeof rows>();
+    for (const b of rows) {
+      const s = String(b.section);
+      if (!bySection.has(s)) bySection.set(s, []);
+      bySection.get(s)!.push(b);
+    }
+
     return page(c, 'Blocks bank', (
       <>
         <div class="statgrid">
-          <div class="stat"><div class="n">{counts.approved}/{counts.total}</div><div class="l">approved blocks</div></div>
-          <div class="stat"><div class="n">{counts.esOk}/{counts.total}</div><div class="l">ES parity approved</div></div>
+          <div class="stat"><div class="n">{counts?.approved ?? 0}/{counts?.total ?? 0}</div><div class="l">approved blocks</div></div>
+          <div class="stat"><div class="n">{counts?.es_ok ?? 0}/{counts?.total ?? 0}</div><div class="l">ES parity approved</div></div>
         </div>
+        <form method="get" action="/blocks" class="card actions">
+          {sel('section', ['summary', 'skills', 'experience', 'projects'], q.section)}
+          {sel('anchor_id', anchors, q.anchor_id)}
+          {sel('angle', angles, q.angle)}
+          {sel('status', ['draft', 'review', 'approved', 'retired'], q.status)}
+          {sel('es_status', ['missing', 'draft', 'approved'], q.es_status)}
+          <button type="submit" class="primary">Filter</button>
+          <a href="/blocks">Clear</a>
+        </form>
         <div class="card actions">
           <form class="inline" method="post" action="/blocks/approve-all">
             <button type="submit" class="primary">Approve the ENTIRE bank (EN + ES)</button>
           </form>
           <span class="muted">Light review: look at the SAMPLE CVs in /cvs; if they represent you, approve everything here.</span>
         </div>
-        <table>
-          <tr><th>id</th><th>section</th><th>angle</th><th>status</th><th>ES</th><th>text (EN)</th><th></th></tr>
-          {rows.map((b) => (
-            <tr>
-              <td class="muted">{b.id}</td>
-              <td>{b.section}</td>
-              <td>{b.angle ?? '—'}</td>
-              <td class={b.status === 'approved' ? 'ok' : 'warn'}>{b.status}</td>
-              <td class={b.es_status === 'approved' ? 'ok' : 'muted'}>{b.es_status}</td>
-              <td>{String(b.text_en ?? '').slice(0, 110)}…</td>
-              <td>
-                {b.status !== 'approved' ? (
-                  <form class="inline" method="post" action="/blocks/approve">
-                    <input type="hidden" name="id" value={String(b.id)} />
-                    <button type="submit">approve</button>
-                  </form>
-                ) : (
-                  <form class="inline" method="post" action="/blocks/retire">
-                    <input type="hidden" name="id" value={String(b.id)} />
-                    <button type="submit">retire</button>
-                  </form>
-                )}
-              </td>
-            </tr>
-          ))}
-        </table>
+        {[...bySection.entries()].map(([section, brows]) => (
+          <>
+            <h2>{section} ({brows.length})</h2>
+            <div class="table-wrap"><table>
+              <tr><th>id</th><th class="hide-sm">anchor</th><th class="hide-sm">angle</th><th>status</th><th>ES</th><th class="hide-sm">text (EN)</th><th></th></tr>
+              {brows.map((b) => (
+                <tr>
+                  <td class="muted">{b.id}</td>
+                  <td class="hide-sm muted">{b.anchor_id ?? '—'}</td>
+                  <td class="hide-sm">{b.angle ?? '—'}</td>
+                  <td class={b.status === 'approved' ? 'ok' : 'warn'}>{b.status}</td>
+                  <td class={b.es_status === 'approved' ? 'ok' : 'muted'}>{b.es_status}</td>
+                  <td class="hide-sm">{String(b.text_en ?? '').slice(0, 90)}…</td>
+                  <td>
+                    {b.status !== 'approved' ? (
+                      <form class="inline" method="post" action="/blocks/approve">
+                        <input type="hidden" name="id" value={String(b.id)} />
+                        <button type="submit">approve</button>
+                      </form>
+                    ) : (
+                      <form class="inline" method="post" action="/blocks/retire">
+                        <input type="hidden" name="id" value={String(b.id)} />
+                        <button type="submit">retire</button>
+                      </form>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </table></div>
+          </>
+        ))}
+        {pager('/blocks', pg, hasNext, { section: q.section, anchor_id: q.anchor_id, angle: q.angle, status: q.status, es_status: q.es_status })}
       </>
     ));
   });
@@ -884,7 +988,7 @@ export function consoleApp(): App {
           <button type="submit" class="primary">Generate (uses draft blocks — review only)</button>
         </form>
         {cvs.length === 0 ? <div class="card"><p>No CVs generated yet.</p></div> : (
-          <table>
+          <div class="table-wrap"><table>
             <tr><th>#</th><th>job</th><th>language</th><th>type</th><th>doc</th><th>selection</th><th>verifier tweaks</th><th>date</th></tr>
             {cvs.map((v) => (
               <tr>
@@ -898,7 +1002,7 @@ export function consoleApp(): App {
                 <td class="muted">{fmt(String(v.created_at))}</td>
               </tr>
             ))}
-          </table>
+          </table></div>
         )}
       </>
     ));
@@ -924,12 +1028,15 @@ export function consoleApp(): App {
   });
 
   // ---------- Health ----------
-  app.get('/salud', async (c) => {
+  app.get('/health', async (c) => {
+    const pg = pageNum(c);
     const runs = (
       await c.env.DB.prepare(
-        'SELECT id, started_at, status, trigger, duration_ms, companies_ok, companies_fail, jobs_seen, jobs_new, survivors, notified, closed, subrequests, d1_reads, d1_writes, errors FROM runs ORDER BY id DESC LIMIT 30',
+        `SELECT id, started_at, status, trigger, duration_ms, companies_ok, companies_fail, jobs_seen, jobs_new, survivors, notified, closed, subrequests, d1_reads, d1_writes, errors FROM runs ORDER BY id DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
       ).all<Record<string, string | number | null>>()
     ).results;
+    const runsHasNext = runs.length > PAGE;
+    if (runsHasNext) runs.pop();
     const events = (
       await c.env.DB.prepare(
         'SELECT ts, type, severity, detail FROM events ORDER BY id DESC LIMIT 20',
@@ -947,30 +1054,35 @@ export function consoleApp(): App {
           <div class="stat"><div class="n">{today?.writes ?? 0}</div><div class="l">D1 writes today (limit 100k)</div></div>
           <div class="stat"><div class="n">{today?.reads ?? 0}</div><div class="l">D1 reads today (limit 5M)</div></div>
         </div>
-        <table>
-          <tr><th>run</th><th>start</th><th>status</th><th>ms</th><th>companies</th><th>seen</th><th>new</th><th>surv.</th><th>notif.</th><th>closed</th><th>subreq</th><th>errors</th></tr>
+        <div class="table-wrap"><table>
+          <tr><th>run</th><th>start</th><th>status</th><th class="hide-sm">ms</th><th>companies</th><th class="hide-sm">seen</th><th class="hide-sm">new</th><th>surv.</th><th>notif.</th><th class="hide-sm">closed</th><th class="hide-sm">subreq</th><th>errors</th></tr>
           {runs.map((r) => (
             <tr>
               <td>{r.id} <span class="muted">{r.trigger}</span></td>
               <td class="muted">{fmt(String(r.started_at))}</td>
               <td class={r.status === 'ok' ? 'ok' : r.status === 'running' ? 'muted' : 'bad'}>{r.status}</td>
-              <td>{r.duration_ms ?? '—'}</td>
+              <td class="hide-sm">{r.duration_ms ?? '—'}</td>
               <td>{r.companies_ok}/{Number(r.companies_ok) + Number(r.companies_fail)}</td>
-              <td>{r.jobs_seen}</td><td>{r.jobs_new}</td><td>{r.survivors}</td>
-              <td>{r.notified}</td><td>{r.closed}</td><td>{r.subrequests}</td>
+              <td class="hide-sm">{r.jobs_seen}</td><td class="hide-sm">{r.jobs_new}</td><td>{r.survivors}</td>
+              <td>{r.notified}</td><td class="hide-sm">{r.closed}</td><td class="hide-sm">{r.subrequests}</td>
               <td class={Number(r.errors) > 0 ? 'bad' : ''}>{r.errors}</td>
             </tr>
           ))}
-        </table>
+        </table></div>
+        {pager('/health', pg, runsHasNext, {})}
         <h2>Recent events</h2>
         {events.length === 0 ? <p class="muted">no events</p> : (
-          <table>{events.map((e) => (
+          <div class="table-wrap"><table>{events.map((e) => (
             <tr><td class="muted">{fmt(e.ts)}</td><td class={e.severity === 'error' ? 'bad' : e.severity === 'warn' ? 'warn' : ''}>{e.type}</td><td class="muted">{e.detail}</td></tr>
-          ))}</table>
+          ))}</table></div>
         )}
       </>
     ));
   });
+
+  // Redirects from the old Spanish routes (bookmarks)
+  app.get('/semana', (c) => c.redirect('/week'));
+  app.get('/salud', (c) => c.redirect('/health'));
 
   return app;
 }
