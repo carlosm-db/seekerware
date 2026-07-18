@@ -6,7 +6,7 @@ import type { Child } from 'hono/jsx';
 import { Layout, type FooterStatus } from './layout';
 import { authMiddleware, createSession, setSessionCookie, verifyPassword, type ConsoleEnv } from './auth';
 import { validateScoringConfig } from '../config-store';
-import { SECTIONS, SKCATS, newBlockId, normalizeBlockInput } from './blocks-form';
+import { SKCATS, newBlockId, normalizeBlockInput } from './blocks-form';
 import { fmtDates, normalizeMonth, tokensOfRole, validateRoleCode } from './roles';
 import {
   applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES, parseMeta,
@@ -48,14 +48,11 @@ export function consoleApp(): App {
     );
   }
 
-  // ---------- Bank add/edit shared bits (docs/UI.md §2) ----------
+  // ---------- Bank shared bits (docs/UI.md §2; v4 2026-07-18: LinkedIn-style
+  // collapsible cards, edit-in-place, saving IS the approval) ----------
   type AnchorOpt = {
     id: string; company: string | null; kind: string;
     title: string | null; date_from: string | null; date_to: string | null;
-  };
-  type BlockEdit = {
-    section?: string | null; anchor_id?: string | null; skcat?: string | null;
-    text_en?: string | null; text_es?: string | null; tags?: string | null;
   };
   // Newest role first: current (date_to NULL), then by end date, then start date.
   const ANCHOR_ORDER = 'kind, (date_to IS NULL) DESC, date_to DESC, date_from DESC, id';
@@ -63,36 +60,6 @@ export function consoleApp(): App {
     (await env.DB.prepare(
       `SELECT id, company, kind, title, date_from, date_to FROM anchors WHERE status = 'active' ORDER BY ${ANCHOR_ORDER}`,
     ).all<AnchorOpt>()).results;
-  /** Language pill state → CSS class (EN · draft / ES · approved …). */
-  const pillClass = (s: string | null | undefined) =>
-    s === 'approved' ? 'approved' : s === 'retired' ? 'retired' : s === 'missing' ? 'missing' : 'draft';
-
-  /** Shared field set for the add (b undefined) and edit (b prefilled) block forms. */
-  function blockFields(anchors: AnchorOpt[], b?: BlockEdit) {
-    return (
-      <div class="formgrid">
-        <div class="field f-section"><label>Section</label>
-          <select name="section" required>
-            {SECTIONS.map((s) => <option value={s} selected={b?.section === s}>{s}</option>)}
-          </select></div>
-        <div class="field f-anchor"><label>Which role? (experience &amp; projects)</label>
-          <select name="anchor_id">
-            <option value="" selected={!b?.anchor_id}>(none)</option>
-            {anchors.map((a) => <option value={a.id} selected={b?.anchor_id === a.id}>{a.company ?? a.id} ({a.id})</option>)}
-          </select></div>
-        <div class="field f-cat"><label>Category (skills only)</label>
-          <select name="skcat">
-            <option value="" selected={!b?.skcat}>(none)</option>
-            {SKCATS.map((k) => <option value={k} selected={b?.skcat === k}>{k}</option>)}
-          </select></div>
-        <div class="field f-en"><label>Text — English (required)</label>
-          <textarea name="text_en" required>{b?.text_en ?? ''}</textarea></div>
-        <div class="field f-es"><label>Text — Spanish (required)</label>
-          <textarea name="text_es" required>{b?.text_es ?? ''}</textarea></div>
-        <input type="hidden" name="tags" value={b?.tags ?? ''} />
-      </div>
-    );
-  }
 
   async function footer(env: ConsoleEnv): Promise<FooterStatus> {
     const r = await env.DB.prepare(
@@ -1233,244 +1200,190 @@ export function consoleApp(): App {
     return c.redirect(`/config?m=${encodeURIComponent(`reverted: ${row.key}`)}`);
   });
 
-  // ---------- Bank (role-centric, phone-first — 2026-07-18 rebuild;
-  // career-shaped v3.3 redesign same day: identity headers with title/dates,
-  // per-bullet approval ONLY, EN+ES always, control-language buttons) ----------
+  // ---------- Bank (v4 2026-07-18, LinkedIn-inspired): collapsed role cards,
+  // tap to open, one pencil per item editing in place, EN+ES always, saving IS
+  // the approval — no draft/approve cycle. Editor state is server-rendered via
+  // query params (?edit=<block> / ?editrole=<code> / ?add=<key> / ?addrole=1).
 
   app.get('/blocks', async (c) => {
-    const anchorsAll = (
-      await c.env.DB.prepare(
-        `SELECT id, company, kind, status, title, date_from, date_to FROM anchors ORDER BY ${ANCHOR_ORDER}`,
-      ).all<AnchorOpt & { status: string }>()
-    ).results;
-    const activeAnchors = anchorsAll.filter((a) => a.status === 'active');
-    const retiredAnchors = anchorsAll.filter((a) => a.status === 'retired');
-
+    const q = c.req.query();
+    const anchors = await fetchAnchors(c.env);
     const rows = (
       await c.env.DB.prepare(
-        `SELECT id, section, anchor_id, skcat, status, es_status, text_en, text_es FROM blocks
-         ORDER BY section, anchor_id, id`,
+        `SELECT id, section, anchor_id, skcat, tags, text_en, text_es FROM blocks
+         WHERE status != 'retired' ORDER BY section, anchor_id, id`,
       ).all<Record<string, string | null>>()
     ).results;
+    const roleCount = anchors.filter((a) => a.kind === 'role').length;
 
-    const counts = await c.env.DB.prepare(
-      "SELECT COUNT(*) total, SUM(status='approved') approved FROM blocks",
-    ).first<{ total: number; approved: number }>();
-
-    /** Approve covers whatever is still pending; label names the pending side. */
-    const approveLabel = (b: Record<string, string | null>) => {
-      const en = b.status === 'approved';
-      const es = b.es_status === 'approved';
-      if (en && es) return null;
-      if (en) return 'Approve ES';
-      if (es) return 'Approve EN';
-      return 'Approve';
-    };
-
-    /** One bullet: language+state fused in ONE pill per line; buttons below. */
-    const bullet = (b: Record<string, string | null>) => (
-      <div class="bullet">
-        <div><span class={`pill ${pillClass(b.status)}`}>EN · {b.status}</span>{b.text_en}</div>
-        <div class="es"><span class={`pill ${pillClass(b.es_status)}`}>ES · {b.es_status}</span>{b.text_es}</div>
-        <div class="actions" style="margin-top:6px">
-          {approveLabel(b) ? (
-            <form class="inline" method="post" action="/blocks/approve">
-              <input type="hidden" name="id" value={String(b.id)} />
-              <button type="submit" class="primary">{approveLabel(b)}</button>
-            </form>
-          ) : null}
-          <a class="btnlike" href={`/blocks/edit?id=${encodeURIComponent(String(b.id))}`}>Edit</a>
+    /** In-place editor for one existing bullet (?edit=<id>). */
+    const editPane = (b: Record<string, string | null>) => (
+      <div class="editpane">
+        <form method="post" action="/blocks/update" id={`bf-${b.id}`}>
+          <input type="hidden" name="id" value={String(b.id)} />
+          <input type="hidden" name="section" value={String(b.section)} />
+          <input type="hidden" name="anchor_id" value={String(b.anchor_id ?? '')} />
+          <input type="hidden" name="skcat" value={String(b.skcat ?? '')} />
+          <input type="hidden" name="tags" value={String(b.tags ?? '')} />
+          <div class="field"><label>Text — English (required)</label><textarea name="text_en" required>{b.text_en}</textarea></div>
+          <div class="field"><label>Text — Español (required)</label><textarea name="text_es" required>{b.text_es}</textarea></div>
+        </form>
+        <div class="rowactions">
+          <button type="submit" form={`bf-${b.id}`} class="primary">Save</button>
+          <a class="btnlike" href="/blocks">Cancel</a>
+          <span class="spacer" />
+          <form class="inline" method="post" action="/blocks/delete"
+            onsubmit="return confirm('Delete this bullet permanently? This cannot be undone.')">
+            <input type="hidden" name="id" value={String(b.id)} />
+            <button type="submit">Delete bullet</button>
+          </form>
         </div>
       </div>
     );
 
-    /** Contextual add: role/category implied by placement — EN + ES, both required. */
-    const miniAdd = (label: string, hidden: Record<string, string>) => (
-      <details class="btnlike sec">
-        <summary>＋ {label}</summary>
-        <form method="post" action="/blocks/create" class="panel">
+    /** One responsibility: EN + ES with its pencil — or its open editor. */
+    const bulletRow = (b: Record<string, string | null>) =>
+      q.edit === b.id ? editPane(b) : (
+        <div class="b-row">
+          <div class="b-text">{b.text_en}<div class="es">{b.text_es}</div></div>
+          <a class="pencil" href={`/blocks?edit=${encodeURIComponent(String(b.id))}`} title="Edit bullet">✏️</a>
+        </div>
+      );
+
+    /** In-place add form (?add=<key>): EN + ES, both required. */
+    const addPane = (hidden: Record<string, string>) => (
+      <div class="editpane">
+        <form method="post" action="/blocks/create">
           {Object.entries(hidden).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
           <div class="field"><label>Text — English (required)</label><textarea name="text_en" required /></div>
-          <div class="field"><label>Text — Spanish (required)</label><textarea name="text_es" required /></div>
-          <div class="actions"><button type="submit" class="primary">Add as draft</button></div>
-        </form>
-      </details>
-    );
-
-    const monthField = (label: string, name: string, value?: string | null) => (
-      <div class="field"><label>{label}</label>
-        <input type="month" name={name} value={value ?? ''} /></div>
-    );
-
-    const roleCard = (a: AnchorOpt) => {
-      const section = a.kind === 'role' ? 'experience' : 'projects';
-      const bl = rows.filter((r) => r.anchor_id === a.id && r.section === section);
-      const approved = bl.filter((r) => r.status === 'approved').length;
-      const dates = fmtDates(a.date_from, a.date_to);
-      return (
-        <div class="card">
-          <div class="rolehead">
-            <span class="rtitle">{a.title ?? a.company ?? a.id}</span>
-            {a.title && a.company ? <span class="muted">{a.company}</span> : null}
-            <span class="rdates">{dates || 'no dates yet'}</span>
-            <span class="chip">{a.id}</span>
-            <span class="muted">{approved}/{bl.length} approved</span>
-            <details class="btnlike">
-              <summary>Edit role</summary>
-              <form method="post" action="/roles/update" class="panel">
-                <input type="hidden" name="id" value={a.id} />
-                <div class="field"><label>Role title</label>
-                  <input type="text" name="title" value={a.title ?? ''} /></div>
-                <div class="field"><label>Company / name</label>
-                  <input type="text" name="company" value={a.company ?? ''} /></div>
-                {monthField('From', 'date_from', a.date_from)}
-                {monthField('To (empty = current role)', 'date_to', a.date_to)}
-                <div class="field"><label>Code — template-coupled; a rename verifies the Doc first</label>
-                  <input type="text" name="new_code" placeholder={a.id} style="max-width:140px" /></div>
-                <div class="actions"><button type="submit" class="primary">Save role</button></div>
-              </form>
-              <form method="post" action="/roles/retire" class="inline"
-                onsubmit="return confirm('Retire this role? Its bullets stay but the role leaves CV selection. Reactivate anytime.')">
-                <input type="hidden" name="id" value={a.id} />
-                <button type="submit">Retire role</button>
-              </form>
-            </details>
+          <div class="field"><label>Text — Español (required)</label><textarea name="text_es" required /></div>
+          <div class="rowactions">
+            <button type="submit" class="primary">Save</button>
+            <a class="btnlike" href="/blocks">Cancel</a>
           </div>
-          {bl.length === 0 ? <p class="muted">no bullets yet — add the first one</p> : bl.map(bullet)}
-          <div style="margin-top:8px">{miniAdd('Add bullet', { section, anchor_id: a.id, tags: '' })}</div>
+        </form>
+      </div>
+    );
+    const addButton = (key: string, label: string) => (
+      <a class="btnlike sec" href={`/blocks?add=${encodeURIComponent(key)}`}>＋ {label}</a>
+    );
+
+    /** LinkedIn-style role setup (a = existing role; null = create). */
+    const roleEditor = (a: AnchorOpt | null) => {
+      const fid = a ? `rf-${a.id}` : 'rf-new';
+      return (
+        <div class="editpane">
+          <form method="post" action={a ? '/roles/update' : '/roles/create'} id={fid}>
+            {a ? <input type="hidden" name="id" value={a.id} /> : null}
+            <div class="fields2">
+              <div class="fld grow"><label>Title</label><input type="text" name="title" value={a?.title ?? ''} /></div>
+              <div class="fld grow"><label>Company / name{a ? '' : ' (required)'}</label>
+                <input type="text" name="company" value={a?.company ?? ''} required={!a} /></div>
+              <div class="fld w-sm"><label>From</label><input type="month" name="date_from" value={a?.date_from ?? ''} /></div>
+              <div class="fld w-sm"><label>To</label>
+                <input type="month" name="date_to" value={a?.date_to ?? ''} disabled={!!a && !a.date_to && !!a.date_from} /></div>
+            </div>
+            <label class="chk"><input type="checkbox" name="current" checked={!!a && !a.date_to && !!a.date_from}
+              onchange="this.form.elements.date_to.disabled=this.checked; if(this.checked) this.form.elements.date_to.value=''" />
+              I currently work here</label>
+            <div class="fields2">
+              {a ? (
+                <div class="fld w-sm"><label>Code (template-coupled)</label>
+                  <input type="text" name="new_code" placeholder={a.id} /></div>
+              ) : (
+                <>
+                  <div class="fld w-sm"><label>Code — e.g. TD1 (required)</label><input type="text" name="code" required /></div>
+                  <div class="fld"><label>Type</label>
+                    <select name="kind"><option value="role">job / role</option><option value="project">project</option></select></div>
+                </>
+              )}
+            </div>
+          </form>
+          <div class="rowactions">
+            <button type="submit" form={fid} class="primary">{a ? 'Save role' : 'Add role'}</button>
+            <a class="btnlike" href="/blocks">Cancel</a>
+            {a ? (
+              <>
+                <span class="spacer" />
+                <form class="inline" method="post" action="/roles/delete"
+                  onsubmit={`return confirm('Delete role ${a.id} AND all its bullets permanently? This cannot be undone.')`}>
+                  <input type="hidden" name="id" value={a.id} />
+                  <button type="submit">Delete role</button>
+                </form>
+              </>
+            ) : null}
+          </div>
         </div>
       );
     };
 
-    const skillsOf = (cat: string) => rows.filter((r) => r.section === 'skills' && r.skcat === cat);
+    const roleCard = (a: AnchorOpt) => {
+      const section = a.kind === 'role' ? 'experience' : 'projects';
+      const bl = rows.filter((r) => r.anchor_id === a.id && r.section === section);
+      const dates = fmtDates(a.date_from, a.date_to);
+      const isOpen = q.editrole === a.id || q.add === a.id || bl.some((r) => r.id === q.edit);
+      return (
+        <details class="rc" open={isOpen}>
+          <summary class="rc-head">
+            <span class="caret" />
+            <span class="rc-title">{a.title ?? a.company ?? a.id}</span>
+            {a.title && a.company ? <span class="rc-sub">{a.company}</span> : null}
+            {dates ? <span class="rc-dates">{dates}</span> : null}
+            <span class="rc-meta">{bl.length} bullets · <span class="chip">{a.id}</span>
+              <a class="pencil" href={`/blocks?editrole=${encodeURIComponent(a.id)}`} title="Edit role">✏️</a>
+            </span>
+          </summary>
+          <div class="rc-body">
+            {q.editrole === a.id ? roleEditor(a) : null}
+            {bl.length === 0 && q.add !== a.id ? <p class="muted">no bullets yet — add the first one</p> : bl.map(bulletRow)}
+            {q.add === a.id ? addPane({ section, anchor_id: a.id, tags: '' })
+              : <div style="margin-top:10px">{addButton(a.id, 'Add bullet')}</div>}
+          </div>
+        </details>
+      );
+    };
+
     const summaryRows = rows.filter((r) => r.section === 'summary');
-    const expCount = rows.filter((r) => r.section === 'experience').length;
-    const prjCount = rows.filter((r) => r.section === 'projects').length;
-    const sklCount = rows.filter((r) => r.section === 'skills').length;
 
     return page(c, 'Blocks bank', (
       <>
         <div class="actions" style="margin-bottom:12px">
-          <span><strong>{counts?.approved ?? 0}/{counts?.total ?? 0}</strong> <span class="muted">bullets approved</span></span>
-          <details class="btnlike sec">
-            <summary>＋ Add role</summary>
-            <form method="post" action="/roles/create" class="panel">
-              <div class="field"><label>Role title</label><input type="text" name="title" /></div>
-              <div class="field"><label>Company / name (required)</label><input type="text" name="company" required /></div>
-              <div class="field"><label>Short code — uppercase, e.g. TD1 (also goes in your CV template as {'{{CODE}}'}R1…)</label>
-                <input type="text" name="code" required style="max-width:160px" /></div>
-              <div class="field"><label>Type</label>
-                <select name="kind"><option value="role">job / role</option><option value="project">project</option></select></div>
-              {monthField('From', 'date_from')}
-              {monthField('To (empty = current role)', 'date_to')}
-              <div class="actions"><button type="submit" class="primary">Add role</button></div>
-            </form>
-          </details>
+          <span><strong>{rows.length}</strong> <span class="muted">bullets</span> · <strong>{roleCount}</strong> <span class="muted">roles</span></span>
+          <a class="btnlike sec" href="/blocks?addrole=1">＋ Add role</a>
           <a href="/blocks/template-check">Check template ↗</a>
         </div>
+        {q.addrole ? <div class="card">{roleEditor(null)}</div> : null}
 
-        <h2>My roles ({expCount} bullets)</h2>
-        {activeAnchors.filter((a) => a.kind === 'role').map(roleCard)}
-        {retiredAnchors.length > 0 ? (
-          <details class="card">
-            <summary class="muted">Retired roles ({retiredAnchors.length})</summary>
-            {retiredAnchors.map((a) => (
-              <div class="actions" style="margin-top:6px">
-                <span>{a.title ?? a.company ?? a.id}</span> <span class="chip">{a.id}</span>
-                <form class="inline" method="post" action="/roles/reactivate">
-                  <input type="hidden" name="id" value={a.id} />
-                  <button type="submit">Reactivate</button>
-                </form>
-              </div>
-            ))}
-          </details>
-        ) : null}
+        <h2>My roles <span class="muted" style="font-weight:400">— newest first, tap to open</span></h2>
+        {anchors.filter((a) => a.kind === 'role').map(roleCard)}
 
-        <h2>My projects ({prjCount} bullets)</h2>
-        {activeAnchors.filter((a) => a.kind === 'project').map(roleCard)}
+        <h2>My projects</h2>
+        {anchors.filter((a) => a.kind === 'project').map(roleCard)}
         <p class="muted">Projects are static text in the CV template for now — these bullets are kept for the future project-tailoring option.</p>
 
-        <h2>My skills ({sklCount})</h2>
+        <h2>My skills</h2>
         {SKCATS.map((cat) => {
-          const items = skillsOf(cat);
+          const items = rows.filter((r) => r.section === 'skills' && r.skcat === cat);
+          const key = `skl-${cat}`;
           return (
             <div class="card">
               <div class="actions">
                 <strong style="text-transform:capitalize">{cat}</strong>
                 <span class="muted">{items.length} items</span>
               </div>
-              {items.length === 0 ? <p class="muted">none yet</p> : items.map(bullet)}
-              <div style="margin-top:8px">{miniAdd(`Add ${cat} skill`, { section: 'skills', skcat: cat, tags: '' })}</div>
+              {items.length === 0 && q.add !== key ? <p class="muted">none yet</p> : items.map(bulletRow)}
+              {q.add === key ? addPane({ section: 'skills', skcat: cat, tags: '' })
+                : <div style="margin-top:10px">{addButton(key, `Add ${cat} skill`)}</div>}
             </div>
           );
         })}
 
-        <h2>My summary ({summaryRows.length} lines)</h2>
+        <h2>My summary</h2>
         <div class="card">
           <p class="muted">the opening bullets of every CV — the AI picks the best ones per job</p>
-          {summaryRows.length === 0 ? <p class="muted">none yet</p> : summaryRows.map(bullet)}
-          <div style="margin-top:8px">{miniAdd('Add summary line', { section: 'summary', tags: '' })}</div>
-        </div>
-      </>
-    ));
-  });
-
-  app.post('/blocks/approve', async (c) => {
-    const b = await c.req.parseBody();
-    await c.env.DB.prepare(
-      "UPDATE blocks SET status='approved', es_status = CASE WHEN text_es IS NOT NULL THEN 'approved' ELSE es_status END, updated_at=? WHERE id=?",
-    ).bind(now(), String(b.id)).run();
-    return c.redirect('/blocks?m=approved');
-  });
-
-  app.post('/blocks/retire', async (c) => {
-    const b = await c.req.parseBody();
-    await c.env.DB.prepare("UPDATE blocks SET status='retired', updated_at=? WHERE id=?")
-      .bind(now(), String(b.id)).run();
-    return c.redirect('/blocks?m=retired (kept, not deleted)');
-  });
-
-  app.get('/blocks/edit', async (c) => {
-    const id = c.req.query('id') ?? '';
-    const b = await c.env.DB.prepare(
-      'SELECT id, section, anchor_id, skcat, text_en, text_es, es_status, tags, status FROM blocks WHERE id = ?',
-    ).bind(id).first<Record<string, string | null>>();
-    if (!b) return c.redirect('/blocks?m=block not found');
-    const anchors = await fetchAnchors(c.env);
-    const role = b.anchor_id ? anchors.find((a) => a.id === b.anchor_id) : undefined;
-    return page(c, 'Edit block', (
-      <>
-        <p>
-          <span class={`pill ${pillClass(b.status)}`}>EN · {String(b.status)}</span>{' '}
-          <span class={`pill ${pillClass(b.es_status)}`}>ES · {String(b.es_status)}</span>{' '}
-          <strong>{String(b.section)}</strong>
-          {role ? <span> · {role.title ?? role.company ?? role.id}</span> : null}
-          <span class="muted"> · {String(b.id)}</span>
-        </p>
-        <form method="post" action="/blocks/update" class="card">
-          <input type="hidden" name="id" value={String(b.id)} />
-          {blockFields(anchors, b)}
-          <div class="actions">
-            <button type="submit" class="primary">Save changes</button>
-            <a href="/blocks">Cancel</a>
-          </div>
-        </form>
-        <div class="card actions">
-          {b.status !== 'approved' ? (
-            <form class="inline" method="post" action="/blocks/approve">
-              <input type="hidden" name="id" value={String(b.id)} />
-              <button type="submit">Approve</button>
-            </form>
-          ) : (
-            <form class="inline" method="post" action="/blocks/retire">
-              <input type="hidden" name="id" value={String(b.id)} />
-              <button type="submit">Retire (keep record)</button>
-            </form>
-          )}
-          <form class="inline" method="post" action="/blocks/delete" onsubmit="return confirm('Delete this block permanently? This cannot be undone.')">
-            <input type="hidden" name="id" value={String(b.id)} />
-            <button type="submit" class="danger">Delete permanently</button>
-          </form>
+          {summaryRows.length === 0 && q.add !== 'sum' ? <p class="muted">none yet</p> : summaryRows.map(bulletRow)}
+          {q.add === 'sum' ? addPane({ section: 'summary', tags: '' })
+            : <div style="margin-top:10px">{addButton('sum', 'Add summary line')}</div>}
         </div>
       </>
     ));
@@ -1482,43 +1395,38 @@ export function consoleApp(): App {
     if ('error' in n) return c.redirect(`/blocks?m=${encodeURIComponent(`add failed: ${n.error}`)}`);
     const id = newBlockId(n.section);
     try {
+      // Saving IS the approval (bank v4): owner-authored content enters live.
       await c.env.DB.prepare(
         `INSERT INTO blocks (id, section, anchor_id, skcat, text_en, text_es, es_status, tags, status, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,'draft',?)`,
-      ).bind(id, n.section, n.anchor_id, n.skcat, n.text_en, n.text_es, n.es_status, n.tags, now()).run();
+         VALUES (?,?,?,?,?,?,'approved',?,'approved',?)`,
+      ).bind(id, n.section, n.anchor_id, n.skcat, n.text_en, n.text_es, n.tags, now()).run();
     } catch (err) {
       return c.redirect(`/blocks?m=${encodeURIComponent(`add failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
     }
-    return c.redirect(`/blocks?m=${encodeURIComponent('added (draft)')}`);
+    return c.redirect(`/blocks?m=${encodeURIComponent('saved')}`);
   });
 
   app.post('/blocks/update', async (c) => {
     const body = await c.req.parseBody();
     const id = String(body.id ?? '');
     const n = normalizeBlockInput(body);
-    if ('error' in n) return c.redirect(`/blocks/edit?id=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${n.error}`)}`);
-    const old = await c.env.DB.prepare('SELECT text_en, text_es, status, es_status, tags FROM blocks WHERE id = ?')
-      .bind(id).first<{ text_en: string | null; text_es: string | null; status: string; es_status: string; tags: string | null }>();
-    if (!old) return c.redirect('/blocks?m=block not found');
-    // Language-symmetric approval (2026-07-18 audit): editing one language
-    // never silently un-approves the other. Each language re-drafts only when
-    // ITS text actually changed. (text_es can no longer be emptied — EN+ES rule.)
-    const status = n.text_en !== (old.text_en ?? '') ? 'draft' : old.status;
-    const esStatus = n.text_es === (old.text_es ?? '') ? old.es_status : 'draft';
+    if ('error' in n) return c.redirect(`/blocks?edit=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${n.error}`)}`);
     try {
-      await c.env.DB.prepare(
-        `UPDATE blocks SET section=?, anchor_id=?, skcat=?, text_en=?, text_es=?, es_status=?, tags=?, status=?, updated_at=? WHERE id=?`,
-      ).bind(n.section, n.anchor_id, n.skcat, n.text_en, n.text_es, esStatus, n.tags || (old.tags ?? ''), status, now(), id).run();
+      const r = await c.env.DB.prepare(
+        `UPDATE blocks SET section=?, anchor_id=?, skcat=?, text_en=?, text_es=?,
+           es_status='approved', tags=?, status='approved', updated_at=? WHERE id=?`,
+      ).bind(n.section, n.anchor_id, n.skcat, n.text_en, n.text_es, n.tags, now(), id).run();
+      if (!r.meta.changes) return c.redirect('/blocks?m=block not found');
     } catch (err) {
-      return c.redirect(`/blocks/edit?id=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
+      return c.redirect(`/blocks?edit=${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
     }
-    return c.redirect('/blocks?m=block updated');
+    return c.redirect('/blocks?m=saved');
   });
 
   app.post('/blocks/delete', async (c) => {
     const b = await c.req.parseBody();
     await c.env.DB.prepare('DELETE FROM blocks WHERE id = ?').bind(String(b.id ?? '')).run();
-    return c.redirect('/blocks?m=block deleted permanently');
+    return c.redirect('/blocks?m=bullet deleted');
   });
 
   // ---------- Roles (anchors) — the missing write path (2026-07-18) ----------
@@ -1529,7 +1437,8 @@ export function consoleApp(): App {
     const company = String(b.company ?? '').trim();
     const title = String(b.title ?? '').trim() || null;
     const dateFrom = normalizeMonth(String(b.date_from ?? ''));
-    const dateTo = normalizeMonth(String(b.date_to ?? ''));
+    // "I currently work here" wins over any stale To value.
+    const dateTo = b.current != null ? null : normalizeMonth(String(b.date_to ?? ''));
     if (!company) return c.redirect('/blocks?m=add role failed: company/name is required');
     const existing = ((await c.env.DB.prepare('SELECT id FROM anchors').all<{ id: string }>()).results).map((a) => a.id);
     const err = validateRoleCode(code, existing);
@@ -1548,7 +1457,8 @@ export function consoleApp(): App {
     const company = String(b.company ?? '').trim();
     const title = String(b.title ?? '').trim() || null;
     const dateFrom = normalizeMonth(String(b.date_from ?? ''));
-    const dateTo = normalizeMonth(String(b.date_to ?? ''));
+    // "I currently work here" wins over any stale To value.
+    const dateTo = b.current != null ? null : normalizeMonth(String(b.date_to ?? ''));
     const newCode = String(b.new_code ?? '').trim().toUpperCase();
     const row = await c.env.DB.prepare('SELECT id, kind, company FROM anchors WHERE id = ?')
       .bind(id).first<{ id: string; kind: string; company: string | null }>();
@@ -1590,18 +1500,19 @@ export function consoleApp(): App {
     return c.redirect(`/blocks?m=${encodeURIComponent(`role renamed ${id} → ${newCode} (bullets repointed)`)}`);
   });
 
-  app.post('/roles/retire', async (c) => {
+  // Hard delete, LinkedIn-style (owner decision 2026-07-18): the role AND its
+  // bullets go, permanently. The confirm dialog names both consequences.
+  app.post('/roles/delete', async (c) => {
     const b = await c.req.parseBody();
-    await c.env.DB.prepare("UPDATE anchors SET status='retired', retired_at=? WHERE id=?")
-      .bind(now(), String(b.id ?? '')).run();
-    return c.redirect('/blocks?m=role retired (kept for history — reactivate anytime)');
-  });
-
-  app.post('/roles/reactivate', async (c) => {
-    const b = await c.req.parseBody();
-    await c.env.DB.prepare("UPDATE anchors SET status='active', retired_at=NULL WHERE id=?")
-      .bind(String(b.id ?? '')).run();
-    return c.redirect('/blocks?m=role reactivated');
+    const id = String(b.id ?? '');
+    if (!id) return c.redirect('/blocks?m=role not found');
+    await c.env.DB.batch([
+      c.env.DB.prepare('DELETE FROM blocks WHERE anchor_id = ?').bind(id),
+      c.env.DB.prepare('DELETE FROM anchors WHERE id = ?').bind(id),
+    ]);
+    return c.redirect(`/blocks?m=${encodeURIComponent(
+      `role ${id} and its bullets deleted — remove its {{${id}R…}} lines from the CV template Doc and run Check template`,
+    )}`);
   });
 
   // ---------- Check template: bank ↔ Google Doc contract, both directions ----------
@@ -1699,47 +1610,21 @@ export function consoleApp(): App {
     ));
   });
 
-  // Generate CV — lives ON the job (2026-07-18: pickers were backwards).
-  // Approved bank -> queue a REAL build; unapproved -> render a SAMPLE now.
+  // Generate CV — lives ON the job. Bank v4 (2026-07-18): everything saved is
+  // live, so there is no SAMPLE mode anymore — this always queues a REAL build
+  // (picked up by the next pipeline run; force one via POST /api/run).
   app.post('/jobs/:hash/cv', async (c) => {
     const hash = c.req.param('hash');
     const b = await c.req.parseBody();
     const back = String(b.back ?? '') === 'today' ? '/' : `/jobs/${hash}`;
     const j = await c.env.DB.prepare(
-      `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, j.status, co.name company
-       FROM jobs j JOIN companies co ON co.id = j.company_id WHERE j.url_hash = ?`,
-    ).bind(hash).first<Record<string, string | null>>();
-    if (!j || !['new', 'notified'].includes(String(j.status))) {
+      'SELECT url_hash, status FROM jobs WHERE url_hash = ?',
+    ).bind(hash).first<{ url_hash: string; status: string }>();
+    if (!j || !['new', 'notified'].includes(j.status)) {
       return c.redirect(`${back}?m=job not found or closed`);
     }
-    const approved = await c.env.DB.prepare("SELECT COUNT(*) n FROM blocks WHERE status='approved'").first<{ n: number }>();
-    if ((approved?.n ?? 0) > 0) {
-      await c.env.DB.prepare('UPDATE jobs SET cv_pending = 1 WHERE url_hash = ?').bind(hash).run();
-      return c.redirect(`${back}?m=${encodeURIComponent('REAL CV queued — the next pipeline run builds it from your approved bank')}`);
-    }
-    // Bank not approved yet: build a SAMPLE right now so the owner can judge.
-    const { generateCv } = await import('../ia/cv_factory');
-    const fx = await generateCv(c.env, {
-      id: String(j.ext_id ?? ''), company: String(j.company), title: String(j.title),
-      location: String(j.location ?? ''), url: String(j.url), description: String(j.description_text ?? ''),
-      posted_at: null, ats: (j.ats ?? 'greenhouse') as 'greenhouse', raw: null,
-      url_hash: hash, track: j.track ?? null,
-    }, 'en', true);
-    // Honest flash: exactly what filled, what stayed blank, what was not understood.
-    let msg: string;
-    if (fx.ok) {
-      const f = fx.fill;
-      const parts = [`SAMPLE generated (bank not approved yet) · ${f?.filled.length ?? 0} slots filled`];
-      if (f?.blanked.length) parts.push(`${f.blanked.length} blank: ${f.blanked.slice(0, 6).join(', ')}${f.blanked.length > 6 ? '…' : ''}`);
-      if (f?.unrecognized.length) parts.push(`⚠ unknown tokens: ${f.unrecognized.slice(0, 6).join(', ')}`);
-      if (f?.unplaced_blocks.length) parts.push(`${f.unplaced_blocks.length} selected blocks had no slot`);
-      if (fx.contact_missing) parts.push('⚠ contact profile not set (empty phone/location)');
-      parts.push('see it in /cvs');
-      msg = parts.join(' · ');
-    } else {
-      msg = `FAILED: ${fx.error}`;
-    }
-    return c.redirect(`${back}?m=${encodeURIComponent(msg)}`);
+    await c.env.DB.prepare('UPDATE jobs SET cv_pending = 1 WHERE url_hash = ?').bind(hash).run();
+    return c.redirect(`${back}?m=${encodeURIComponent('CV queued — the next pipeline run builds it from your bank')}`);
   });
 
   // ---------- Applications (step 8: kit queue + answers bank) ----------

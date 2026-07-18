@@ -7,13 +7,13 @@ const ok = (r: NormalizedBlock | { error: string }): NormalizedBlock => {
 };
 
 describe('normalizeBlockInput (post-0007 schema)', () => {
-  it('accepts a valid skill and derives es_status when ES is present', () => {
+  it('accepts a valid skill with both languages', () => {
     const r = ok(normalizeBlockInput({
       section: 'skills', text_en: 'SQL', text_es: 'SQL', skcat: 'technical', tags: 'sql',
     }));
     expect(r).toMatchObject({
       section: 'skills', anchor_id: null, skcat: 'technical',
-      text_en: 'SQL', text_es: 'SQL', es_status: 'draft', tags: 'sql',
+      text_en: 'SQL', text_es: 'SQL', tags: 'sql',
     });
   });
 

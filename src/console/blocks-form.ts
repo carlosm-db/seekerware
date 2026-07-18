@@ -1,6 +1,7 @@
 // Bank block form helpers (docs/UI.md §2): pure normalization for the /blocks
 // add/edit console forms, kept DB-free so it can be unit-tested. The owner
-// authors/edits content here; blocks enter as `draft` (domain rule 1).
+// authors/edits content here; SAVING is the approval (owner decision
+// 2026-07-18, bank v4) — the routes write status directly.
 // Post-0007 schema: no fact_key/evidence/source/suggested/angle; the skill
 // category is the real column `skcat`.
 
@@ -17,7 +18,6 @@ export interface NormalizedBlock {
   skcat: string | null;
   text_en: string;
   text_es: string;
-  es_status: 'draft';
   tags: string;
 }
 
@@ -59,7 +59,6 @@ export function normalizeBlockInput(
     skcat,
     text_en,
     text_es,
-    es_status: 'draft',
     tags: s('tags'),
   };
 }

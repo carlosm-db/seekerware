@@ -85,12 +85,38 @@ details.btnlike > form, details.btnlike > .panel { margin-top:8px }
 .pill.missing { background:var(--bad-soft); color:var(--bad) }
 .pill.retired { background:var(--chip); color:var(--muted) }
 
-/* Bank role cards: identity header (title · company · dates, code demoted). */
-.rolehead { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap }
-.rolehead .rtitle { font-weight:700 }
-.rolehead .rdates { color:var(--muted); font-size:14px; font-variant-numeric:tabular-nums }
-.bullet .pill { margin-right:7px }
-.bullet .es { color:var(--muted); font-size:14px; margin-top:2px }
+/* Bank v4 (2026-07-18, LinkedIn-inspired): collapsible role cards, one pencil
+   per item, in-place editors. Summary = the whole header row; caret via CSS. */
+details.rc { background:var(--card); border:1px solid var(--line); border-radius:10px; margin-bottom:12px }
+details.rc > summary { list-style:none; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
+  padding:14px 16px; cursor:pointer; min-height:44px; color:var(--fg) }
+details.rc > summary::-webkit-details-marker { display:none }
+details.rc > summary:hover { background:var(--bg); border-radius:10px }
+.caret::before { content:'▸'; color:var(--muted); font-size:13px }
+details[open] > summary .caret::before { content:'▾' }
+.rc-title { font-weight:700 }
+.rc-sub { color:var(--muted); font-size:14px }
+.rc-dates { color:var(--muted); font-size:13.5px; font-variant-numeric:tabular-nums }
+.rc-meta { margin-left:auto; display:flex; gap:8px; align-items:center; color:var(--muted); font-size:13px }
+.rc-body { border-top:1px solid var(--line); padding:6px 16px 14px }
+.pencil { border:1px solid var(--line); border-radius:8px; min-width:36px; min-height:36px;
+  display:inline-flex; align-items:center; justify-content:center; font-size:14px; color:var(--fg) }
+.pencil:hover { border-color:var(--accent); text-decoration:none }
+.b-row { display:flex; gap:10px; padding:10px 0; border-top:1px solid var(--line); align-items:flex-start }
+.b-row:first-of-type { border-top:none }
+.b-text { flex:1; max-width:80ch }
+.b-text .es { color:var(--muted); font-size:14px; margin-top:2px }
+.editpane { border:1px solid var(--accent); border-radius:10px; padding:12px 14px; margin:10px 0; background:var(--card) }
+.fields2 { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-end }
+.fld { display:flex; flex-direction:column; gap:3px }
+.fld label { font-size:12px; color:var(--muted) }
+.fld.grow { flex:1 1 240px }
+.fld.w-sm { width:160px }
+.fld input { width:100% }
+.chk { display:flex; gap:8px; align-items:center; font-size:14px; padding:8px 0 2px }
+.chk input[type=checkbox] { min-height:0; width:18px; height:18px }
+.rowactions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px }
+.rowactions .spacer { flex:1 }
 
 /* Calibration matrix (2026-07-18): 5 categories x favor/against x EN/ES.
    Wide content scrolls inside its own container (phone-safe). */

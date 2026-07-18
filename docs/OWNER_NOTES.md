@@ -25,11 +25,13 @@ No secrets or private values in this file — only where to put them.
 
 ## B. Console pass (phone is fine)
 
-5. **Bank** (/blocks): you should see *My roles / My skills / My summary* with
-   full text. Exercise it end to end: ＋Add role (code `TEST1`) → ＋Add bullet
-   under it → edit the bullet → per-role approve → **Check template** (expect
-   it to flag TEST1 having bullets but no `{{TEST1R…}}` tokens — that's it
-   working) → retire TEST1.
+5. **Bank** (/blocks): roles are collapsed cards, newest first — tap one to
+   open it; every ✏️ pencil edits in place (EN + ES always required; saving IS
+   the approval, no approve step exists). Exercise it end to end: ＋Add role
+   (code `TEST1`, set dates) → ＋Add bullet under it → pencil-edit the bullet →
+   **Check template** (expect it to flag TEST1 having bullets but no
+   `{{TEST1R…}}` tokens — that's it working) → ✏️ on TEST1 → **Delete role**
+   (removes TEST1 AND its bullets, permanently).
 6. **Calibration** (/config): remove or add any word chip → an orange
    "unsaved changes" banner appears → **Preview impact & activate** → watch
    the impact table → Activate. History now describes the change in words.
@@ -43,29 +45,26 @@ No secrets or private values in this file — only where to put them.
 
 9. **Check template** (/blocks → Check template): fix anything it flags in
    the Doc (token typos, missing lines) and re-run until it says ✓ match.
-10. **Sample**: open any job (Today or Jobs) → **Generate CV** → it builds a
-    SAMPLE from draft blocks. Inspect Doc + PDF: no raw `{{` anywhere, all 5
-    DLAB1 bullets filled, 4 skills lines, phone/location match the job's
-    track, "Suggested tweaks" in the Doc but NOT the PDF. Edit bank text in
-    /blocks and regenerate until it represents you.
-11. **Approve the bank**: per role/section, or "Approve the ENTIRE bank"
-    (it asks for confirmation now).
-12. **Real CV**: tap **Generate CV** on the job again → "REAL CV queued" →
+10. **CV**: open any job (Today or Jobs) → **Generate CV** → "CV queued" →
     the next scheduled run builds it. To force a run right now:
     `curl -X POST -H "Authorization: Bearer <API_TOKEN>" https://<your-worker>.workers.dev/api/run`
-13. Verify: /cvs row typed **real** with its fill report; clean PDF in the
-    Drive `archive/` folder. That's the project's core promise delivered.
+11. Inspect Doc + PDF: no raw `{{` anywhere, all 5 DLAB1 bullets filled,
+    4 skills lines, phone/location match the job's track, "Suggested tweaks"
+    in the Doc but NOT the PDF. Whatever is saved in /blocks is what builds —
+    there is no approval step: pencil-edit until it represents you, regenerate.
+12. Verify: /cvs row with its fill report; clean PDF in the Drive `archive/`
+    folder. That's the project's core promise delivered.
 
 ## D. Kit + bot
 
-14. **/applications**: pick an Apply job → **Build kit** → open the kit:
+13. **/applications**: pick an Apply job → **Build kit** → open the kit:
     matched answers, 🔴 unanswered, ⚖️ EEOC flagged (never auto-answered),
     form link, checklist.
-15. **Bot**: send any text to your bot — reply "No question is pending…"
+14. **Bot**: send any text to your bot — reply "No question is pending…"
     proves the webhook. New job notifications now carry 📋 **View kit** /
     ✅ **I applied** buttons. Tap View kit → answer the red questions one by
     one in chat → each reply saves as a DRAFT answer.
-16. Back in /applications: **approve** the draft answers you want reused
+15. Back in /applications: **approve** the draft answers you want reused
     forever; add common ones (work authorization, notice period, salary
     expectation) once — every future kit matches them automatically.
 

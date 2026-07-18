@@ -23,7 +23,7 @@ in the same commit that introduces the new term.
 | freshness | publication age <= `FRESHNESS_MAX_DAYS` (3 days) | validity, age |
 | verify-on-notify | re-query of the job against the ATS API immediately before notifying | liveness check, liveness verification |
 | store | the system's persistence in D1 (`jobs` table), accessed only via `src/store.ts` | database, DB, registry, history |
-| block | approved phrasing of a fact in the bank (`blocks` table), anchored to an anchor and differentiated by angle and language | phrase, snippet, bullet, sentence |
+| block | owner-authored phrasing of a fact in the bank (`blocks` table), anchored to an anchor, in EN+ES always; saving is the approval (2026-07-18) | phrase, snippet, bullet, sentence |
 | fact | verifiable professional fact from the canonical record, with a single exact metric; blocks are its phrasings | achievement, claim, assertion, datum |
 | anchor | real role or project a block is anchored to (`anchors` table); neutral — the displayed titles are per-market projections | role_anchor, position, title |
 | angle | projection of a fact for a role type: `data`, `compliance`, `operations`, `leadership` | focus, variant, version |
