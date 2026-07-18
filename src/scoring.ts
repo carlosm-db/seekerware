@@ -12,6 +12,8 @@ export interface Keyword {
   weight: number;
   /** Display language ('es' = Spanish list in the console; absent = English). Matching ignores it. */
   lang?: 'es';
+  /** Pair id linking the EN/ES twins of one concept (console matrix, 2026-07-18). Matching ignores it. */
+  pair?: string;
 }
 
 export interface Gate {

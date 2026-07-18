@@ -91,6 +91,37 @@ details.btnlike > form, details.btnlike > .panel { margin-top:8px }
 .rolehead .rdates { color:var(--muted); font-size:14px; font-variant-numeric:tabular-nums }
 .bullet .pill { margin-right:7px }
 .bullet .es { color:var(--muted); font-size:14px; margin-top:2px }
+
+/* Calibration matrix (2026-07-18): 5 categories x favor/against x EN/ES.
+   Wide content scrolls inside its own container (phone-safe). */
+.matrix-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch }
+.matrix { border:1px solid var(--line); border-radius:10px; min-width:900px;
+  background:var(--card); margin-bottom:14px }
+.mrow { display:grid; grid-template-columns:140px 1.15fr 1.15fr 1fr 1fr }
+.mrow > div { padding:10px 12px; border-top:1px solid var(--line);
+  border-left:1px solid var(--line); min-width:0 }
+.mrow > div:first-child { border-left:none }
+.mrow.mhead > div { border-top:none; background:var(--bg); font-size:11px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.05em; color:var(--muted) }
+.mrow.mhead .fav { color:var(--ok) } .mrow.mhead .agn { color:var(--bad) }
+.mcat { font-weight:600; font-size:14px }
+.mcat .sub { display:block; font-weight:400; font-size:12px; color:var(--muted) }
+.chip.neg { background:var(--bad-soft) }
+.chip.w3 { box-shadow:inset 0 0 0 1px var(--accent) }
+.chip.w1 { opacity:.75 }
+.chip.extra { display:none }
+.mcell.open .chip.extra { display:inline-block }
+.chip.hit { outline:2px solid var(--accent) }
+.chip.dim { opacity:.25 }
+.path { display:inline-block; font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; margin-left:4px; white-space:nowrap }
+.p-0 { background:var(--bad-soft); color:var(--bad) }
+.p-1 { background:var(--warn-soft); color:var(--warn) }
+.p-2 { background:var(--ok-soft); color:var(--ok) }
+.morebtn { background:none; border:none; min-height:0; padding:2px 0; color:var(--accent);
+  font-size:12px; cursor:pointer; text-decoration:underline; text-underline-offset:3px }
+.calsearch { display:flex; align-items:center; gap:8px; flex:1; min-width:220px }
+.calsearch input { flex:1 }
 input[type=text], input[type=password], input[type=number], input[type=date], select, textarea {
   background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:8px;
   padding:10px 12px; font-size:16px; min-height:44px; max-width:100% }

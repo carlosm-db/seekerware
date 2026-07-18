@@ -49,6 +49,9 @@ in the same commit that introduces the new term.
 | cluster | soft grouping of jobs by `title_norm` + tags (similar-jobs radar) | group, role family |
 | answer | approved standard answer for application forms (`answers` table, blocks-style governance) | canned answer, template, profile_answer |
 | kit | per-job view with the CV as PDF, answers and links to apply in minutes; the human ALWAYS submits | package, bundle, auto-apply |
+| matrix | the Calibration grid (2026-07-18): 5 categories × in favor/against × EN/ES; a projection over keywords + gates, never a softening of them | word lists, chip walls |
+| pair | the EN+ES twins of one calibration concept, linked by `Keyword.pair`; ✕ removes both | twins, duo, translation |
+| path | the track a matrix word unlocks (require) or blocks (reject) via its gate membership; badge on the chip | track tag, route, lane badge |
 
 Shared-vocabulary rule: the blocks bank's `tags` and the `config` table's
 keywords use the SAME canonical terms (domain / tool / signal families). A new

@@ -8,9 +8,13 @@ import { authMiddleware, createSession, setSessionCookie, verifyPassword, type C
 import { validateScoringConfig } from '../config-store';
 import { SECTIONS, SKCATS, newBlockId, normalizeBlockInput } from './blocks-form';
 import { fmtDates, normalizeMonth, tokensOfRole, validateRoleCode } from './roles';
+import {
+  applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES, parseMeta,
+  type Chip, type MatrixCategory, type MatrixMeta, type RemoveTarget,
+} from './matrix';
 import * as greenhouse from '../connectors/greenhouse';
 import type { Company } from '../types';
-import type { ScoreResult } from '../scoring';
+import { CATEGORIES, type Category, type ScoreResult } from '../scoring';
 
 type App = Hono<{ Bindings: ConsoleEnv }>;
 
@@ -458,7 +462,7 @@ export function consoleApp(): App {
           <select name="ats"><option>greenhouse</option><option>lever</option><option>ashby</option></select>
           <input type="text" name="token" placeholder="board token" required />
           <input type="text" name="notes" placeholder="notes" />
-          <button type="submit" class="primary">Add and test</button>
+          <button type="submit" class="primary">Add company</button>
         </form>
         <div class="table-wrap"><table>
           <tr><th>company</th><th>ats</th><th>token</th><th>active</th><th>health</th><th>jobs 90d</th><th>survivors</th><th>yield</th></tr>
@@ -515,16 +519,21 @@ export function consoleApp(): App {
     return c.redirect('/companies?m=updated');
   });
 
-  // ---------- Calibration (humanized 2026-07-18: plain words, chips, one
-  // save flow with impact preview, readable history) ----------
-  const WEIGHT_LABELS: Array<[number, string]> = [
-    [3, 'Strong'], [2, 'Normal'], [1, 'Light'], [-2, 'Against'], [-3, 'Strongly against'],
-  ];
-  const CAT_LABELS: Record<string, string> = {
-    domain: 'Industry & domain words (what the job is about)',
-    role_type: 'Role words (job titles that fit me — or don’t)',
-    tool_overlap: 'Tools I work with',
-    level_fit: 'Seniority level words',
+  // ---------- Calibration (matrix redesign 2026-07-18, mockups v3.3: ONE grid
+  // — 5 categories × in favor/against × EN/ES — with the track as a path badge
+  // on the word; ONE add form after the table; draft → Preview impact →
+  // Activate flow unchanged) ----------
+  const MATRIX_LABELS: Record<MatrixCategory, [string, string]> = {
+    location: ['Location', 'where I can work'],
+    role_type: ['Role titles', 'jobs that fit me — or don’t'],
+    level_fit: ['Seniority', 'level words'],
+    domain: ['Industry & domain', 'what the job is about'],
+    tool_overlap: ['Tools', 'what I work with'],
+  };
+  const TRACK_LABELS: Record<string, string> = {
+    canada_coop: 'Canada co-op',
+    colombia_perm: 'Colombia permanent',
+    contractor_usd: 'Contractor international',
   };
   /** Draft-or-live scoring config: chip edits accumulate in a draft until activated. */
   async function loadDraftOrLive(env: ConsoleEnv): Promise<{ cfg: import('../scoring').ScoringConfig; isDraft: boolean }> {
@@ -538,6 +547,15 @@ export function consoleApp(): App {
     await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring_draft', ?)")
       .bind(JSON.stringify(cfg)).run();
   }
+  /** Console-only display metadata for gate terms (language/pairing). Cosmetic — outside the draft flow. */
+  async function loadMeta(env: ConsoleEnv): Promise<MatrixMeta> {
+    const r = await env.DB.prepare("SELECT value FROM config WHERE key='matrix_meta'").first<{ value: string }>();
+    return parseMeta(r?.value);
+  }
+  async function saveMeta(env: ConsoleEnv, meta: MatrixMeta): Promise<void> {
+    await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('matrix_meta', ?)")
+      .bind(JSON.stringify(meta)).run();
+  }
 
   app.get('/config', async (c) => {
     const rows = (
@@ -550,34 +568,43 @@ export function consoleApp(): App {
         .all<{ id: number; ts: string; key: string; replay_summary: string | null; diff_summary: string | null }>()
     ).results;
 
-    const chip = (category: string, term: string, weight: number) => (
-      <span class="chip">
-        {term}{weight !== 2 ? <span class="muted"> {weight > 0 ? `+${weight}` : weight}</span> : null}
+    const meta = await loadMeta(c.env);
+    const matrix = buildMatrix(cfg, meta);
+    const trackLabel = (t: string) => TRACK_LABELS[t] ?? t;
+    const pathClass = (t: string) => `path p-${Math.max(0, cfg.tracks.findIndex((x) => x.id === t))}`;
+
+    /** One word chip: term, weight (or penalty), path badge, ✕ removes the pair. */
+    const chipEl = (ch: Chip, extra: boolean) => (
+      <span class={`chip${extra ? ' extra' : ''}${!ch.favor ? ' neg' : ''}${Math.abs(ch.weight ?? 0) >= 3 ? ' w3' : ''}${Math.abs(ch.weight ?? 0) === 1 ? ' w1' : ''}`}>
+        {ch.term}
+        {ch.weight !== undefined ? <span class="muted"> {ch.weight > 0 ? `+${ch.weight}` : ch.weight}</span>
+          : ch.penalty !== undefined ? <span class="muted"> −{ch.penalty}</span> : null}
+        {ch.path ? <span class={pathClass(ch.path)}>{trackLabel(ch.path)}</span> : null}
         <form class="inline" method="post" action="/config/word-remove">
-          <input type="hidden" name="category" value={category} />
-          <input type="hidden" name="term" value={term} />
-          <button type="submit" class="chipx" title="remove word">✕</button>
+          <input type="hidden" name="kind" value={ch.source.kind} />
+          {ch.source.kind === 'keyword' ? (
+            <input type="hidden" name="category" value={ch.category} />
+          ) : (
+            <>
+              <input type="hidden" name="track" value={ch.source.track} />
+              <input type="hidden" name="gate" value={ch.source.gate} />
+            </>
+          )}
+          <input type="hidden" name="term" value={ch.term} />
+          <button type="submit" class="chipx" title="remove word (both languages)">✕</button>
         </form>
       </span>
     );
-    const gateChip = (track: string, gate: string, list: string, term: string) => (
-      <span class="chip">
-        {term}
-        <form class="inline" method="post" action="/config/gate-remove">
-          <input type="hidden" name="track" value={track} />
-          <input type="hidden" name="gate" value={gate} />
-          <input type="hidden" name="list" value={list} />
-          <input type="hidden" name="term" value={term} />
-          <button type="submit" class="chipx" title="remove word">✕</button>
-        </form>
-      </span>
+    const SHOW = 8;
+    const cellEl = (chips: Chip[]) => (
+      <div class="mcell">
+        {chips.length === 0 ? <span class="muted" style="font-size:12.5px">none</span>
+          : chips.map((ch, i) => chipEl(ch, i >= SHOW))}
+        {chips.length > SHOW ? (
+          <div><button type="button" class="morebtn">show {chips.length - SHOW} more</button></div>
+        ) : null}
+      </div>
     );
-    const scopeLabel = (s?: string) =>
-      s === 'location' ? 'the location' : s === 'title' ? 'the title' : s === 'title_location' ? 'title or location' : 'the posting';
-    const gateSentence = (g: { type: string; points?: number; require?: string[]; reject?: string[]; scope?: string }) =>
-      g.reject?.length
-        ? (g.type === 'hard' ? `Rejected when ${scopeLabel(g.scope)} mentions:` : `−${g.points ?? 0} points when ${scopeLabel(g.scope)} mentions:`)
-        : (g.type === 'hard' ? `Must mention (in ${scopeLabel(g.scope)}):` : `−${g.points ?? 0} points when ${scopeLabel(g.scope)} lacks:`);
 
     return page(c, 'Calibration', (
       <>
@@ -587,13 +614,13 @@ export function consoleApp(): App {
               <strong>⚠ You have unsaved calibration changes.</strong>
               <form class="inline" method="post" action="/config/replay">
                 <input type="hidden" name="n" value="200" />
-                <button type="submit" class="primary">Preview impact &amp; activate</button>
+                <button type="submit" class="primary">Preview impact</button>
               </form>
               <form class="inline" method="post" action="/config/replay/discard">
                 <button type="submit">Discard changes</button>
               </form>
             </div>
-            <p class="muted">Nothing applies to real scoring until you preview and activate.</p>
+            <p class="muted">Nothing applies to real scoring until you preview the impact and then activate — Activate is its own button on the preview screen.</p>
           </div>
         ) : null}
 
@@ -610,72 +637,89 @@ export function consoleApp(): App {
           <span class="muted">run this after activating changes so stored jobs pick them up</span>
         </form>
 
-        <h2>What I want to see (word lists)</h2>
-        {(Object.keys(cfg.keywords) as Array<keyof typeof cfg.keywords>).map((cat) => {
-          const kws = cfg.keywords[cat] ?? [];
-          const posEn = kws.filter((k) => k.weight > 0 && k.lang !== 'es');
-          const posEs = kws.filter((k) => k.weight > 0 && k.lang === 'es');
-          const neg = kws.filter((k) => k.weight < 0);
-          return (
-            <div class="card">
-              <strong>{CAT_LABELS[cat] ?? cat}</strong>
-              <div style="margin:8px 0"><span class="muted">English: </span>{posEn.map((k) => chip(cat, k.term, k.weight))}</div>
-              {posEs.length ? (
-                <div style="margin:8px 0"><span class="muted">Español (matches Colombian postings): </span>{posEs.map((k) => chip(cat, k.term, k.weight))}</div>
-              ) : null}
-              {neg.length ? (
-                <div style="margin:8px 0"><span class="muted">Works against me: </span>{neg.map((k) => chip(cat, k.term, k.weight))}</div>
-              ) : null}
-              <form method="post" action="/config/word-add" class="actions">
-                <input type="hidden" name="category" value={cat} />
-                <input type="text" name="term" placeholder="add a word or phrase" required />
-                <select name="weight">
-                  {WEIGHT_LABELS.map(([w, l]) => <option value={String(w)} selected={w === 2}>{l}</option>)}
-                </select>
-                <select name="lang">
-                  <option value="">English</option>
-                  <option value="es">Español</option>
-                </select>
-                <button type="submit">Add</button>
-              </form>
-            </div>
-          );
-        })}
+        <h2>What I want to see (the matrix)</h2>
+        <p class="muted" style="margin:0 0 6px">
+          Weight: <strong>+3</strong> strong · <strong>+2</strong> medium · <strong>+1</strong> light ·
+          <strong> −2</strong> against · <strong>−3</strong> strongly against — ✕ removes a word in BOTH
+          languages; adding happens in ONE place, after the table.
+        </p>
+        <p class="muted" style="margin:0 0 8px">
+          <strong>Path</strong> — the track a word unlocks (or, on an against word, blocks):
+          {cfg.tracks.map((t) => <span class={pathClass(t.id)}>{trackLabel(t.id)}</span>)}
+          <span> · no badge = scores every track · path words are gates: absolute, not points (−N = penalty)</span>
+        </p>
+        <div class="actions" style="margin-bottom:10px">
+          <div class="calsearch">
+            <input type="search" id="calsearch-input" placeholder="Find a word across every list…" aria-label="Find a word" />
+          </div>
+        </div>
 
-        <h2>My tracks (where I can work)</h2>
-        {cfg.tracks.map((t) => (
-          <div class="card">
-            <strong>{t.id}</strong>
-            {t.gates.map((g) => (
-              <div style="margin:8px 0">
-                <div class="muted">{gateSentence(g)}</div>
-                <div style="margin:4px 0">
-                  {(g.reject?.length ? g.reject : g.require ?? []).map((term) =>
-                    gateChip(t.id, g.id, g.reject?.length ? 'reject' : 'require', term))}
-                </div>
-                <form method="post" action="/config/gate-add" class="actions">
-                  <input type="hidden" name="track" value={t.id} />
-                  <input type="hidden" name="gate" value={g.id} />
-                  <input type="hidden" name="list" value={g.reject?.length ? 'reject' : 'require'} />
-                  <input type="text" name="term" placeholder="add a word or phrase" required />
-                  {g.type === 'penalty' ? (
-                    <label class="muted">penalty <input type="number" name="points" value={String(g.points ?? 0)} style="width:60px"
-                      onchange="this.form.action='/config/gate-points'" /></label>
-                  ) : null}
-                  <button type="submit">Add</button>
-                </form>
+        <div class="matrix-wrap">
+          <div class="matrix">
+            <div class="mrow mhead">
+              <div>Category</div>
+              <div class="fav">In favor · English</div>
+              <div class="fav">In favor · Español</div>
+              <div class="agn">Against · English</div>
+              <div class="agn">Against · Español</div>
+            </div>
+            {matrix.map((r) => (
+              <div class="mrow">
+                <div class="mcat">{MATRIX_LABELS[r.category][0]}<span class="sub">{MATRIX_LABELS[r.category][1]}</span></div>
+                {cellEl(r.favor_en)}
+                {cellEl(r.favor_es)}
+                {cellEl(r.against_en)}
+                {cellEl(r.against_es)}
               </div>
             ))}
           </div>
-        ))}
+        </div>
+
+        <div class="card">
+          <strong>＋ Add word — the only add form on the page</strong>
+          <form method="post" action="/config/word-add" style="margin-top:8px">
+            <div class="formgrid">
+              <div class="field f-en"><label>Word — English (required)</label>
+                <input type="text" name="term_en" required placeholder="e.g. remote latam" /></div>
+              <div class="field f-es"><label>Word — Español (required; same word twice if it doesn’t translate)</label>
+                <input type="text" name="term_es" required placeholder="e.g. latam remoto" /></div>
+            </div>
+            <div class="actions">
+              <label class="muted">Category{' '}
+                <select name="category">
+                  {MATRIX_CATEGORIES.map((cat) => <option value={cat}>{MATRIX_LABELS[cat][0]}</option>)}
+                </select></label>
+              <label><input type="radio" name="dir" value="favor" checked
+                onchange="document.getElementById('wf').disabled=false;document.getElementById('wa').disabled=true" /> In favor</label>
+              <label><input type="radio" name="dir" value="against"
+                onchange="document.getElementById('wf').disabled=true;document.getElementById('wa').disabled=false" /> Against</label>
+              <select name="weight" id="wf">
+                <option value="3">+3 strong</option>
+                <option value="2" selected>+2 medium</option>
+                <option value="1">+1 light</option>
+              </select>
+              <select name="weight" id="wa" disabled>
+                <option value="2" selected>−2 against</option>
+                <option value="3">−3 strongly against</option>
+              </select>
+              <label class="muted">Path{' '}
+                <select name="path">
+                  <option value="">— every track —</option>
+                  {cfg.tracks.map((t) => <option value={t.id}>{trackLabel(t.id)}</option>)}
+                </select></label>
+              <button type="submit" class="primary">Add to draft</button>
+            </div>
+            <p class="muted" style="margin:6px 0 0">Location words REQUIRE a path (they are the track gates; weight does not apply there).</p>
+          </form>
+        </div>
 
         <details class="card">
           <summary>Advanced: raw JSON</summary>
           <form method="post" action="/config/scoring" style="margin-top:8px">
             <textarea name="scoring" rows={18}>{JSON.stringify(cfg, null, 2)}</textarea>
             <div class="actions" style="margin-top:8px">
-              <button type="submit" class="primary">Validate and save</button>
-              <button type="submit" formaction="/config/replay">🔬 Simulate first (Replay)</button>
+              <button type="submit" class="primary">Save as active config</button>
+              <button type="submit" formaction="/config/replay">Preview impact (Replay)</button>
               <label>against last <input type="number" name="n" value="200" min="50" max="1000" style="width:80px" /> jobs</label>
             </div>
           </form>
@@ -693,83 +737,77 @@ export function consoleApp(): App {
                   <form class="inline" method="post" action="/config/revert"
                     onsubmit={`return confirm('Revert this change? It will undo: ${String(h.diff_summary ?? 'the recorded change').replaceAll("'", '’')}')`}>
                     <input type="hidden" name="id" value={String(h.id)} />
-                    <button type="submit">revert</button>
+                    <button type="submit">Revert</button>
                   </form>
                 </td>
               </tr>
             ))}
           </table></div>
         </div>
+        <script dangerouslySetInnerHTML={{ __html: `
+(() => {
+  const q = document.getElementById('calsearch-input');
+  if (q) q.addEventListener('input', () => {
+    const s = q.value.trim().toLowerCase();
+    document.querySelectorAll('.matrix .chip').forEach((ch) => {
+      ch.classList.remove('hit', 'dim');
+      if (!s) return;
+      if (ch.textContent.toLowerCase().includes(s)) { ch.classList.add('hit'); ch.classList.remove('extra'); }
+      else ch.classList.add('dim');
+    });
+  });
+  document.querySelectorAll('.morebtn').forEach((b) => b.addEventListener('click', () => {
+    const cell = b.closest('.mcell');
+    cell.classList.toggle('open');
+    b.textContent = cell.classList.contains('open') ? 'show fewer' : b.textContent.replace('fewer', 'more');
+  }));
+})();` }} />
       </>
     ));
   });
 
-  // Chip edits accumulate in the draft; nothing goes live without the
-  // preview-impact → activate step.
+  // Word edits accumulate in the draft; nothing goes live without the
+  // Preview impact → Activate steps. ONE add/remove pair of routes: the matrix
+  // maps each concept to keywords and/or gate lists (src/console/matrix.ts).
   app.post('/config/word-add', async (c) => {
     const b = await c.req.parseBody();
-    const cat = String(b.category ?? '');
-    const term = String(b.term ?? '').trim().toLowerCase();
-    const weight = Number(b.weight ?? 2);
-    const lang = String(b.lang ?? '') === 'es' ? 'es' as const : undefined;
+    const category = String(b.category ?? '') as MatrixCategory;
+    if (!MATRIX_CATEGORIES.includes(category)) return c.redirect('/config?m=invalid category');
     const { cfg } = await loadDraftOrLive(c.env);
-    const list = cfg.keywords[cat as keyof typeof cfg.keywords];
-    if (!list || !term) return c.redirect('/config?m=invalid word');
-    if (list.some((k) => k.term === term)) return c.redirect(`/config?m=${encodeURIComponent(`"${term}" is already listed`)}`);
-    list.push(lang ? { term, weight, lang } : { term, weight });
-    try { validateScoringConfig(cfg); } catch (err) {
-      return c.redirect(`/config?m=${encodeURIComponent(`rejected: ${err instanceof Error ? err.message : 'invalid'}`)}`);
+    const meta = await loadMeta(c.env);
+    const err = applyWordAdd(cfg, meta, {
+      en: String(b.term_en ?? ''),
+      es: String(b.term_es ?? ''),
+      category,
+      favor: String(b.dir ?? 'favor') !== 'against',
+      weight: Number(b.weight ?? 2),
+      path: String(b.path ?? '') || undefined,
+    });
+    if (err) return c.redirect(`/config?m=${encodeURIComponent(`rejected: ${err.error}`)}`);
+    try { validateScoringConfig(cfg); } catch (e) {
+      return c.redirect(`/config?m=${encodeURIComponent(`rejected: ${e instanceof Error ? e.message : 'invalid'}`)}`);
     }
     await saveDraft(c.env, cfg);
-    return c.redirect(`/config?m=${encodeURIComponent(`added "${term}" — preview & activate to apply`)}`);
+    await saveMeta(c.env, meta);
+    return c.redirect(`/config?m=${encodeURIComponent(`added "${String(b.term_en).trim().toLowerCase()}" (EN+ES) — Preview impact to apply`)}`);
   });
 
   app.post('/config/word-remove', async (c) => {
     const b = await c.req.parseBody();
-    const cat = String(b.category ?? '');
     const term = String(b.term ?? '');
+    const target: RemoveTarget = String(b.kind ?? '') === 'gate'
+      ? { kind: 'gate', track: String(b.track ?? ''), gate: String(b.gate ?? ''), term }
+      : { kind: 'keyword', category: String(b.category ?? '') as Category, term };
+    if (target.kind === 'keyword' && !CATEGORIES.includes(target.category)) {
+      return c.redirect('/config?m=invalid category');
+    }
     const { cfg } = await loadDraftOrLive(c.env);
-    const list = cfg.keywords[cat as keyof typeof cfg.keywords];
-    if (!list) return c.redirect('/config?m=invalid category');
-    cfg.keywords[cat as keyof typeof cfg.keywords] = list.filter((k) => k.term !== term);
+    const meta = await loadMeta(c.env);
+    const r = applyPairRemove(cfg, meta, target);
+    if ('error' in r) return c.redirect(`/config?m=${encodeURIComponent(`remove failed: ${r.error}`)}`);
     await saveDraft(c.env, cfg);
-    return c.redirect(`/config?m=${encodeURIComponent(`removed "${term}" — preview & activate to apply`)}`);
-  });
-
-  app.post('/config/gate-add', async (c) => {
-    const b = await c.req.parseBody();
-    const term = String(b.term ?? '').trim().toLowerCase();
-    const { cfg } = await loadDraftOrLive(c.env);
-    const gate = cfg.tracks.find((t) => t.id === String(b.track))?.gates.find((g) => g.id === String(b.gate));
-    if (!gate || !term) return c.redirect('/config?m=invalid gate');
-    const list = String(b.list) === 'reject' ? 'reject' : 'require';
-    gate[list] = gate[list] ?? [];
-    if (gate[list]!.includes(term)) return c.redirect(`/config?m=${encodeURIComponent(`"${term}" is already listed`)}`);
-    gate[list]!.push(term);
-    await saveDraft(c.env, cfg);
-    return c.redirect(`/config?m=${encodeURIComponent(`added "${term}" — preview & activate to apply`)}`);
-  });
-
-  app.post('/config/gate-remove', async (c) => {
-    const b = await c.req.parseBody();
-    const { cfg } = await loadDraftOrLive(c.env);
-    const gate = cfg.tracks.find((t) => t.id === String(b.track))?.gates.find((g) => g.id === String(b.gate));
-    if (!gate) return c.redirect('/config?m=invalid gate');
-    const list = String(b.list) === 'reject' ? 'reject' : 'require';
-    gate[list] = (gate[list] ?? []).filter((x) => x !== String(b.term));
-    await saveDraft(c.env, cfg);
-    return c.redirect(`/config?m=${encodeURIComponent(`removed "${String(b.term)}" — preview & activate to apply`)}`);
-  });
-
-  app.post('/config/gate-points', async (c) => {
-    const b = await c.req.parseBody();
-    const points = Math.max(0, Math.min(100, Number(b.points ?? 0)));
-    const { cfg } = await loadDraftOrLive(c.env);
-    const gate = cfg.tracks.find((t) => t.id === String(b.track))?.gates.find((g) => g.id === String(b.gate));
-    if (!gate || gate.type !== 'penalty') return c.redirect('/config?m=invalid gate');
-    gate.points = points;
-    await saveDraft(c.env, cfg);
-    return c.redirect(`/config?m=${encodeURIComponent(`penalty set to −${points} — preview & activate to apply`)}`);
+    await saveMeta(c.env, meta);
+    return c.redirect(`/config?m=${encodeURIComponent(`removed ${r.removed.map((t) => `"${t}"`).join(' + ')} — Preview impact to apply`)}`);
   });
 
   async function saveConfig(env: ConsoleEnv, key: string, value: string, diffSummary?: string): Promise<void> {
@@ -1100,7 +1138,7 @@ export function consoleApp(): App {
           <div id="apply-form" style="display:none">
             <form method="post" action="/config/replay/apply" class="inline">
               <input type="hidden" name="summary" id="summary-input" />
-              <button type="submit" class="primary">Save and activate</button>
+              <button type="submit" class="primary">Activate</button>
             </form>{' '}
             <form method="post" action="/config/replay/discard" class="inline">
               <button type="submit">Discard draft</button>
@@ -1421,12 +1459,12 @@ export function consoleApp(): App {
           {b.status !== 'approved' ? (
             <form class="inline" method="post" action="/blocks/approve">
               <input type="hidden" name="id" value={String(b.id)} />
-              <button type="submit">approve</button>
+              <button type="submit">Approve</button>
             </form>
           ) : (
             <form class="inline" method="post" action="/blocks/retire">
               <input type="hidden" name="id" value={String(b.id)} />
-              <button type="submit">retire (keep record)</button>
+              <button type="submit">Retire (keep record)</button>
             </form>
           )}
           <form class="inline" method="post" action="/blocks/delete" onsubmit="return confirm('Delete this block permanently? This cannot be undone.')">
@@ -1814,17 +1852,17 @@ export function consoleApp(): App {
             <div class="muted">{a.question_label}</div>
             <div>{a.answer_en}</div>
             <div class="actions" style="margin-top:4px">
-              <span class={a.status === 'approved' ? 'ok' : 'warn'}>{a.status}</span>
+              <span class={`pill ${a.status === 'approved' ? 'approved' : 'draft'}`}>{a.status}</span>
               {a.status !== 'approved' ? (
                 <form class="inline" method="post" action="/applications/answer-approve">
                   <input type="hidden" name="id" value={String(a.id)} />
-                  <button type="submit">approve</button>
+                  <button type="submit" class="primary">Approve</button>
                 </form>
               ) : null}
               <form class="inline" method="post" action="/applications/answer-delete"
                 onsubmit="return confirm('Delete this answer permanently?')">
                 <input type="hidden" name="id" value={String(a.id)} />
-                <button type="submit" class="chipx">✕ delete</button>
+                <button type="submit">Delete</button>
               </form>
             </div>
           </div>
