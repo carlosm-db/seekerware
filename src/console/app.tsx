@@ -1440,6 +1440,53 @@ export function consoleApp(): App {
     return c.redirect(`/blocks?${sanitizeRet(String(b.ret ?? ''))}&m=role reactivated`);
   });
 
+  // ---------- Check template: bank ↔ Google Doc contract, both directions ----------
+  app.get('/blocks/template-check', async (c) => {
+    const { checkTemplate } = await import('./template-check');
+    const roles = (
+      await c.env.DB.prepare(
+        `SELECT a.id, COUNT(b.id) bullets, SUM(CASE WHEN b.status='approved' THEN 1 ELSE 0 END) approved
+         FROM anchors a LEFT JOIN blocks b ON b.anchor_id = a.id AND b.section = 'experience'
+         WHERE a.kind = 'role' AND a.status = 'active' GROUP BY a.id ORDER BY a.id`,
+      ).all<{ id: string; bullets: number; approved: number }>()
+    ).results.map((r) => ({ id: r.id, bullets: Number(r.bullets), approved: Number(r.approved ?? 0) }));
+    const catRows = (
+      await c.env.DB.prepare(
+        "SELECT skcat, COUNT(*) n FROM blocks WHERE section='skills' AND skcat IS NOT NULL GROUP BY skcat",
+      ).all<{ skcat: string; n: number }>()
+    ).results;
+    const skillCats: Record<string, number> = { technical: 0, methodologies: 0, academic: 0, emerging: 0 };
+    for (const r of catRows) skillCats[r.skcat] = Number(r.n);
+    const summary = await c.env.DB.prepare("SELECT COUNT(*) n FROM blocks WHERE section='summary'").first<{ n: number }>();
+
+    let findings;
+    let tokenCount = 0;
+    try {
+      if (!c.env.CV_TEMPLATE_DOC_ID) throw new Error('CV_TEMPLATE_DOC_ID not configured');
+      const { googleAccessToken, readPlaceholders } = await import('../gdocs');
+      const token = await googleAccessToken(c.env);
+      const docTokens = await readPlaceholders(token, c.env.CV_TEMPLATE_DOC_ID);
+      tokenCount = docTokens.length;
+      findings = checkTemplate(docTokens, { roles, skillCats, summaryCount: summary?.n ?? 0 });
+    } catch (err) {
+      findings = [{
+        level: 'error' as const,
+        text: `cannot read the template Doc: ${err instanceof Error ? err.message : 'Google unreachable'} — is it shared with the service account?`,
+      }];
+    }
+    const cls = { error: 'bad', warn: 'warn', ok: 'ok' } as const;
+    return page(c, 'Check template', (
+      <>
+        <div class="card">
+          <p>Compared your CV template Doc ({tokenCount} tokens) against the bank ({roles.length} active roles). <a href="/blocks">← back to the Bank</a></p>
+        </div>
+        <div class="card">
+          {findings.map((f) => <div class={cls[f.level]} style="padding:4px 0">{f.level === 'ok' ? '✓' : f.level === 'warn' ? '⚠' : '✗'} {f.text}</div>)}
+        </div>
+      </>
+    ));
+  });
+
   // ---------- CVs ----------
   app.get('/cvs', async (c) => {
     const pg = pageNum(c);
