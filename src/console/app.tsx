@@ -497,73 +497,261 @@ export function consoleApp(): App {
     return c.redirect('/companies?m=updated');
   });
 
-  // ---------- Calibration ----------
+  // ---------- Calibration (humanized 2026-07-18: plain words, chips, one
+  // save flow with impact preview, readable history) ----------
+  const WEIGHT_LABELS: Array<[number, string]> = [
+    [3, 'Strong'], [2, 'Normal'], [1, 'Light'], [-2, 'Against'], [-3, 'Strongly against'],
+  ];
+  const CAT_LABELS: Record<string, string> = {
+    domain: 'Industry & domain words (what the job is about)',
+    role_type: 'Role words (job titles that fit me — or don’t)',
+    tool_overlap: 'Tools I work with',
+    level_fit: 'Seniority level words',
+  };
+  /** Draft-or-live scoring config: chip edits accumulate in a draft until activated. */
+  async function loadDraftOrLive(env: ConsoleEnv): Promise<{ cfg: import('../scoring').ScoringConfig; isDraft: boolean }> {
+    const d = await env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
+    if (d) return { cfg: JSON.parse(d.value), isDraft: true };
+    const l = await env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
+    if (!l) throw new Error('scoring config missing');
+    return { cfg: JSON.parse(l.value), isDraft: false };
+  }
+  async function saveDraft(env: ConsoleEnv, cfg: unknown): Promise<void> {
+    await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring_draft', ?)")
+      .bind(JSON.stringify(cfg)).run();
+  }
+
   app.get('/config', async (c) => {
     const rows = (
-      await c.env.DB.prepare("SELECT key, value FROM config WHERE key IN ('scoring','FRESHNESS_MAX_DAYS','weekly_goal')").all<{ key: string; value: string }>()
+      await c.env.DB.prepare("SELECT key, value FROM config WHERE key IN ('FRESHNESS_MAX_DAYS')").all<{ key: string; value: string }>()
     ).results;
-    const cfg = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-    let thresholds = { apply: 75, stretch: 55 };
-    try { thresholds = (JSON.parse(cfg.scoring ?? '{}') as { thresholds: typeof thresholds }).thresholds ?? thresholds; } catch { /* raw */ }
+    const freshness = rows.find((r) => r.key === 'FRESHNESS_MAX_DAYS')?.value ?? '3';
+    const { cfg, isDraft } = await loadDraftOrLive(c.env);
     const history = (
-      await c.env.DB.prepare('SELECT id, ts, key, replay_summary FROM config_history ORDER BY id DESC LIMIT 30')
-        .all<{ id: number; ts: string; key: string; replay_summary: string | null }>()
+      await c.env.DB.prepare('SELECT id, ts, key, replay_summary, diff_summary FROM config_history ORDER BY id DESC LIMIT 30')
+        .all<{ id: number; ts: string; key: string; replay_summary: string | null; diff_summary: string | null }>()
     ).results;
+
+    const chip = (category: string, term: string, weight: number) => (
+      <span class="chip">
+        {term}{weight !== 2 ? <span class="muted"> {weight > 0 ? `+${weight}` : weight}</span> : null}
+        <form class="inline" method="post" action="/config/word-remove">
+          <input type="hidden" name="category" value={category} />
+          <input type="hidden" name="term" value={term} />
+          <button type="submit" class="chipx" title="remove word">✕</button>
+        </form>
+      </span>
+    );
+    const gateChip = (track: string, gate: string, list: string, term: string) => (
+      <span class="chip">
+        {term}
+        <form class="inline" method="post" action="/config/gate-remove">
+          <input type="hidden" name="track" value={track} />
+          <input type="hidden" name="gate" value={gate} />
+          <input type="hidden" name="list" value={list} />
+          <input type="hidden" name="term" value={term} />
+          <button type="submit" class="chipx" title="remove word">✕</button>
+        </form>
+      </span>
+    );
+    const scopeLabel = (s?: string) =>
+      s === 'location' ? 'the location' : s === 'title' ? 'the title' : s === 'title_location' ? 'title or location' : 'the posting';
+    const gateSentence = (g: { type: string; points?: number; require?: string[]; reject?: string[]; scope?: string }) =>
+      g.reject?.length
+        ? (g.type === 'hard' ? `Rejected when ${scopeLabel(g.scope)} mentions:` : `−${g.points ?? 0} points when ${scopeLabel(g.scope)} mentions:`)
+        : (g.type === 'hard' ? `Must mention (in ${scopeLabel(g.scope)}):` : `−${g.points ?? 0} points when ${scopeLabel(g.scope)} lacks:`);
 
     return page(c, 'Calibration', (
       <>
+        {isDraft ? (
+          <div class="card" style="border-color:var(--warn)">
+            <div class="actions">
+              <strong>⚠ You have unsaved calibration changes.</strong>
+              <form class="inline" method="post" action="/config/replay">
+                <input type="hidden" name="n" value="200" />
+                <button type="submit" class="primary">Preview impact &amp; activate</button>
+              </form>
+              <form class="inline" method="post" action="/config/replay/discard">
+                <button type="submit">Discard changes</button>
+              </form>
+            </div>
+            <p class="muted">Nothing applies to real scoring until you preview and activate.</p>
+          </div>
+        ) : null}
+
         <form method="post" action="/config/quick" class="card actions">
-          <label>Apply ≥ <input type="number" name="apply" value={String(thresholds.apply)} style="width:70px" /></label>
-          <label>Stretch ≥ <input type="number" name="stretch" value={String(thresholds.stretch)} style="width:70px" /></label>
-          <label>Freshness days <input type="number" name="freshness" value={cfg.FRESHNESS_MAX_DAYS ?? '3'} style="width:60px" /></label>
-          <label>Weekly goal <input type="number" name="goal" value={cfg.weekly_goal ?? '5'} style="width:60px" /></label>
+          <label>Notify me at score ≥ <input type="number" name="apply" value={String(cfg.thresholds.apply)} style="width:70px" /></label>
+          <label>Show borderline from ≥ <input type="number" name="stretch" value={String(cfg.thresholds.stretch)} style="width:70px" /></label>
+          <label>Ignore postings older than <input type="number" name="freshness" value={freshness} style="width:60px" /> days</label>
           <button type="submit" class="primary">Save</button>
           <a href="/contact">Contact profile →</a>
         </form>
+
         <form method="post" action="/config/rescore" class="card actions"
           onsubmit="return confirm('Re-score ALL open jobs with the ACTIVE config? This rewrites score/track/verdict on changed rows (history kept in job events).')">
           <button type="submit">♻️ Re-score open jobs with the active config</button>
-          <span class="muted">applies config fixes to already-stored jobs (verdicts are otherwise frozen at ingestion)</span>
+          <span class="muted">run this after activating changes so stored jobs pick them up</span>
         </form>
-        <div class="cols-2 main-side">
-          <form method="post" action="/config/scoring" class="card">
-            <h2 style="margin-top:0">Scoring config (full JSON — advanced)</h2>
-            <textarea name="scoring" rows={22}>{cfg.scoring ?? ''}</textarea>
+
+        <h2>What I want to see (word lists)</h2>
+        {(Object.keys(cfg.keywords) as Array<keyof typeof cfg.keywords>).map((cat) => {
+          const kws = cfg.keywords[cat] ?? [];
+          const pos = kws.filter((k) => k.weight > 0);
+          const neg = kws.filter((k) => k.weight < 0);
+          return (
+            <div class="card">
+              <strong>{CAT_LABELS[cat] ?? cat}</strong>
+              <div style="margin:8px 0">{pos.map((k) => chip(cat, k.term, k.weight))}</div>
+              {neg.length ? (
+                <div style="margin:8px 0"><span class="muted">Works against me: </span>{neg.map((k) => chip(cat, k.term, k.weight))}</div>
+              ) : null}
+              <form method="post" action="/config/word-add" class="actions">
+                <input type="hidden" name="category" value={cat} />
+                <input type="text" name="term" placeholder="add a word or phrase" required />
+                <select name="weight">
+                  {WEIGHT_LABELS.map(([w, l]) => <option value={String(w)} selected={w === 2}>{l}</option>)}
+                </select>
+                <button type="submit">Add</button>
+              </form>
+            </div>
+          );
+        })}
+
+        <h2>My tracks (where I can work)</h2>
+        {cfg.tracks.map((t) => (
+          <div class="card">
+            <strong>{t.id}</strong>
+            {t.gates.map((g) => (
+              <div style="margin:8px 0">
+                <div class="muted">{gateSentence(g)}</div>
+                <div style="margin:4px 0">
+                  {(g.reject?.length ? g.reject : g.require ?? []).map((term) =>
+                    gateChip(t.id, g.id, g.reject?.length ? 'reject' : 'require', term))}
+                </div>
+                <form method="post" action="/config/gate-add" class="actions">
+                  <input type="hidden" name="track" value={t.id} />
+                  <input type="hidden" name="gate" value={g.id} />
+                  <input type="hidden" name="list" value={g.reject?.length ? 'reject' : 'require'} />
+                  <input type="text" name="term" placeholder="add a word or phrase" required />
+                  {g.type === 'penalty' ? (
+                    <label class="muted">penalty <input type="number" name="points" value={String(g.points ?? 0)} style="width:60px"
+                      onchange="this.form.action='/config/gate-points'" /></label>
+                  ) : null}
+                  <button type="submit">Add</button>
+                </form>
+              </div>
+            ))}
+          </div>
+        ))}
+
+        <details class="card">
+          <summary>Advanced: raw JSON</summary>
+          <form method="post" action="/config/scoring" style="margin-top:8px">
+            <textarea name="scoring" rows={18}>{JSON.stringify(cfg, null, 2)}</textarea>
             <div class="actions" style="margin-top:8px">
               <button type="submit" class="primary">Validate and save</button>
-              <button type="submit" formaction="/config/replay">🔬 Simulate with Replay before saving</button>
+              <button type="submit" formaction="/config/replay">🔬 Simulate first (Replay)</button>
               <label>against last <input type="number" name="n" value="200" min="50" max="1000" style="width:80px" /> jobs</label>
             </div>
           </form>
-          <div class="card">
-            <h2 style="margin-top:0">History</h2>
-            <div class="table-wrap"><table>
-              {history.map((h) => (
-                <tr>
-                  <td class="muted">{fmt(h.ts)}</td>
-                  <td>{h.key}</td>
-                  <td class="muted">{h.replay_summary ? 'with replay' : ''}</td>
-                  <td>
-                    <form class="inline" method="post" action="/config/revert">
-                      <input type="hidden" name="id" value={String(h.id)} />
-                      <button type="submit">revert to previous version</button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </table></div>
-          </div>
+        </details>
+
+        <div class="card">
+          <h2 style="margin-top:0">History (what changed, in words)</h2>
+          <div class="table-wrap"><table>
+            {history.map((h) => (
+              <tr>
+                <td class="muted">{fmt(h.ts)}</td>
+                <td>{h.key}</td>
+                <td>{h.diff_summary ?? <span class="muted">{h.replay_summary ? 'with replay' : '—'}</span>}</td>
+                <td>
+                  <form class="inline" method="post" action="/config/revert"
+                    onsubmit={`return confirm('Revert this change? It will undo: ${String(h.diff_summary ?? 'the recorded change').replaceAll("'", '’')}')`}>
+                    <input type="hidden" name="id" value={String(h.id)} />
+                    <button type="submit">revert</button>
+                  </form>
+                </td>
+              </tr>
+            ))}
+          </table></div>
         </div>
       </>
     ));
   });
 
-  async function saveConfig(env: ConsoleEnv, key: string, value: string): Promise<void> {
+  // Chip edits accumulate in the draft; nothing goes live without the
+  // preview-impact → activate step.
+  app.post('/config/word-add', async (c) => {
+    const b = await c.req.parseBody();
+    const cat = String(b.category ?? '');
+    const term = String(b.term ?? '').trim().toLowerCase();
+    const weight = Number(b.weight ?? 2);
+    const { cfg } = await loadDraftOrLive(c.env);
+    const list = cfg.keywords[cat as keyof typeof cfg.keywords];
+    if (!list || !term) return c.redirect('/config?m=invalid word');
+    if (list.some((k) => k.term === term)) return c.redirect(`/config?m=${encodeURIComponent(`"${term}" is already listed`)}`);
+    list.push({ term, weight });
+    try { validateScoringConfig(cfg); } catch (err) {
+      return c.redirect(`/config?m=${encodeURIComponent(`rejected: ${err instanceof Error ? err.message : 'invalid'}`)}`);
+    }
+    await saveDraft(c.env, cfg);
+    return c.redirect(`/config?m=${encodeURIComponent(`added "${term}" — preview & activate to apply`)}`);
+  });
+
+  app.post('/config/word-remove', async (c) => {
+    const b = await c.req.parseBody();
+    const cat = String(b.category ?? '');
+    const term = String(b.term ?? '');
+    const { cfg } = await loadDraftOrLive(c.env);
+    const list = cfg.keywords[cat as keyof typeof cfg.keywords];
+    if (!list) return c.redirect('/config?m=invalid category');
+    cfg.keywords[cat as keyof typeof cfg.keywords] = list.filter((k) => k.term !== term);
+    await saveDraft(c.env, cfg);
+    return c.redirect(`/config?m=${encodeURIComponent(`removed "${term}" — preview & activate to apply`)}`);
+  });
+
+  app.post('/config/gate-add', async (c) => {
+    const b = await c.req.parseBody();
+    const term = String(b.term ?? '').trim().toLowerCase();
+    const { cfg } = await loadDraftOrLive(c.env);
+    const gate = cfg.tracks.find((t) => t.id === String(b.track))?.gates.find((g) => g.id === String(b.gate));
+    if (!gate || !term) return c.redirect('/config?m=invalid gate');
+    const list = String(b.list) === 'reject' ? 'reject' : 'require';
+    gate[list] = gate[list] ?? [];
+    if (gate[list]!.includes(term)) return c.redirect(`/config?m=${encodeURIComponent(`"${term}" is already listed`)}`);
+    gate[list]!.push(term);
+    await saveDraft(c.env, cfg);
+    return c.redirect(`/config?m=${encodeURIComponent(`added "${term}" — preview & activate to apply`)}`);
+  });
+
+  app.post('/config/gate-remove', async (c) => {
+    const b = await c.req.parseBody();
+    const { cfg } = await loadDraftOrLive(c.env);
+    const gate = cfg.tracks.find((t) => t.id === String(b.track))?.gates.find((g) => g.id === String(b.gate));
+    if (!gate) return c.redirect('/config?m=invalid gate');
+    const list = String(b.list) === 'reject' ? 'reject' : 'require';
+    gate[list] = (gate[list] ?? []).filter((x) => x !== String(b.term));
+    await saveDraft(c.env, cfg);
+    return c.redirect(`/config?m=${encodeURIComponent(`removed "${String(b.term)}" — preview & activate to apply`)}`);
+  });
+
+  app.post('/config/gate-points', async (c) => {
+    const b = await c.req.parseBody();
+    const points = Math.max(0, Math.min(100, Number(b.points ?? 0)));
+    const { cfg } = await loadDraftOrLive(c.env);
+    const gate = cfg.tracks.find((t) => t.id === String(b.track))?.gates.find((g) => g.id === String(b.gate));
+    if (!gate || gate.type !== 'penalty') return c.redirect('/config?m=invalid gate');
+    gate.points = points;
+    await saveDraft(c.env, cfg);
+    return c.redirect(`/config?m=${encodeURIComponent(`penalty set to −${points} — preview & activate to apply`)}`);
+  });
+
+  async function saveConfig(env: ConsoleEnv, key: string, value: string, diffSummary?: string): Promise<void> {
     const old = await env.DB.prepare('SELECT value FROM config WHERE key = ?').bind(key).first<{ value: string }>();
     await env.DB.batch([
       env.DB.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').bind(key, value),
-      env.DB.prepare('INSERT INTO config_history (ts, key, old_value, new_value) VALUES (?, ?, ?, ?)')
-        .bind(now(), key, old?.value ?? null, value),
+      env.DB.prepare('INSERT INTO config_history (ts, key, old_value, new_value, diff_summary) VALUES (?, ?, ?, ?, ?)')
+        .bind(now(), key, old?.value ?? null, value, diffSummary ?? null),
     ]);
   }
 
@@ -643,13 +831,21 @@ export function consoleApp(): App {
     const b = await c.req.parseBody();
     const raw = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
     if (raw) {
-      const cfg = JSON.parse(raw.value) as { thresholds: { apply: number; stretch: number } };
+      const old = JSON.parse(raw.value) as import('../scoring').ScoringConfig;
+      const cfg = JSON.parse(raw.value) as import('../scoring').ScoringConfig;
       cfg.thresholds = { apply: Number(b.apply), stretch: Number(b.stretch) };
       validateScoringConfig(cfg);
-      await saveConfig(c.env, 'scoring', JSON.stringify(cfg));
+      const { diffScoring } = await import('./config-diff');
+      await saveConfig(c.env, 'scoring', JSON.stringify(cfg), diffScoring(old, cfg));
+      // Keep an open draft coherent with the new thresholds.
+      const draft = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
+      if (draft) {
+        const d = JSON.parse(draft.value) as import('../scoring').ScoringConfig;
+        d.thresholds = cfg.thresholds;
+        await saveDraft(c.env, d);
+      }
     }
     await saveConfig(c.env, 'FRESHNESS_MAX_DAYS', String(Number(b.freshness ?? 3)));
-    await saveConfig(c.env, 'weekly_goal', String(Number(b.goal ?? 5)));
     return c.redirect('/config?m=saved');
   });
 
@@ -814,10 +1010,17 @@ export function consoleApp(): App {
   app.post('/config/replay', async (c) => {
     const b = await c.req.parseBody();
     try {
-      const parsed = JSON.parse(String(b.scoring ?? ''));
-      validateScoringConfig(parsed);
-      await c.env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring_draft', ?)")
-        .bind(JSON.stringify(parsed)).run();
+      if (b.scoring) {
+        // Advanced JSON path: the textarea content becomes the draft.
+        const parsed = JSON.parse(String(b.scoring));
+        validateScoringConfig(parsed);
+        await saveDraft(c.env, parsed);
+      } else {
+        // Chip-edit path: the accumulated draft is previewed as-is.
+        const draft = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
+        if (!draft) return c.redirect('/config?m=no changes to preview');
+        validateScoringConfig(JSON.parse(draft.value));
+      }
       const n = Math.min(1000, Math.max(50, Number(b.n ?? 200)));
       return c.redirect(`/config/replay?n=${n}`);
     } catch (err) {
@@ -893,13 +1096,15 @@ export function consoleApp(): App {
     const draft = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
     if (!draft) return c.redirect('/config?m=no draft');
     const old = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
+    const { diffScoring } = await import('./config-diff');
+    const diff = old ? diffScoring(JSON.parse(old.value), JSON.parse(draft.value)) : 'initial config';
     await c.env.DB.batch([
       c.env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring', ?)").bind(draft.value),
       c.env.DB.prepare("DELETE FROM config WHERE key='scoring_draft'"),
-      c.env.DB.prepare('INSERT INTO config_history (ts, key, old_value, new_value, replay_summary) VALUES (?, ?, ?, ?, ?)')
-        .bind(now(), 'scoring', old?.value ?? null, draft.value, String(b.summary ?? '')),
+      c.env.DB.prepare('INSERT INTO config_history (ts, key, old_value, new_value, replay_summary, diff_summary) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(now(), 'scoring', old?.value ?? null, draft.value, String(b.summary ?? ''), diff),
     ]);
-    return c.redirect('/config?m=draft activated (replay saved to history)');
+    return c.redirect(`/config?m=${encodeURIComponent(`activated: ${diff.slice(0, 120)} — now run Re-score so stored jobs pick it up`)}`);
   });
 
   app.post('/config/replay/discard', async (c) => {

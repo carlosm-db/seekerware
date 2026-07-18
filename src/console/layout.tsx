@@ -47,6 +47,9 @@ tr:last-child td { border-bottom:none }
   padding:14px 16px; margin-bottom:14px }
 .chip { background:var(--chip); border-radius:6px; padding:2px 8px; font-size:12px;
   display:inline-block; margin:1px 3px 1px 0 }
+button.chipx { border:none; background:none; padding:0 0 0 5px; min-height:0;
+  font-size:11px; color:var(--muted); cursor:pointer }
+button.chipx:hover { color:var(--bad) }
 .v-Apply { color:var(--ok); font-weight:700 } .v-Stretch-worth-it { color:var(--warn); font-weight:600 }
 .v-Skip { color:var(--muted) }
 .s-new { color:var(--accent) } .s-notified { color:var(--ok) } .s-closed { color:var(--muted) }
