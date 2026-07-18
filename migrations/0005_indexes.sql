@@ -1,5 +1,5 @@
--- Migration number: 0005 	 Indices para consola v2 (hallazgo de la revision de cuotas:
--- /semana, digest, replay y radar de similares escaneaban jobs completo sin indice).
+-- Migration number: 0005 	 Indexes for console v2 (finding from the quota review:
+-- /semana, digest, replay, and the similar-jobs radar scanned the full jobs table without an index).
 
 CREATE INDEX idx_jobs_first_seen  ON jobs (first_seen);
 CREATE INDEX idx_jobs_notified_at ON jobs (notified_at);

@@ -1,5 +1,5 @@
-// Consola v1 (UI.md §2): Hoy (triage), Vacantes, Empresas, Calibracion, Salud.
-// Server-rendered puro: cada mutacion es un <form> real. htmx llega en v2.
+// Console v1 (UI.md §2): Today (triage), Jobs, Companies, Calibration, Health.
+// Pure server-rendered: every mutation is a real <form>. htmx arrives in v2.
 
 import { Hono, type Context } from 'hono';
 import type { Child } from 'hono/jsx';
@@ -63,8 +63,8 @@ export function consoleApp(): App {
         <body>
           <form method="post" action="/login">
             <strong>Seekerware</strong>
-            <input type="password" name="password" placeholder="contraseña" autofocus />
-            <button type="submit">Entrar</button>
+            <input type="password" name="password" placeholder="password" autofocus />
+            <button type="submit">Sign in</button>
           </form>
         </body>
       </html>,
@@ -75,14 +75,14 @@ export function consoleApp(): App {
     const body = await c.req.parseBody();
     const ok = await verifyPassword(c.env, String(body.password ?? ''));
     if (!ok) {
-      await new Promise((r) => setTimeout(r, 500)); // freno anti fuerza bruta
+      await new Promise((r) => setTimeout(r, 500)); // brute-force throttle
       return c.redirect('/login');
     }
     setSessionCookie(c, await createSession(c.env));
     return c.redirect('/');
   });
 
-  // ---------- Hoy (triage) ----------
+  // ---------- Today (triage) ----------
   app.get('/', async (c) => {
     const nowIso = now();
     const strip = await c.env.DB.prepare(
@@ -105,31 +105,31 @@ export function consoleApp(): App {
       ).bind(nowIso).all<Record<string, string | number>>()
     ).results;
 
-    const health = strip?.run_status === 'ok' ? <span class="ok">verde</span>
-      : strip?.run_status ? <span class="warn">{strip.run_status}</span> : <span class="muted">sin runs</span>;
+    const health = strip?.run_status === 'ok' ? <span class="ok">green</span>
+      : strip?.run_status ? <span class="warn">{strip.run_status}</span> : <span class="muted">no runs</span>;
 
-    return page(c, 'Hoy', (
+    return page(c, 'Today', (
       <>
         <div class="statgrid">
-          <div class="stat"><div class="n">{rows.length}</div><div class="l">pendientes de triage</div></div>
-          <div class="stat"><div class="n">{strip?.applied_week ?? 0}/{strip?.goal ?? '5'}</div><div class="l">aplicadas esta semana</div></div>
-          <div class="stat"><div class="n">{health}</div><div class="l">salud del sistema</div></div>
+          <div class="stat"><div class="n">{rows.length}</div><div class="l">pending triage</div></div>
+          <div class="stat"><div class="n">{strip?.applied_week ?? 0}/{strip?.goal ?? '5'}</div><div class="l">applied this week</div></div>
+          <div class="stat"><div class="n">{health}</div><div class="l">system health</div></div>
         </div>
-        {rows.length === 0 ? <div class="card">Triage al dia ✓</div> : null}
+        {rows.length === 0 ? <div class="card">Triage up to date ✓</div> : null}
         {rows.map((j) => (
           <div class="card">
             <div>
               <a href={`/jobs/${j.url_hash}`}><strong>{j.title}</strong></a> — {j.company}
-              {' '}<span class="muted">📍 {j.location || 'sin ubicacion'}</span>
+              {' '}<span class="muted">📍 {j.location || 'no location'}</span>
             </div>
             <div style="margin:4px 0">
               <span class={`v-${j.verdict}`}>{j.verdict}</span> · {j.score}/100 ·{' '}
               <span class="chip">{j.track}</span>
-              {' '}<a href={String(j.url)} target="_blank" rel="noreferrer">ver vacante ↗</a>
+              {' '}<a href={String(j.url)} target="_blank" rel="noreferrer">view job ↗</a>
             </div>
             <div class="muted">{j.why_it_fits} · {j.positioning_lead}</div>
             <div class="actions" style="margin-top:8px">
-              {(['prepared|Preparar', 'applied|Aplicado', 'dismissed|Descartar'] as const).map((x) => {
+              {(['prepared|Prepare', 'applied|Applied', 'dismissed|Dismiss'] as const).map((x) => {
                 const [stage, label] = x.split('|');
                 return (
                   <form class="inline" method="post" action="/triage">
@@ -142,7 +142,7 @@ export function consoleApp(): App {
               <form class="inline" method="post" action="/triage">
                 <input type="hidden" name="hash" value={String(j.url_hash)} />
                 <input type="hidden" name="stage" value="snooze3" />
-                <button type="submit">Posponer 3d</button>
+                <button type="submit">Snooze 3d</button>
               </form>
             </div>
           </div>
@@ -156,15 +156,15 @@ export function consoleApp(): App {
     const hash = String(b.hash ?? '');
     const action = String(b.stage ?? '');
     const ts = now();
-    if (!hash || !action) return c.redirect('/?m=accion invalida');
+    if (!hash || !action) return c.redirect('/?m=invalid action');
     if (action === 'snooze3') {
       const until = new Date(Date.now() + 3 * 86400000).toISOString();
       await c.env.DB.prepare(
         `INSERT INTO applications (url_hash, stage, snoozed_until, updated_at) VALUES (?, 'prepared', ?, ?)
          ON CONFLICT(url_hash) DO UPDATE SET snoozed_until = ?, updated_at = ?`,
       ).bind(hash, until, ts, until, ts).run();
-      await jobEvent(c.env, hash, 'snoozed', 'hasta ' + until.slice(0, 10));
-      return c.redirect('/?m=pospuesto 3 dias');
+      await jobEvent(c.env, hash, 'snoozed', 'until ' + until.slice(0, 10));
+      return c.redirect('/?m=snoozed 3 days');
     }
     const appliedAt = action === 'applied' ? ts : null;
     await c.env.DB.prepare(
@@ -175,7 +175,7 @@ export function consoleApp(): App {
     return c.redirect(`/?m=${action}`);
   });
 
-  // ---------- Vacantes ----------
+  // ---------- Jobs ----------
   app.get('/jobs', async (c) => {
     const q = c.req.query();
     const where: string[] = ['1=1'];
@@ -202,19 +202,19 @@ export function consoleApp(): App {
       </select>
     );
 
-    return page(c, 'Vacantes', (
+    return page(c, 'Jobs', (
       <>
         <form method="get" action="/jobs" class="card actions">
           {sel('track', ['canada_coop', 'colombia_perm', 'contractor_usd'], q.track)}
           {sel('verdict', ['Apply', 'Stretch-worth-it', 'Skip'], q.verdict)}
           {sel('status', ['new', 'notified', 'closed', 'skipped'], q.status)}
-          <input type="text" name="q" placeholder="buscar en titulo" value={q.q ?? ''} />
-          <button type="submit" class="primary">Filtrar</button>
-          <a href="/jobs?verdict=Apply&status=new">Apply pendientes</a>
-          <a href="/jobs?status=notified">Notificados</a>
+          <input type="text" name="q" placeholder="search in title" value={q.q ?? ''} />
+          <button type="submit" class="primary">Filter</button>
+          <a href="/jobs?verdict=Apply&status=new">Apply pending</a>
+          <a href="/jobs?status=notified">Notified</a>
         </form>
         <table>
-          <tr><th>titulo</th><th>empresa</th><th>track</th><th>score</th><th>verdict</th><th>status</th><th>stage</th><th>visto</th></tr>
+          <tr><th>title</th><th>company</th><th>track</th><th>score</th><th>verdict</th><th>status</th><th>stage</th><th>seen</th></tr>
           {rows.map((j) => (
             <tr>
               <td><a href={`/jobs/${j.url_hash}`}>{j.title}</a><div class="muted">{j.location}</div></td>
@@ -228,7 +228,7 @@ export function consoleApp(): App {
             </tr>
           ))}
         </table>
-        <p class="muted">{rows.length} filas (max 100)</p>
+        <p class="muted">{rows.length} rows (max 100)</p>
       </>
     ));
   });
@@ -244,7 +244,7 @@ export function consoleApp(): App {
         .bind(hash).all<Record<string, string>>()
     ).results;
     let breakdown: ScoreResult | null = null;
-    try { breakdown = JSON.parse(String(j.score_breakdown ?? '')) as ScoreResult; } catch { /* sin breakdown */ }
+    try { breakdown = JSON.parse(String(j.score_breakdown ?? '')) as ScoreResult; } catch { /* no breakdown */ }
     const similares = j.title_norm
       ? (
           await c.env.DB.prepare(
@@ -259,14 +259,14 @@ export function consoleApp(): App {
       <>
         <div class="card">
           <div><strong>{j.company}</strong> · 📍 {j.location || '—'} · <span class={`v-${j.verdict}`}>{j.verdict}</span> · {j.score}/100 · <span class="chip">{j.track ?? '—'}</span> · <span class={`s-${j.status}`}>{j.status}</span></div>
-          <div class="muted">publicado: {fmt(j.posted_at as string)} · visto: {fmt(j.first_seen as string)} · notificado: {fmt(j.notified_at as string)}</div>
-          <div style="margin-top:6px"><a href={String(j.url)} target="_blank" rel="noreferrer">abrir vacante ↗</a></div>
+          <div class="muted">posted: {fmt(j.posted_at as string)} · seen: {fmt(j.first_seen as string)} · notified: {fmt(j.notified_at as string)}</div>
+          <div style="margin-top:6px"><a href={String(j.url)} target="_blank" rel="noreferrer">open job ↗</a></div>
         </div>
         {breakdown ? (
           <div class="card">
-            <h2 style="margin-top:0">Desglose del score</h2>
+            <h2 style="margin-top:0">Score breakdown</h2>
             <table>
-              <tr><th>categoria</th><th>matches</th><th>norm</th><th>puntos</th></tr>
+              <tr><th>category</th><th>matches</th><th>norm</th><th>points</th></tr>
               {Object.entries(breakdown.breakdown).map(([cat, b]) => (
                 <tr>
                   <td>{cat}</td>
@@ -276,9 +276,9 @@ export function consoleApp(): App {
                 </tr>
               ))}
             </table>
-            <h2>Gates por track</h2>
+            <h2>Gates by track</h2>
             <table>
-              <tr><th>track</th><th>verdict</th><th>score aj.</th><th>gates</th></tr>
+              <tr><th>track</th><th>verdict</th><th>adj. score</th><th>gates</th></tr>
               {Object.entries(breakdown.tracks).map(([t, r]) => (
                 <tr>
                   <td>{t}</td>
@@ -288,15 +288,15 @@ export function consoleApp(): App {
                 </tr>
               ))}
             </table>
-            {breakdown.near_miss_reason ? <p class="warn">por que no: {breakdown.near_miss_reason}</p> : null}
+            {breakdown.near_miss_reason ? <p class="warn">why not: {breakdown.near_miss_reason}</p> : null}
           </div>
         ) : null}
         <div class="card">
-          <details><summary>descripcion completa</summary><p>{j.description_text}</p></details>
+          <details><summary>full description</summary><p>{j.description_text}</p></details>
         </div>
         {similares.length > 0 ? (
           <div class="card">
-            <h2 style="margin-top:0">Radar de similares ({similares.length})</h2>
+            <h2 style="margin-top:0">Similar jobs radar ({similares.length})</h2>
             {similares.map((s) => (
               <div>
                 <a href={`/jobs/${s.url_hash}`}>{s.title}</a> @ {s.company} ·{' '}
@@ -306,8 +306,8 @@ export function consoleApp(): App {
           </div>
         ) : null}
         <div class="card">
-          <h2 style="margin-top:0">Historial</h2>
-          {events.length === 0 ? <p class="muted">sin eventos</p> : (
+          <h2 style="margin-top:0">History</h2>
+          {events.length === 0 ? <p class="muted">no events</p> : (
             <table>{events.map((e) => <tr><td class="muted">{fmt(e.ts)}</td><td>{e.actor}</td><td>{e.event}</td><td class="muted">{e.detail}</td></tr>)}</table>
           )}
         </div>
@@ -315,7 +315,7 @@ export function consoleApp(): App {
     ));
   });
 
-  // ---------- Empresas ----------
+  // ---------- Companies ----------
   app.get('/companies', async (c) => {
     const rows = (
       await c.env.DB.prepare(
@@ -328,17 +328,17 @@ export function consoleApp(): App {
       ).all<Record<string, string | number | null>>()
     ).results;
 
-    return page(c, 'Empresas', (
+    return page(c, 'Companies', (
       <>
         <form method="post" action="/companies" class="card actions">
-          <input type="text" name="name" placeholder="nombre" required />
+          <input type="text" name="name" placeholder="name" required />
           <select name="ats"><option>greenhouse</option><option>lever</option><option>ashby</option></select>
-          <input type="text" name="token" placeholder="token del board" required />
-          <input type="text" name="notes" placeholder="notas" />
-          <button type="submit" class="primary">Agregar y probar</button>
+          <input type="text" name="token" placeholder="board token" required />
+          <input type="text" name="notes" placeholder="notes" />
+          <button type="submit" class="primary">Add and test</button>
         </form>
         <table>
-          <tr><th>empresa</th><th>ats</th><th>token</th><th>activa</th><th>salud</th><th>jobs 90d</th><th>survivors</th><th>yield</th></tr>
+          <tr><th>company</th><th>ats</th><th>token</th><th>active</th><th>health</th><th>jobs 90d</th><th>survivors</th><th>yield</th></tr>
           {rows.map((r) => (
             <tr>
               <td>{r.name}<div class="muted">{r.notes}</div></td>
@@ -347,10 +347,10 @@ export function consoleApp(): App {
               <td>
                 <form class="inline" method="post" action="/companies/toggle">
                   <input type="hidden" name="id" value={String(r.id)} />
-                  <button type="submit">{r.active ? '✅ si' : '⛔ no'}</button>
+                  <button type="submit">{r.active ? '✅ yes' : '⛔ no'}</button>
                 </form>
               </td>
-              <td>{Number(r.fail_count) > 0 ? <span class="bad">{r.fail_count} fallos · {r.last_error}</span> : <span class="ok">ok {fmt(r.last_ok_fetch as string)}</span>}</td>
+              <td>{Number(r.fail_count) > 0 ? <span class="bad">{r.fail_count} failures · {r.last_error}</span> : <span class="ok">ok {fmt(r.last_ok_fetch as string)}</span>}</td>
               <td>{r.jobs_seen}</td>
               <td>{r.survivors ?? 0}</td>
               <td>{Number(r.jobs_seen) > 0 ? `${((Number(r.survivors ?? 0) / Number(r.jobs_seen)) * 100).toFixed(1)}%` : '—'}</td>
@@ -367,16 +367,16 @@ export function consoleApp(): App {
     const ats = String(b.ats ?? 'greenhouse');
     const token = String(b.token ?? '').trim();
     const notes = String(b.notes ?? '');
-    if (!name || !token) return c.redirect('/companies?m=faltan campos');
-    let probe = 'connector pendiente (paso 5): guardada inactiva';
+    if (!name || !token) return c.redirect('/companies?m=missing fields');
+    let probe = 'connector pending (step 5): saved inactive';
     let active = 0;
     if (ats === 'greenhouse') {
       try {
         const jobs = await greenhouse.fetchJobs({ id: 0, name, ats: 'greenhouse', token, active: true } as Company);
-        probe = `token OK: ${jobs.length} jobs en el board`;
+        probe = `token OK: ${jobs.length} jobs on the board`;
         active = 1;
       } catch (err) {
-        probe = `token FALLO: ${err instanceof Error ? err.message : 'error'} — guardada inactiva`;
+        probe = `token FAILED: ${err instanceof Error ? err.message : 'error'} — saved inactive`;
       }
     }
     await c.env.DB.prepare(
@@ -388,10 +388,10 @@ export function consoleApp(): App {
   app.post('/companies/toggle', async (c) => {
     const b = await c.req.parseBody();
     await c.env.DB.prepare('UPDATE companies SET active = 1 - active WHERE id = ?').bind(Number(b.id)).run();
-    return c.redirect('/companies?m=actualizada');
+    return c.redirect('/companies?m=updated');
   });
 
-  // ---------- Calibracion ----------
+  // ---------- Calibration ----------
   app.get('/config', async (c) => {
     const rows = (
       await c.env.DB.prepare("SELECT key, value FROM config WHERE key IN ('scoring','FRESHNESS_MAX_DAYS','weekly_goal')").all<{ key: string; value: string }>()
@@ -404,36 +404,36 @@ export function consoleApp(): App {
         .all<{ id: number; ts: string; key: string; replay_summary: string | null }>()
     ).results;
 
-    return page(c, 'Calibracion', (
+    return page(c, 'Calibration', (
       <>
         <form method="post" action="/config/quick" class="card actions">
           <label>Apply ≥ <input type="number" name="apply" value={String(thresholds.apply)} style="width:70px" /></label>
           <label>Stretch ≥ <input type="number" name="stretch" value={String(thresholds.stretch)} style="width:70px" /></label>
-          <label>Freshness dias <input type="number" name="freshness" value={cfg.FRESHNESS_MAX_DAYS ?? '3'} style="width:60px" /></label>
-          <label>Objetivo semanal <input type="number" name="goal" value={cfg.weekly_goal ?? '5'} style="width:60px" /></label>
-          <button type="submit" class="primary">Guardar</button>
+          <label>Freshness days <input type="number" name="freshness" value={cfg.FRESHNESS_MAX_DAYS ?? '3'} style="width:60px" /></label>
+          <label>Weekly goal <input type="number" name="goal" value={cfg.weekly_goal ?? '5'} style="width:60px" /></label>
+          <button type="submit" class="primary">Save</button>
         </form>
         <form method="post" action="/config/scoring" class="card">
-          <h2 style="margin-top:0">Config de scoring (JSON completo — avanzado)</h2>
+          <h2 style="margin-top:0">Scoring config (full JSON — advanced)</h2>
           <textarea name="scoring" rows={22}>{cfg.scoring ?? ''}</textarea>
           <div class="actions" style="margin-top:8px">
-            <button type="submit" class="primary">Validar y guardar</button>
-            <button type="submit" formaction="/config/replay">🔬 Simular con Replay antes de guardar</button>
-            <label>contra ultimos <input type="number" name="n" value="200" min="50" max="1000" style="width:80px" /> jobs</label>
+            <button type="submit" class="primary">Validate and save</button>
+            <button type="submit" formaction="/config/replay">🔬 Simulate with Replay before saving</button>
+            <label>against last <input type="number" name="n" value="200" min="50" max="1000" style="width:80px" /> jobs</label>
           </div>
         </form>
         <div class="card">
-          <h2 style="margin-top:0">Historial</h2>
+          <h2 style="margin-top:0">History</h2>
           <table>
             {history.map((h) => (
               <tr>
                 <td class="muted">{fmt(h.ts)}</td>
                 <td>{h.key}</td>
-                <td class="muted">{h.replay_summary ? 'con replay' : ''}</td>
+                <td class="muted">{h.replay_summary ? 'with replay' : ''}</td>
                 <td>
                   <form class="inline" method="post" action="/config/revert">
                     <input type="hidden" name="id" value={String(h.id)} />
-                    <button type="submit">revertir a la version anterior</button>
+                    <button type="submit">revert to previous version</button>
                   </form>
                 </td>
               </tr>
@@ -464,7 +464,7 @@ export function consoleApp(): App {
     }
     await saveConfig(c.env, 'FRESHNESS_MAX_DAYS', String(Number(b.freshness ?? 3)));
     await saveConfig(c.env, 'weekly_goal', String(Number(b.goal ?? 5)));
-    return c.redirect('/config?m=guardado');
+    return c.redirect('/config?m=saved');
   });
 
   app.post('/config/scoring', async (c) => {
@@ -473,17 +473,17 @@ export function consoleApp(): App {
       const parsed = JSON.parse(String(b.scoring ?? ''));
       validateScoringConfig(parsed);
       await saveConfig(c.env, 'scoring', JSON.stringify(parsed));
-      return c.redirect('/config?m=scoring valido y guardado');
+      return c.redirect('/config?m=scoring valid and saved');
     } catch (err) {
-      return c.redirect(`/config?m=${encodeURIComponent(`ERROR: ${err instanceof Error ? err.message : 'invalido'}`)}`);
+      return c.redirect(`/config?m=${encodeURIComponent(`ERROR: ${err instanceof Error ? err.message : 'invalid'}`)}`);
     }
   });
 
   // ---------- Tracker ----------
   const STAGES = ['prepared', 'applied', 'interview', 'offer', 'rejected'] as const;
   const STAGE_LABEL: Record<string, string> = {
-    prepared: 'Preparado', applied: 'Aplicado', interview: 'Entrevista',
-    offer: 'Oferta', rejected: 'Rechazado', dismissed: 'Descartado',
+    prepared: 'Prepared', applied: 'Applied', interview: 'Interview',
+    offer: 'Offer', rejected: 'Rejected', dismissed: 'Dismissed',
   };
 
   app.get('/tracker', async (c) => {
@@ -505,8 +505,8 @@ export function consoleApp(): App {
       <>
         {due.length > 0 ? (
           <div class="card">
-            <h2 style="margin-top:0">Seguimientos vencidos</h2>
-            {due.map((r) => <div><a href={`/jobs/${r.url_hash}`}>{r.title}</a> @ {r.company} — seguimiento {String(r.follow_up_at).slice(0, 10)}</div>)}
+            <h2 style="margin-top:0">Overdue follow-ups</h2>
+            {due.map((r) => <div><a href={`/jobs/${r.url_hash}`}>{r.title}</a> @ {r.company} — follow-up {String(r.follow_up_at).slice(0, 10)}</div>)}
           </div>
         ) : null}
         <div style="display:flex; gap:14px; align-items:flex-start; overflow-x:auto">
@@ -518,7 +518,7 @@ export function consoleApp(): App {
                 {col.map((r) => (
                   <div class="card">
                     <a href={`/jobs/${r.url_hash}`}><strong>{r.title}</strong></a>
-                    <div class="muted">{r.company} · <span class="chip">{r.track}</span> · {daysIn(r.updated_at)}d en etapa</div>
+                    <div class="muted">{r.company} · <span class="chip">{r.track}</span> · {daysIn(r.updated_at)}d in stage</div>
                     {r.notes ? <div class="muted">📝 {String(r.notes).slice(0, 80)}</div> : null}
                     <form method="post" action="/tracker/update" style="margin-top:6px; display:grid; gap:4px">
                       <input type="hidden" name="hash" value={String(r.url_hash)} />
@@ -528,8 +528,8 @@ export function consoleApp(): App {
                         </select>
                         <input type="date" name="follow_up" value={r.follow_up_at ? String(r.follow_up_at).slice(0, 10) : ''} />
                       </div>
-                      <input type="text" name="note" placeholder="nota (opcional)" />
-                      <button type="submit">Actualizar</button>
+                      <input type="text" name="note" placeholder="note (optional)" />
+                      <button type="submit">Update</button>
                     </form>
                   </div>
                 ))}
@@ -545,7 +545,7 @@ export function consoleApp(): App {
     const b = await c.req.parseBody();
     const hash = String(b.hash ?? '');
     const stage = String(b.stage ?? '');
-    if (!hash || !STAGE_LABEL[stage]) return c.redirect('/tracker?m=invalido');
+    if (!hash || !STAGE_LABEL[stage]) return c.redirect('/tracker?m=invalid');
     const ts = now();
     const followUp = b.follow_up ? `${String(b.follow_up)}T12:00:00Z` : null;
     const note = String(b.note ?? '').trim();
@@ -559,10 +559,10 @@ export function consoleApp(): App {
        WHERE url_hash = ?`,
     ).bind(...(stamp ? [stage, followUp, ts, note, note, ts, hash] : [stage, followUp, ts, note, note, hash])).run();
     await jobEvent(c.env, hash, `stage:${stage}`, note);
-    return c.redirect('/tracker?m=actualizado');
+    return c.redirect('/tracker?m=updated');
   });
 
-  // ---------- Semana ----------
+  // ---------- Week ----------
   app.get('/semana', async (c) => {
     const win = async (from: string, to: string) =>
       (await c.env.DB.prepare(
@@ -602,21 +602,21 @@ export function consoleApp(): App {
     );
     const maxVal = Math.max(1, ...Object.values(cur).map(Number), ...Object.values(prev).map(Number));
 
-    return page(c, 'Semana', (
+    return page(c, 'Week', (
       <>
         <div class="statgrid">
-          <div class="stat"><div class="n">{cur.aplicadas}/{goal}</div><div class="l">aplicadas vs objetivo</div></div>
-          <div class="stat"><div class="n">{median ?? '—'}{median ? 'h' : ''}</div><div class="l">time-to-apply mediano (30d)</div></div>
-          <div class="stat"><div class="n">{aging?.n ?? 0}</div><div class="l">estancadas &gt;7d</div></div>
+          <div class="stat"><div class="n">{cur.aplicadas}/{goal}</div><div class="l">applied vs goal</div></div>
+          <div class="stat"><div class="n">{median ?? '—'}{median ? 'h' : ''}</div><div class="l">median time-to-apply (30d)</div></div>
+          <div class="stat"><div class="n">{aging?.n ?? 0}</div><div class="l">stalled &gt;7d</div></div>
         </div>
         <div class="card">
           <table>
-            <tr><th>semana</th><th>nuevos</th><th>survivors</th><th>notificadas</th><th>aplicadas</th><th>entrevistas</th></tr>
-            {stagesRow('esta', cur, maxVal)}
-            {stagesRow('anterior', prev, maxVal)}
+            <tr><th>week</th><th>new</th><th>survivors</th><th>notified</th><th>applied</th><th>interviews</th></tr>
+            {stagesRow('this', cur, maxVal)}
+            {stagesRow('previous', prev, maxVal)}
           </table>
         </div>
-        <p class="muted">El digest de los lunes a Telegram resume estos mismos numeros.</p>
+        <p class="muted">The Monday digest to Telegram summarizes these same numbers.</p>
       </>
     ));
   });
@@ -632,7 +632,7 @@ export function consoleApp(): App {
       const n = Math.min(1000, Math.max(50, Number(b.n ?? 200)));
       return c.redirect(`/config/replay?n=${n}`);
     } catch (err) {
-      return c.redirect(`/config?m=${encodeURIComponent(`borrador invalido: ${err instanceof Error ? err.message : ''}`)}`);
+      return c.redirect(`/config?m=${encodeURIComponent(`invalid draft: ${err instanceof Error ? err.message : ''}`)}`);
     }
   });
 
@@ -654,7 +654,7 @@ export function consoleApp(): App {
       const key = row.old_verdict + '→' + row.new_verdict;
       sum.byVerdict[key] = (sum.byVerdict[key] || 0) + 1;
       if (row.new_score > row.old_score) sum.up++; else sum.down++;
-      // titulos/empresas son texto de terceros: SOLO textContent, jamas innerHTML
+      // titles/companies are third-party text: ONLY textContent, never innerHTML
       const tr = document.createElement('tr');
       const td = (parent) => parent.appendChild(document.createElement('td'));
       const t1 = td(tr); t1.textContent = row.title;
@@ -666,32 +666,32 @@ export function consoleApp(): App {
       tbody.appendChild(tr);
     }
     cursor = d.next_cursor;
-    bar.textContent = 'procesados ' + d.processed_total + ' / ' + d.total_target +
-      ' · cambian ' + sum.changed;
+    bar.textContent = 'processed ' + d.processed_total + ' / ' + d.total_target +
+      ' · changed ' + sum.changed;
     if (d.done) break;
   }
   const parts = Object.entries(sum.byVerdict).map(([k, v]) => v + ' ' + k).join(' · ');
-  bar.textContent = 'listo: ' + sum.changed + ' de ' + sum.total + ' cambian de verdict' +
+  bar.textContent = 'done: ' + sum.changed + ' of ' + sum.total + ' change verdict' +
     (parts ? ' (' + parts + ')' : '');
   document.getElementById('summary-input').value = JSON.stringify(sum);
   document.getElementById('apply-form').style.display = 'block';
 })();`;
-    return page(c, 'Replay (simulacion)', (
+    return page(c, 'Replay (simulation)', (
       <>
         <div class="card">
-          <p>Simulando el borrador contra los ultimos {n} jobs almacenados. <strong id="bar">iniciando…</strong></p>
+          <p>Simulating the draft against the last {n} stored jobs. <strong id="bar">starting…</strong></p>
           <div id="apply-form" style="display:none">
             <form method="post" action="/config/replay/apply" class="inline">
               <input type="hidden" name="summary" id="summary-input" />
-              <button type="submit" class="primary">Guardar y activar</button>
+              <button type="submit" class="primary">Save and activate</button>
             </form>{' '}
             <form method="post" action="/config/replay/discard" class="inline">
-              <button type="submit">Descartar borrador</button>
+              <button type="submit">Discard draft</button>
             </form>
           </div>
         </div>
         <table>
-          <tr><th>job</th><th>score</th><th>antes</th><th>despues</th></tr>
+          <tr><th>job</th><th>score</th><th>before</th><th>after</th></tr>
           <tbody id="diffs" />
         </table>
         <script dangerouslySetInnerHTML={{ __html: runner }} />
@@ -702,7 +702,7 @@ export function consoleApp(): App {
   app.post('/config/replay/apply', async (c) => {
     const b = await c.req.parseBody();
     const draft = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
-    if (!draft) return c.redirect('/config?m=sin borrador');
+    if (!draft) return c.redirect('/config?m=no draft');
     const old = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
     await c.env.DB.batch([
       c.env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring', ?)").bind(draft.value),
@@ -710,24 +710,24 @@ export function consoleApp(): App {
       c.env.DB.prepare('INSERT INTO config_history (ts, key, old_value, new_value, replay_summary) VALUES (?, ?, ?, ?, ?)')
         .bind(now(), 'scoring', old?.value ?? null, draft.value, String(b.summary ?? '')),
     ]);
-    return c.redirect('/config?m=borrador activado (replay guardado en historial)');
+    return c.redirect('/config?m=draft activated (replay saved to history)');
   });
 
   app.post('/config/replay/discard', async (c) => {
     await c.env.DB.prepare("DELETE FROM config WHERE key='scoring_draft'").run();
-    return c.redirect('/config?m=borrador descartado');
+    return c.redirect('/config?m=draft discarded');
   });
 
   app.post('/config/revert', async (c) => {
     const b = await c.req.parseBody();
     const row = await c.env.DB.prepare('SELECT key, old_value FROM config_history WHERE id = ?')
       .bind(Number(b.id)).first<{ key: string; old_value: string | null }>();
-    if (!row?.old_value) return c.redirect('/config?m=nada que revertir');
+    if (!row?.old_value) return c.redirect('/config?m=nothing to revert');
     await saveConfig(c.env, row.key, row.old_value);
-    return c.redirect(`/config?m=${encodeURIComponent(`revertido: ${row.key}`)}`);
+    return c.redirect(`/config?m=${encodeURIComponent(`reverted: ${row.key}`)}`);
   });
 
-  // ---------- Banco ----------
+  // ---------- Bank ----------
   app.get('/blocks', async (c) => {
     const rows = (
       await c.env.DB.prepare(
@@ -735,8 +735,8 @@ export function consoleApp(): App {
       ).all<Record<string, string | null>>()
     ).results;
     if (rows.length === 0) {
-      return page(c, 'Banco de blocks', (
-        <div class="card"><p>El banco aun no esta sembrado en la base (seeds del paso 6).</p></div>
+      return page(c, 'Blocks bank', (
+        <div class="card"><p>The bank is not yet seeded in the database (step 6 seeds).</p></div>
       ));
     }
     const counts = {
@@ -744,20 +744,20 @@ export function consoleApp(): App {
       approved: rows.filter((r) => r.status === 'approved').length,
       esOk: rows.filter((r) => r.es_status === 'approved').length,
     };
-    return page(c, 'Banco de blocks', (
+    return page(c, 'Blocks bank', (
       <>
         <div class="statgrid">
-          <div class="stat"><div class="n">{counts.approved}/{counts.total}</div><div class="l">blocks aprobados</div></div>
-          <div class="stat"><div class="n">{counts.esOk}/{counts.total}</div><div class="l">paridad ES aprobada</div></div>
+          <div class="stat"><div class="n">{counts.approved}/{counts.total}</div><div class="l">approved blocks</div></div>
+          <div class="stat"><div class="n">{counts.esOk}/{counts.total}</div><div class="l">ES parity approved</div></div>
         </div>
         <div class="card actions">
           <form class="inline" method="post" action="/blocks/approve-all">
-            <button type="submit" class="primary">Aprobar TODO el banco (EN + ES)</button>
+            <button type="submit" class="primary">Approve the ENTIRE bank (EN + ES)</button>
           </form>
-          <span class="muted">La revision ligera: mira los CVs de MUESTRA en /cvs; si te representan, aprueba todo aqui.</span>
+          <span class="muted">Light review: look at the SAMPLE CVs in /cvs; if they represent you, approve everything here.</span>
         </div>
         <table>
-          <tr><th>id</th><th>seccion</th><th>angle</th><th>estado</th><th>ES</th><th>texto (EN)</th><th></th></tr>
+          <tr><th>id</th><th>section</th><th>angle</th><th>status</th><th>ES</th><th>text (EN)</th><th></th></tr>
           {rows.map((b) => (
             <tr>
               <td class="muted">{b.id}</td>
@@ -770,12 +770,12 @@ export function consoleApp(): App {
                 {b.status !== 'approved' ? (
                   <form class="inline" method="post" action="/blocks/approve">
                     <input type="hidden" name="id" value={String(b.id)} />
-                    <button type="submit">aprobar</button>
+                    <button type="submit">approve</button>
                   </form>
                 ) : (
                   <form class="inline" method="post" action="/blocks/retire">
                     <input type="hidden" name="id" value={String(b.id)} />
-                    <button type="submit">retirar</button>
+                    <button type="submit">retire</button>
                   </form>
                 )}
               </td>
@@ -791,21 +791,21 @@ export function consoleApp(): App {
     await c.env.DB.prepare(
       "UPDATE blocks SET status='approved', es_status = CASE WHEN text_es IS NOT NULL THEN 'approved' ELSE es_status END, updated_at=? WHERE id=?",
     ).bind(now(), String(b.id)).run();
-    return c.redirect('/blocks?m=aprobado');
+    return c.redirect('/blocks?m=approved');
   });
 
   app.post('/blocks/retire', async (c) => {
     const b = await c.req.parseBody();
     await c.env.DB.prepare("UPDATE blocks SET status='retired', updated_at=? WHERE id=?")
       .bind(now(), String(b.id)).run();
-    return c.redirect('/blocks?m=retirado (nunca se borra)');
+    return c.redirect('/blocks?m=retired (never deleted)');
   });
 
   app.post('/blocks/approve-all', async (c) => {
     await c.env.DB.prepare(
       "UPDATE blocks SET status='approved', es_status = CASE WHEN text_es IS NOT NULL THEN 'approved' ELSE es_status END, updated_at=? WHERE status IN ('draft','review')",
     ).bind(now()).run();
-    return c.redirect('/blocks?m=banco completo aprobado');
+    return c.redirect('/blocks?m=entire bank approved');
   });
 
   // ---------- CVs ----------
@@ -825,26 +825,26 @@ export function consoleApp(): App {
          ORDER BY j.score DESC LIMIT 30`,
       ).all<Record<string, string>>()
     ).results;
-    return page(c, 'Biblioteca de CVs', (
+    return page(c, 'CV library', (
       <>
         <form method="post" action="/cvs/sample" class="card actions">
-          <strong>Generar CV de MUESTRA</strong>
+          <strong>Generate SAMPLE CV</strong>
           <select name="hash">
             {candidates.map((j) => <option value={j.url_hash}>{`${j.title!.slice(0, 50)} @ ${j.company}`}</option>)}
           </select>
           <select name="lang"><option value="en">EN</option><option value="es">ES</option></select>
-          <button type="submit" class="primary">Generar (usa blocks draft — solo revision)</button>
+          <button type="submit" class="primary">Generate (uses draft blocks — review only)</button>
         </form>
-        {cvs.length === 0 ? <div class="card"><p>Aun no hay CVs generados.</p></div> : (
+        {cvs.length === 0 ? <div class="card"><p>No CVs generated yet.</p></div> : (
           <table>
-            <tr><th>#</th><th>job</th><th>idioma</th><th>tipo</th><th>doc</th><th>seleccion</th><th>tweaks del verifier</th><th>fecha</th></tr>
+            <tr><th>#</th><th>job</th><th>language</th><th>type</th><th>doc</th><th>selection</th><th>verifier tweaks</th><th>date</th></tr>
             {cvs.map((v) => (
               <tr>
                 <td>{v.id}</td>
                 <td>{v.title} <div class="muted">{v.company}</div></td>
                 <td>{v.lang}</td>
-                <td>{v.sample ? <span class="warn">MUESTRA</span> : <span class="ok">real</span>}</td>
-                <td><a href={String(v.doc_url)} target="_blank" rel="noreferrer">abrir Doc ↗</a></td>
+                <td>{v.sample ? <span class="warn">SAMPLE</span> : <span class="ok">real</span>}</td>
+                <td><a href={String(v.doc_url)} target="_blank" rel="noreferrer">open Doc ↗</a></td>
                 <td class="muted">{String(v.rationale ?? '').slice(0, 80)}</td>
                 <td class="muted">{String(v.verifier_notes ?? '').slice(0, 80)}</td>
                 <td class="muted">{fmt(String(v.created_at))}</td>
@@ -864,7 +864,7 @@ export function consoleApp(): App {
       `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, co.name company
        FROM jobs j JOIN companies co ON co.id = j.company_id WHERE j.url_hash = ?`,
     ).bind(hash).first<Record<string, string | null>>();
-    if (!j) return c.redirect('/cvs?m=job no encontrado');
+    if (!j) return c.redirect('/cvs?m=job not found');
     const { generateCv } = await import('../ia/cv_factory');
     const fx = await generateCv(c.env, {
       id: String(j.ext_id ?? ''), company: String(j.company), title: String(j.title),
@@ -872,10 +872,10 @@ export function consoleApp(): App {
       posted_at: null, ats: (j.ats ?? 'greenhouse') as 'greenhouse', raw: null,
       url_hash: hash, track: j.track ?? null,
     }, lang, true);
-    return c.redirect(`/cvs?m=${encodeURIComponent(fx.ok ? `muestra generada: revisala en Drive` : `FALLO: ${fx.error}`)}`);
+    return c.redirect(`/cvs?m=${encodeURIComponent(fx.ok ? `sample generated: review it in Drive` : `FAILED: ${fx.error}`)}`);
   });
 
-  // ---------- Salud ----------
+  // ---------- Health ----------
   app.get('/salud', async (c) => {
     const runs = (
       await c.env.DB.prepare(
@@ -891,16 +891,16 @@ export function consoleApp(): App {
       "SELECT MAX(subrequests) peak_subreq, SUM(d1_reads) reads, SUM(d1_writes) writes, COUNT(*) runs FROM runs WHERE date(started_at) = date('now')",
     ).first<{ peak_subreq: number; reads: number; writes: number; runs: number }>();
 
-    return page(c, 'Salud', (
+    return page(c, 'Health', (
       <>
         <div class="statgrid">
-          <div class="stat"><div class="n">{today?.runs ?? 0}</div><div class="l">runs hoy</div></div>
-          <div class="stat"><div class="n">{today?.peak_subreq ?? 0}/50</div><div class="l">pico subrequests</div></div>
-          <div class="stat"><div class="n">{today?.writes ?? 0}</div><div class="l">escrituras D1 hoy (límite 100k)</div></div>
-          <div class="stat"><div class="n">{today?.reads ?? 0}</div><div class="l">lecturas D1 hoy (límite 5M)</div></div>
+          <div class="stat"><div class="n">{today?.runs ?? 0}</div><div class="l">runs today</div></div>
+          <div class="stat"><div class="n">{today?.peak_subreq ?? 0}/50</div><div class="l">peak subrequests</div></div>
+          <div class="stat"><div class="n">{today?.writes ?? 0}</div><div class="l">D1 writes today (limit 100k)</div></div>
+          <div class="stat"><div class="n">{today?.reads ?? 0}</div><div class="l">D1 reads today (limit 5M)</div></div>
         </div>
         <table>
-          <tr><th>run</th><th>inicio</th><th>estado</th><th>ms</th><th>empresas</th><th>vistos</th><th>nuevos</th><th>surv.</th><th>notif.</th><th>cerrados</th><th>subreq</th><th>errores</th></tr>
+          <tr><th>run</th><th>start</th><th>status</th><th>ms</th><th>companies</th><th>seen</th><th>new</th><th>surv.</th><th>notif.</th><th>closed</th><th>subreq</th><th>errors</th></tr>
           {runs.map((r) => (
             <tr>
               <td>{r.id} <span class="muted">{r.trigger}</span></td>
@@ -914,8 +914,8 @@ export function consoleApp(): App {
             </tr>
           ))}
         </table>
-        <h2>Eventos recientes</h2>
-        {events.length === 0 ? <p class="muted">sin eventos</p> : (
+        <h2>Recent events</h2>
+        {events.length === 0 ? <p class="muted">no events</p> : (
           <table>{events.map((e) => (
             <tr><td class="muted">{fmt(e.ts)}</td><td class={e.severity === 'error' ? 'bad' : e.severity === 'warn' ? 'warn' : ''}>{e.type}</td><td class="muted">{e.detail}</td></tr>
           ))}</table>

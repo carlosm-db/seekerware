@@ -1,5 +1,5 @@
-// Freshness (docs/TRD.md §5): edad = hoy - posted_at <= FRESHNESS_MAX_DAYS.
-// posted_at ausente/invalido -> fallback a first_seen y freshness_ok = 'unknown'.
+// Freshness (docs/TRD.md §5): age = today - posted_at <= FRESHNESS_MAX_DAYS.
+// posted_at missing/invalid -> falls back to first_seen and freshness_ok = 'unknown'.
 
 export interface Freshness {
   fresh: boolean;

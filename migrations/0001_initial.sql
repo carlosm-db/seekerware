@@ -1,4 +1,4 @@
--- Migration number: 0001 	 Schema inicial: 5 tablas segun docs/DATABASE.md
+-- Migration number: 0001 	 Initial schema: 5 tables per docs/DATABASE.md
 
 CREATE TABLE companies (
   id            INTEGER PRIMARY KEY,

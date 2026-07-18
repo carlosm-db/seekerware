@@ -1,5 +1,5 @@
-// Google Docs/Drive via service account (docs/TRD.md §6): JWT RS256 firmado con
-// crypto.subtle -> access token -> APIs REST con fetch. Sin SDKs (no corren en Workers).
+// Google Docs/Drive via service account (docs/TRD.md §6): JWT RS256 signed with
+// crypto.subtle -> access token -> REST APIs with fetch. No SDKs (they don't run on Workers).
 
 import type { Env } from './types';
 
@@ -27,9 +27,9 @@ function pemToArrayBuffer(pem: string): ArrayBuffer {
   return buf.buffer;
 }
 
-/** Access token del service account (valido ~1h; una emision por invocacion basta). */
+/** Service account access token (valid ~1h; one issuance per invocation is enough). */
 export async function googleAccessToken(env: Env, doFetch: Fetcher = fetch): Promise<string> {
-  if (!env.GOOGLE_SA_KEY) throw new Error('GOOGLE_SA_KEY sin configurar');
+  if (!env.GOOGLE_SA_KEY) throw new Error('GOOGLE_SA_KEY not configured');
   const sa = JSON.parse(env.GOOGLE_SA_KEY) as ServiceAccountKey;
   const now = Math.floor(Date.now() / 1000);
   const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
@@ -70,7 +70,7 @@ async function gapi(
   return res;
 }
 
-/** Copia la plantilla a la carpeta compartida con el nombre dado; devuelve {id, url}. */
+/** Copies the template to the shared folder with the given name; returns {id, url}. */
 export async function copyTemplate(
   env: Env, token: string, name: string, doFetch: Fetcher = fetch,
 ): Promise<{ id: string; url: string }> {
@@ -82,7 +82,7 @@ export async function copyTemplate(
   return { id: body.id, url: `https://docs.google.com/document/d/${body.id}/edit` };
 }
 
-/** Inserta texto plano al final del Doc (indice 1 = documento recien copiado/vacio: insertamos al inicio del body). */
+/** Inserts plain text at the end of the Doc (index 1 = freshly copied/empty document: we insert at the start of the body). */
 export async function appendDocText(
   token: string, docId: string, text: string, doFetch: Fetcher = fetch,
 ): Promise<void> {
@@ -94,7 +94,7 @@ export async function appendDocText(
   });
 }
 
-/** Exporta el Doc a PDF y lo archiva en la subcarpeta archive/ (inmutable por convencion). */
+/** Exports the Doc to PDF and archives it in the archive/ subfolder (immutable by convention). */
 export async function exportAndArchivePdf(
   env: Env, token: string, docId: string, pdfName: string, doFetch: Fetcher = fetch,
 ): Promise<string> {

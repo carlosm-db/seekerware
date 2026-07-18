@@ -1,111 +1,110 @@
 # UI — Seekerware
 
-Diseno de interfaz. Dos canales: **Telegram (push, con botones)** para
-enterarse y dar el visto bueno, y la **consola (pull)** para operar todo. El
-Doc de CV en Drive es el artefacto entregable. Terminologia en
-[`CONVENTIONS.md`](CONVENTIONS.md); diseno extendido en
+Interface design. Two channels: **Telegram (push, with buttons)** to find out
+and give the go-ahead, and the **console (pull)** to operate everything. The CV
+Doc in Drive is the deliverable artifact. Terminology in
+[`CONVENTIONS.md`](CONVENTIONS.md); extended design in
 `docs/audits/2026-07-17-diseno-consola-ux.md`.
 
 ---
 
-## 1. Telegram — canal push (y visto bueno)
+## 1. Telegram — push channel (and go-ahead)
 
-Un mensaje por job notificado (parse mode HTML). Solo verdicts `Apply` y
-`Stretch-worth-it`, con freshness OK y verify-on-notify aprobado.
+One message per notified job (HTML parse mode). Only `Apply` and
+`Stretch-worth-it` verdicts, with freshness OK and verify-on-notify passed.
 
 ```
 🎯 <b>{title}</b> — {company}
-📍 {location} · 🏷 {track} · ⏱ publicado hace {edad}
+📍 {location} · 🏷 {track} · ⏱ published {age} ago
 
 Verdict: <b>{verdict}</b> · Score {score}/100
 
-<b>Por que encaja:</b> {why_it_fits}
-<b>Brecha a mitigar:</b> {gap_to_address}
-<b>Posicionamiento:</b> {positioning_lead}
-<b>Proyecto a destacar:</b> {project_to_feature}
+<b>Why it fits:</b> {why_it_fits}
+<b>Gap to address:</b> {gap_to_address}
+<b>Positioning:</b> {positioning_lead}
+<b>Project to feature:</b> {project_to_feature}
 
-📄 CV sugerido: {cv_doc_url}        <- solo verdict Apply
+📄 Suggested CV: {cv_doc_url}        <- Apply verdict only
 🔗 {url}
 
-[ Ver kit ]  [ Marcar aplicado ]    <- botones inline (paso 8)
+[ View kit ]  [ Mark applied ]      <- inline buttons (step 8)
 ```
 
-Reglas:
+Rules:
 
-- Sin datos personales del usuario en el mensaje (solo datos del job).
-- Si la IA no estuvo disponible, el mensaje sale con los textos rule-based y la
-  marca `(rule-based)`.
-- Fallos repetidos del feed de una empresa generan un mensaje al mismo chat con
-  prefijo `⚠️ MANTENIMIENTO`; los lunes llega el **digest** semanal del funnel.
-- **Flujo conversacional del kit** (paso 8, via webhook): al tocar "Ver kit",
-  si el formulario tiene preguntas sin respuesta aprobada en el banco
-  `answers`, el bot las pregunta UNA a una en el chat; las respuestas del
-  propietario se incluyen en el kit y (con su OK) se guardan al banco. El bot
-  transporta; JAMAS redacta.
+- No personal user data in the message (only job data).
+- If the AI was unavailable, the message goes out with the rule-based texts and
+  the `(rule-based)` mark.
+- Repeated failures of a company's feed generate a message to the same chat
+  with a `⚠️ MAINTENANCE` prefix; on Mondays the weekly funnel **digest**
+  arrives.
+- **Kit conversational flow** (step 8, via webhook): on tapping "View kit", if
+  the form has questions without an approved answer in the `answers` bank, the
+  bot asks them ONE at a time in the chat; the owner's answers are included in
+  the kit and (with their OK) saved to the bank. The bot transports; it NEVER
+  writes.
 
-## 2. La consola — 10 paginas
+## 2. The console — 10 pages
 
-Webapp multipagina servida por el worker, SIEMPRE detras del login (cookie
-firmada — TRD §8). Es la unica superficie de operacion: reemplaza hojas de
-calculo al 100%. Layout ancho obligatorio; tema claro/oscuro; UI en espanol;
-teclado-first en el triage; toda mutacion funciona sin JS (forms reales,
-mejorados con htmx).
+A multipage webapp served by the worker, ALWAYS behind the login (signed
+cookie — TRD §8). It is the only operating surface: it replaces spreadsheets
+100%. Wide layout mandatory; light/dark theme; UI in English; keyboard-first in
+triage; every mutation works without JS (real forms, enhanced with htmx).
 
-| Ruta | Pagina | Proposito | v |
-|------|--------|-----------|---|
-| `/login` | Login | unica ruta sin auth | 1 |
-| `/` | **Hoy** | pagina matutina: tira de estado (pendientes, ritmo vs objetivo, salud, proximos seguimientos) + triage de survivors (preparar `p` / aplicado `a` / descartar `x` / posponer `s` / nota `n`; deshacer 30 s) | 1 |
-| `/jobs` · `/jobs/:hash` | **Vacantes** | todo lo visto: filtros combinables (track/verdict/status/stage/empresa/texto), vistas guardadas, chip "por que NO" en near-misses, export CSV; detalle: desglose del score por categoria, tabla de gates por track, descripcion, historial, panel CV | 1 (tabla+detalle minimo) |
-| `/tracker` | **Tracker** | kanban de applications: Notificado → Preparado → Aplicado → Entrevista → Oferta/Rechazado, con notas, fechas, seguimientos vencidos; drag-and-drop | 2 |
-| `/companies` | **Empresas** | CRUD + salud (racha de fallos, ultimo error) + **ROI 90d** (jobs vistos, survivors, yield %) + sugerencias de poda + boton "probar token" (dry-run preview al crear) | 1 |
-| `/config` | **Calibracion** | editores estructurados (pesos, keywords por familia, gates, umbrales sobre histograma) + **Replay**: simular config borrador contra los ultimos N jobs (default 200, max 1000) con diff de verdicts y proyeccion de volumen ANTES de guardar; historial con revert | 1 (editor) / 2 (replay) |
-| `/blocks` · `/blocks/anchors` | **Banco** | browser agrupado por fact_key, editor con checklist de aprobacion forzado (evidence+fact_key+tag), cola de `suggested` (convertir en borrador / descartar), reporte de cobertura de tags, reporte de paridad EN/ES, registro de anchors | 2 (con paso 6) |
-| `/cvs` | **CVs** | biblioteca de CVs generados: Doc + PDF, blocks usados, notas del verifier persistidas, regenerar, diff entre generaciones | 2 (con paso 6) |
-| `/aplicaciones` | **Aplicaciones** | cola del kit: Apply pendientes → kit listo (PDF, answers matcheadas, preguntas rojas, deep link) → aplicado; censo de preguntas | 2 (paso 8) |
-| `/salud` | **Salud** | ultimo run + historial (`runs`), log de eventos, meters de cuota (pico subrequests vs 50, D1 vs limites, Gemini vs RPD), empresas con problemas, chequeos de integridad | 1 (runs) / 2 (completo) |
-| `/semana` | **Semana** | funnel semanal por track (vistos→survivors→aplicadas→entrevistas→ofertas), conversiones con deltas, momentum (racha de triage, ritmo vs `weekly_goal`, time-to-apply mediano), aging WIP | 2 |
+| Route | Page | Purpose | v |
+|-------|------|---------|---|
+| `/login` | Login | the only route without auth | 1 |
+| `/` | **Today** | morning page: status strip (pending, pace vs goal, health, upcoming follow-ups) + triage of survivors (prepare `p` / applied `a` / dismiss `x` / snooze `s` / note `n`; undo 30 s) | 1 |
+| `/jobs` · `/jobs/:hash` | **Jobs** | everything seen: combinable filters (track/verdict/status/stage/company/text), saved views, "why NOT" chip on near-misses, CSV export; detail: score breakdown by category, gates table per track, description, history, CV panel | 1 (table + minimal detail) |
+| `/tracker` | **Tracker** | applications kanban: Notified → Prepared → Applied → Interview → Offer/Rejected, with notes, dates, overdue follow-ups; drag-and-drop | 2 |
+| `/companies` | **Companies** | CRUD + health (failure streak, last error) + **90d ROI** (jobs seen, survivors, yield %) + pruning suggestions + "test token" button (dry-run preview on create) | 1 |
+| `/config` | **Calibration** | structured editors (weights, keywords per family, gates, thresholds over a histogram) + **Replay**: simulate a draft config against the last N jobs (default 200, max 1000) with verdict diff and volume projection BEFORE saving; history with revert | 1 (editor) / 2 (replay) |
+| `/blocks` · `/blocks/anchors` | **Bank** | browser grouped by fact_key, editor with a forced approval checklist (evidence+fact_key+tag), `suggested` queue (convert to draft / discard), tag coverage report, EN/ES parity report, anchors registry | 2 (with step 6) |
+| `/cvs` | **CVs** | library of generated CVs: Doc + PDF, blocks used, persisted verifier notes, regenerate, diff between generations | 2 (with step 6) |
+| `/aplicaciones` | **Applications** | kit queue: pending Apply → kit ready (PDF, matched answers, red questions, deep link) → applied; question census | 2 (step 8) |
+| `/salud` | **Health** | last run + history (`runs`), event log, quota meters (peak subrequests vs 50, D1 vs limits, Gemini vs RPD), companies with problems, integrity checks | 1 (runs) / 2 (complete) |
+| `/semana` | **Week** | weekly funnel per track (seen→survivors→applied→interviews→offers), conversions with deltas, momentum (triage streak, pace vs `weekly_goal`, median time-to-apply), aging WIP | 2 |
 
-Transversales: nav superior con badges (pendientes de triage, suggested,
-salud), footer omnipresente "ultimo run hace X min · N empresas OK · errores",
-busqueda global `Ctrl+K` (v2), navegacion `g`+tecla.
+Cross-cutting: top nav with badges (triage pending, suggested, health), an
+omnipresent footer "last run X min ago · N companies OK · errors", global
+search `Ctrl+K` (v2), `g`+key navigation.
 
-Features creativas incorporadas: **prep de entrevista** (`/jobs/:hash/prep`,
-v2): dossier 100% rule-based que proyecta los blocks del CV enviado CON su
-`evidence` — cada afirmacion respaldada por su hecho; **radar de similares**
-(cluster por `title_norm` + tags: reuso de posicionamiento entre empresas);
-**momentum** (metricas de ritmo honestas para un perfil de alta
-conciencia); **digest** de lunes.
+Built-in creative features: **interview prep** (`/jobs/:hash/prep`, v2): a
+100% rule-based dossier that projects the blocks of the submitted CV WITH their
+`evidence` — every claim backed by its fact; **similar-jobs radar** (cluster by
+`title_norm` + tags: positioning reuse across companies); **momentum** (honest
+pace metrics for a high-conscientiousness profile); Monday **digest**.
 
-Escritores por pagina (extiende la regla un-escritor-por-columna): `jobs` solo
-sistema (unica excepcion: `status -> skipped`); `applications`/`job_events`
-(actor user) / notas: usuario; `companies`/`config`/`blocks`/`answers`:
-usuario; `runs`/`events`/`notifications`: sistema.
+Writers per page (extends the one-writer-per-column rule): `jobs` system only
+(sole exception: `status -> skipped`); `applications`/`job_events` (actor user)
+/ notes: user; `companies`/`config`/`blocks`/`answers`: user;
+`runs`/`events`/`notifications`: system.
 
-## 3. Doc de CV sugerido (Drive) + PDF
+## 3. Suggested CV Doc (Drive) + PDF
 
-Nombre: `CV — {company} — {title} — {yyyy-mm-dd}`, en la carpeta compartida
+Name: `CV — {company} — {title} — {yyyy-mm-dd}`, in the shared folder
 (`DRIVE_FOLDER_ID`).
 
-Estructura (desde plantilla `CV_TEMPLATE_DOC_ID`, placeholders `{{...}}`):
+Structure (from template `CV_TEMPLATE_DOC_ID`, placeholders `{{...}}`):
 
-1. Encabezado con datos de contacto — vienen de la plantilla (recurso privado),
-   nunca del repo ni del sistema.
-2. Resumen profesional — 1 block seleccionado.
-3. Skills — N blocks seleccionados.
-4. Experiencia — por anchor real, con los blocks seleccionados para este job.
-5. Educacion / certificaciones — desde plantilla.
-6. **Apendice "Suggested tweaks"** (fondo gris, para borrar antes de enviar):
-   sugerencias del cv_verifier — nunca aplicadas automaticamente — y la
-   justificacion de la seleccion. Las notas se persisten ADEMAS en D1 (tabla
-   `cvs`), asi sobreviven cuando el propietario borra el apendice.
+1. Header with contact details — they come from the template (private
+   resource), never from the repo or the system.
+2. Professional summary — 1 selected block.
+3. Skills — N selected blocks.
+4. Experience — per real anchor, with the blocks selected for this job.
+5. Education / certifications — from the template.
+6. **"Suggested tweaks" appendix** (gray background, to delete before
+   submitting): cv_verifier suggestions — never applied automatically — and the
+   selection rationale. The notes are ALSO persisted in D1 (`cvs` table), so
+   they survive when the owner deletes the appendix.
 
-Idioma del Doc = idioma del job (blocks `text_en` o `text_es`; render ES exige
-paridad aprobada). El PDF exportado para el kit y el archivo R2 usa una copia
-LIMPIA sin apendice (TRD §6).
+Doc language = job language (`text_en` or `text_es` blocks; ES render requires
+approved parity). The PDF exported for the kit and the R2 file use a CLEAN copy
+without the appendix (TRD §6).
 
-## 4. Stack de la consola (resumen; detalle TRD §8)
+## 4. Console stack (summary; detail in TRD §8)
 
-Hono + `hono/jsx` SSR + htmx vendorizado + islas vanilla + CSS unico con
-custom properties. Cero build adicional. Login por cookie firmada (sin
-dominio → sin Access). Assets tras `run_worker_first`. Paginacion a 50 en
-toda tabla; replay en lotes de 50 (limite de CPU del free tier).
+Hono + `hono/jsx` SSR + vendored htmx + vanilla islands + a single CSS file
+with custom properties. Zero extra build. Login via signed cookie (no domain →
+no Access). Assets behind `run_worker_first`. Pagination at 50 on every table;
+replay in batches of 50 (free-tier CPU limit).

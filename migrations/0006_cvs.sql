@@ -1,4 +1,4 @@
--- Migration number: 0006 	 Biblioteca de CVs (DATABASE.md §12) + archivo PDF
+-- Migration number: 0006 	 CV library (DATABASE.md §12) + PDF archive
 
 CREATE TABLE cvs (
   id             INTEGER PRIMARY KEY,
@@ -7,10 +7,10 @@ CREATE TABLE cvs (
   doc_url        TEXT NOT NULL,
   lang           TEXT NOT NULL CHECK (lang IN ('en','es')),
   pdf_file_id    TEXT,
-  blocks_used    TEXT,   -- JSON: ids por seccion
+  blocks_used    TEXT,   -- JSON: ids by section
   verifier_notes TEXT,
   rationale      TEXT,
-  sample         INTEGER NOT NULL DEFAULT 0,  -- 1 = CV de MUESTRA (blocks draft, solo revision)
+  sample         INTEGER NOT NULL DEFAULT 0,  -- 1 = SAMPLE CV (draft blocks, review only)
   pending        INTEGER NOT NULL DEFAULT 0,
   created_at     TEXT NOT NULL,
   superseded_by  INTEGER REFERENCES cvs(id)

@@ -74,8 +74,8 @@ function job(over: Partial<Job>): Job {
   };
 }
 
-describe('scoreJob — tracks y gates', () => {
-  it('co-op en Canada pasa los gates de canada_coop y gana como best track', () => {
+describe('scoreJob — tracks and gates', () => {
+  it('co-op in Canada passes the canada_coop gates and wins as best track', () => {
     const r = scoreJob(job({
       title: 'Data Analyst Co-op',
       location: 'Vancouver, BC, Canada',
@@ -86,7 +86,7 @@ describe('scoreJob — tracks y gates', () => {
     expect(['Apply', 'Stretch-worth-it']).toContain(r.best.verdict);
   });
 
-  it('"US only" mata colombia_perm por gate hard aunque el score sea alto', () => {
+  it('"US only" kills colombia_perm via a hard gate even when the score is high', () => {
     const r = scoreJob(job({
       title: 'Business Analyst, Payments',
       location: 'Remote',
@@ -99,7 +99,7 @@ describe('scoreJob — tracks y gates', () => {
     expect(gate.evidence).toContain('us only');
   });
 
-  it('contractor remoto sin senal B2B recibe penalty (resta 15)', () => {
+  it('remote contractor without a B2B signal gets a penalty (subtracts 15)', () => {
     const conJob = job({
       title: 'Business Analyst',
       location: 'Remote worldwide',
@@ -116,8 +116,8 @@ describe('scoreJob — tracks y gates', () => {
   });
 });
 
-describe('scoreJob — near-miss y explicabilidad', () => {
-  it('Skip por score bajo trae near_miss_reason con la brecha', () => {
+describe('scoreJob — near-miss and explainability', () => {
+  it('Skip due to low score carries near_miss_reason with the gap', () => {
     const r = scoreJob(job({
       title: 'Office Manager',
       location: 'Remote',
@@ -127,7 +127,7 @@ describe('scoreJob — near-miss y explicabilidad', () => {
     expect(r.near_miss_reason).toMatch(/score \d+ < 55|gate:/);
   });
 
-  it('los puntos del breakdown suman el score (redondeado)', () => {
+  it('the breakdown points sum to the score (rounded)', () => {
     const r = scoreJob(job({
       title: 'Data Analyst',
       location: 'Canada',
@@ -138,8 +138,8 @@ describe('scoreJob — near-miss y explicabilidad', () => {
   });
 });
 
-describe('scoreJob — nuance de seniority condicionada', () => {
-  it("'senior' penaliza al data engineer pero NO al business analyst", () => {
+describe('scoreJob — conditional seniority nuance', () => {
+  it("'senior' penalizes the data engineer but NOT the business analyst", () => {
     const de = scoreJob(job({
       title: 'Senior Data Engineer',
       location: 'Remote',
@@ -158,8 +158,8 @@ describe('scoreJob — nuance de seniority condicionada', () => {
   });
 });
 
-describe('scoreJob — matching EN/ES y titulo', () => {
-  it("keyword 'conciliacion' matchea texto con tildes ('conciliación')", () => {
+describe('scoreJob — EN/ES matching and title', () => {
+  it("keyword 'conciliacion' matches accented text ('conciliación')", () => {
     const r = scoreJob(job({
       title: 'Analista',
       location: 'Bogotá, Colombia',
@@ -169,7 +169,7 @@ describe('scoreJob — matching EN/ES y titulo', () => {
     expect(m).toContain('conciliacion');
   });
 
-  it('match en el titulo vale doble (title_multiplier=2)', () => {
+  it('a title match counts double (title_multiplier=2)', () => {
     const enTitulo = scoreJob(job({ title: 'Payments Analyst', location: 'Canada', description: 'x' }), config);
     const enCuerpo = scoreJob(job({ title: 'Analyst', location: 'Canada', description: 'payments x' }), config);
     const wTitulo = enTitulo.breakdown.domain.matches.find((m) => m.term === 'payments')!.weight;
@@ -177,14 +177,14 @@ describe('scoreJob — matching EN/ES y titulo', () => {
     expect(wTitulo).toBe(wCuerpo * 2);
   });
 
-  it('word boundary: "sql" no matchea dentro de "mysqlite"', () => {
+  it('word boundary: "sql" does not match inside "mysqlite"', () => {
     const r = scoreJob(job({ title: 'x', location: 'x', description: 'mysqlite database' }), config);
     expect(r.breakdown.tool_overlap.matches.map((m) => m.term)).not.toContain('sql');
   });
 });
 
-describe('scoreJob — umbrales por track', () => {
-  it('un track con thresholds propios los usa en lugar de los globales', () => {
+describe('scoreJob — per-track thresholds', () => {
+  it('a track with its own thresholds uses them instead of the globals', () => {
     const cfg: ScoringConfig = {
       ...config,
       tracks: config.tracks.map((t) =>
@@ -204,7 +204,7 @@ describe('scoreJob — umbrales por track', () => {
 });
 
 describe('normalizeTitle (radar de similares)', () => {
-  it('quita seniority, contenido entre parentesis, y normaliza', () => {
+  it('strips seniority, parenthesized content, and normalizes', () => {
     expect(normalizeTitle('Senior Data Analyst II (Payments) — Remote')).toBe('data analyst remote');
     expect(normalizeTitle('Jr. Business Analyst')).toBe('business analyst');
   });

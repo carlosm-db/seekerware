@@ -1,4 +1,4 @@
-// Entrypoint del worker: scheduled() = pipeline · fetch() = consola + /api/* (todo tras auth).
+// Worker entrypoint: scheduled() = pipeline · fetch() = console + /api/* (all behind auth).
 
 import type { Ats, Company, Job } from './types';
 import { connectors } from './connectors/index';
@@ -13,7 +13,7 @@ import type { ConsoleEnv } from './console/auth';
 
 const app = consoleApp();
 
-// ---------- API JSON (auth: cookie o Bearer, via middleware de la consola) ----------
+// ---------- JSON API (auth: cookie or Bearer, via the console middleware) ----------
 
 app.get('/api/health', async (c) => c.json({ ok: true, tables: await counts(c.env) }));
 
@@ -29,23 +29,23 @@ app.post('/api/run', async (c) => {
 });
 
 app.post('/api/notify-test', async (c) => {
-  const sent = await sendTelegram(c.env, '✅ Seekerware operativo — prueba de canal');
+  const sent = await sendTelegram(c.env, '✅ Seekerware operational — channel test');
   return c.json(sent, sent.ok ? 200 : 502);
 });
 
-/** Replay (glosario): re-score simulado por lotes de 50; NUNCA escribe en jobs. */
+/** Replay (glossary): simulated re-score in batches of 50; NEVER writes to jobs. */
 app.get('/api/replay-batch', async (c) => {
   const cursor = Math.max(0, Math.floor(Number(c.req.query('cursor')) || 0));
   const target = Math.min(1000, Math.max(50, Math.floor(Number(c.req.query('n')) || 200)));
   const BATCH = 50;
-  // LIMIT jamas negativo (en SQLite, LIMIT negativo = SIN limite -> reventaria CPU/lecturas)
+  // LIMIT never negative (in SQLite, negative LIMIT = NO limit -> would blow up CPU/reads)
   const limit = Math.max(0, Math.min(BATCH, target - cursor));
   if (limit === 0) {
     return c.json({ diffs: [], next_cursor: cursor, processed_total: cursor, total_target: target, done: true });
   }
   const draftRow = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'")
     .first<{ value: string }>();
-  if (!draftRow) return c.json({ error: 'sin borrador de scoring' }, 400);
+  if (!draftRow) return c.json({ error: 'no scoring draft' }, 400);
   const draft = JSON.parse(draftRow.value) as ScoringConfig;
 
   const rows = (
@@ -92,8 +92,8 @@ app.get('/api/replay-batch', async (c) => {
 app.get('/api/dry-run', async (c) => {
   const token = c.req.query('company');
   const ats = (c.req.query('ats') ?? 'greenhouse') as Ats;
-  if (!token) return c.json({ error: 'falta ?company=<token>' }, 400);
-  if (!connectors[ats]) return c.json({ error: `ats desconocido: ${ats}` }, 400);
+  if (!token) return c.json({ error: 'missing ?company=<token>' }, 400);
+  if (!connectors[ats]) return c.json({ error: `unknown ats: ${ats}` }, 400);
 
   const company: Company = { id: 0, name: token, ats, token, active: true };
   const jobs = await connectors[ats].fetchJobs(company);
@@ -103,7 +103,7 @@ app.get('/api/dry-run', async (c) => {
   try {
     config = await loadScoringConfig(c.env);
   } catch (err) {
-    scoringNote = err instanceof Error ? err.message : 'config de scoring no disponible';
+    scoringNote = err instanceof Error ? err.message : 'scoring config unavailable';
   }
   const rows = await Promise.all(jobs.map((j) => preview(j, config)));
   if (config) rows.sort((a, b) => (b.scoring?.adjusted_score ?? 0) - (a.scoring?.adjusted_score ?? 0));
@@ -168,9 +168,9 @@ export default {
     ctx.waitUntil(
       runPipeline(env, 'cron').then((stats) => {
         console.log(
-          `run: ${stats.companiesOk}/${stats.companiesTotal} empresas OK · ${stats.jobsNew} nuevos · ` +
-            `${stats.survivors} survivors · ${stats.notified} notificados · ${stats.closed} cerrados · ` +
-            `${stats.subrequests} subrequests · ${stats.errors} errores`,
+          `run: ${stats.companiesOk}/${stats.companiesTotal} companies OK · ${stats.jobsNew} new · ` +
+            `${stats.survivors} survivors · ${stats.notified} notified · ${stats.closed} closed · ` +
+            `${stats.subrequests} subrequests · ${stats.errors} errors`,
         );
       }),
     );

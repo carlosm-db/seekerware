@@ -1,5 +1,5 @@
-// Telegram (docs/UI.md §1): un mensaje por job notificado, parse mode HTML.
-// Sin datos personales del usuario; solo datos del job.
+// Telegram (docs/UI.md §1): one message per notified job, parse mode HTML.
+// No personal data of the user; only job data.
 
 import type { Env, Job, Verdict } from './types';
 import type { ScoreResult } from './scoring';
@@ -20,7 +20,7 @@ export async function sendTelegram(
   doFetch: Fetcher = fetch,
 ): Promise<TelegramResult> {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
-    return { ok: false, error: 'TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID sin configurar' };
+    return { ok: false, error: 'TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not configured' };
   }
   try {
     const res = await doFetch(`${API}/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -37,11 +37,11 @@ export async function sendTelegram(
     if (!body.ok) return { ok: false, error: body.description ?? `HTTP ${res.status}` };
     return { ok: true, message_id: body.result?.message_id };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'error de red' };
+    return { ok: false, error: err instanceof Error ? err.message : 'network error' };
   }
 }
 
-/** Escapa contenido de terceros para parse_mode HTML (titulos de jobs son texto no confiable). */
+/** Escapes third-party content for parse_mode HTML (job titles are untrusted text). */
 export function escapeHtml(text: string): string {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
@@ -58,29 +58,29 @@ export interface JobMessageInput {
   ruleBased: boolean;
 }
 
-/** Formato de UI.md §1 (botones y CV llegan en pasos 6/8; las lineas ausentes se omiten). */
+/** UI.md §1 format (buttons and CV arrive in steps 6/8; missing lines are omitted). */
 export function formatJobMessage(m: JobMessageInput): string {
   const t = escapeHtml(m.job.title);
   const c = escapeHtml(m.job.company);
-  const loc = escapeHtml(m.job.location || 'sin ubicacion');
-  const age = m.ageDays < 1 ? 'hoy' : `hace ${Math.round(m.ageDays)} d`;
+  const loc = escapeHtml(m.job.location || 'no location');
+  const age = m.ageDays < 1 ? 'today' : `${Math.round(m.ageDays)} d ago`;
   const mark = m.ruleBased ? ' <i>(rule-based)</i>' : '';
   return [
     `🎯 <b>${t}</b> — ${c}`,
-    `📍 ${loc} · 🏷 ${escapeHtml(m.track)} · ⏱ publicado ${age}`,
+    `📍 ${loc} · 🏷 ${escapeHtml(m.track)} · ⏱ posted ${age}`,
     '',
     `Verdict: <b>${m.verdict}</b> · Score ${m.score}/100`,
     '',
-    `<b>Por que encaja:</b> ${escapeHtml(m.whyItFits)}${mark}`,
-    `<b>Brecha a mitigar:</b> ${escapeHtml(m.gapToAddress)}`,
-    `<b>Posicionamiento:</b> ${escapeHtml(m.positioningLead)}`,
+    `<b>Why it fits:</b> ${escapeHtml(m.whyItFits)}${mark}`,
+    `<b>Gap to address:</b> ${escapeHtml(m.gapToAddress)}`,
+    `<b>Positioning:</b> ${escapeHtml(m.positioningLead)}`,
     '',
     `🔗 ${m.job.url}`,
   ].join('\n');
 }
 
 export function formatMaintenance(detail: string): string {
-  return `⚠️ MANTENIMIENTO\n${escapeHtml(detail)}`;
+  return `⚠️ MAINTENANCE\n${escapeHtml(detail)}`;
 }
 
 export interface DigestData {
@@ -96,29 +96,29 @@ export interface DigestData {
   rotas: number;
 }
 
-/** Digest semanal de los lunes (UI.md §1): resumen compacto del funnel. */
+/** Weekly Monday digest (UI.md §1): compact funnel summary. */
 export function formatDigest(d: DigestData): string {
   const lines = [
-    '📊 <b>Semana Seekerware</b>',
-    `runs: ${d.runsOk}/${d.runsTotal} OK · vistos ${d.vistos} · nuevos ${d.nuevos}`,
-    `survivors ${d.survivors} · notificadas ${d.notificados} · aplicadas <b>${d.aplicadas}/${d.goal}</b>`,
+    '📊 <b>Seekerware week</b>',
+    `runs: ${d.runsOk}/${d.runsTotal} OK · seen ${d.vistos} · new ${d.nuevos}`,
+    `survivors ${d.survivors} · notified ${d.notificados} · applied <b>${d.aplicadas}/${d.goal}</b>`,
   ];
-  if (d.topCompany) lines.push(`top empresa: ${escapeHtml(d.topCompany)}`);
-  if (d.rotas > 0) lines.push(`⚠️ ${d.rotas} empresa(s) con fallos — revisar /companies`);
+  if (d.topCompany) lines.push(`top company: ${escapeHtml(d.topCompany)}`);
+  if (d.rotas > 0) lines.push(`⚠️ ${d.rotas} company(ies) failing — check /companies`);
   return lines.join('\n');
 }
 
-/** Textos rule-based (TRD §3.5): plantillas desde las categorias disparadas; el enricher llega en paso 6. */
+/** Rule-based texts (TRD §3.5): templates from the triggered categories; the enricher arrives in step 6. */
 export function ruleBasedTexts(result: ScoreResult): {
   whyItFits: string;
   gapToAddress: string;
   positioningLead: string;
 } {
   const cats: Array<[string, string]> = [
-    ['domain', 'dominio'],
-    ['role_type', 'tipo de rol'],
-    ['tool_overlap', 'herramientas'],
-    ['level_fit', 'nivel'],
+    ['domain', 'domain'],
+    ['role_type', 'role type'],
+    ['tool_overlap', 'tools'],
+    ['level_fit', 'level'],
   ];
   const strong: string[] = [];
   let weakest: { label: string; points: number } | null = null;
@@ -128,10 +128,10 @@ export function ruleBasedTexts(result: ScoreResult): {
     if (top.length) strong.push(`${label}: ${top.join(', ')}`);
     if (!weakest || b.points < weakest.points) weakest = { label, points: b.points };
   }
-  const lead = strong[0] ?? 'perfil general';
+  const lead = strong[0] ?? 'general profile';
   return {
-    whyItFits: strong.slice(0, 3).join(' · ') || 'coincidencia general de perfil',
-    gapToAddress: weakest ? `senales debiles en ${weakest.label} — reforzar en la aplicacion` : '—',
-    positioningLead: `abrir por ${lead}`,
+    whyItFits: strong.slice(0, 3).join(' · ') || 'general profile match',
+    gapToAddress: weakest ? `weak signals in ${weakest.label} — reinforce in the application` : '—',
+    positioningLead: `lead with ${lead}`,
   };
 }

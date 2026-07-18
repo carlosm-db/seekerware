@@ -1,4 +1,4 @@
-// Shell de la consola: nav, tema claro/oscuro, layout ancho, footer con estado del ultimo run.
+// Console shell: nav, light/dark theme, wide layout, footer with last run status.
 import type { FC, Child } from 'hono/jsx';
 
 const CSS = `
@@ -67,15 +67,15 @@ export const Layout: FC<{
   children?: Child;
 }> = ({ title, path, pendingTriage, footer, flash, children }) => {
   const links: Array<[string, string]> = [
-    ['/', 'Hoy'],
+    ['/', 'Today'],
     ['/tracker', 'Tracker'],
-    ['/jobs', 'Vacantes'],
-    ['/companies', 'Empresas'],
-    ['/config', 'Calibracion'],
-    ['/blocks', 'Banco'],
+    ['/jobs', 'Jobs'],
+    ['/companies', 'Companies'],
+    ['/config', 'Calibration'],
+    ['/blocks', 'Bank'],
     ['/cvs', 'CVs'],
-    ['/semana', 'Semana'],
-    ['/salud', 'Salud'],
+    ['/semana', 'Week'],
+    ['/salud', 'Health'],
   ];
   return (
     <html data-theme="">
@@ -113,8 +113,8 @@ export const Layout: FC<{
           {children}
         </main>
         <footer>
-          ultimo run:{' '}
-          {footer.lastRun ? `${footer.lastRun} UTC · ${footer.companiesOk} empresas OK · ${footer.errors} errores` : 'sin runs aun'}
+          last run:{' '}
+          {footer.lastRun ? `${footer.lastRun} UTC · ${footer.companiesOk} companies OK · ${footer.errors} errors` : 'no runs yet'}
         </footer>
       </body>
     </html>

@@ -1,7 +1,7 @@
-// Agentes declarativos (docs/TRD.md §4). Reglas de dominio inquebrantables:
-// - enricher: SOLO mejora textos de survivors; jamas toca verdicts ni gates.
-// - cv_selector: SOLO selecciona IDs de blocks approved (enum forzado por schema).
-// - cv_verifier: temp 0; sugiere tweaks, JAMAS edita.
+// Declarative agents (docs/TRD.md §4). Inviolable domain rules:
+// - enricher: ONLY improves survivor texts; never touches verdicts or gates.
+// - cv_selector: ONLY selects IDs of approved blocks (enum forced by schema).
+// - cv_verifier: temp 0; suggests tweaks, NEVER edits.
 
 import type { Env, Job } from '../types';
 import { callGemini, wrapUntrusted, type GeminiResult } from './gemini';
@@ -22,13 +22,13 @@ export async function enricher(
   return callGemini<EnrichedTexts>(env, {
     temperature: 0.4,
     instruction:
-      'Eres el enricher de un motor de descubrimiento de empleo. Mejora la redaccion de tres textos ' +
-      'cortos (espanol, 1-2 frases cada uno) sobre por que una vacante encaja con un perfil de ' +
-      'business analyst/data en banca, pagos, cobranzas y compliance en transicion a datos. ' +
-      'Basate SOLO en la vacante y los borradores rule-based. No inventes experiencia ni cifras. ' +
-      'NO cambies veredictos ni menciones puntajes.',
+      'You are the enricher of a job-discovery engine. Improve the wording of three short ' +
+      'texts (English, 1-2 sentences each) about why a job fits the profile of a ' +
+      'business analyst/data professional in banking, payments, collections, and compliance transitioning to data. ' +
+      'Rely ONLY on the job and the rule-based drafts. Do not invent experience or figures. ' +
+      'Do NOT change verdicts or mention scores.',
     input:
-      `BORRADORES RULE-BASED:\n${JSON.stringify(ruleTexts)}\n\nVACANTE (titulo: ${job.title})\n` +
+      `RULE-BASED DRAFTS:\n${JSON.stringify(ruleTexts)}\n\nJOB (title: ${job.title})\n` +
       wrapUntrusted(job.description.slice(0, 6000)),
     responseSchema: {
       type: 'OBJECT',
@@ -61,7 +61,7 @@ export interface Selection {
   rationale: string;
 }
 
-/** El schema restringe cada ID al enum de blocks del catalogo: la alucinacion es imposible por construccion. */
+/** The schema restricts each ID to the catalog's block enum: hallucination is impossible by construction. */
 export async function cvSelector(
   env: Env, job: Job, catalog: CatalogBlock[], doFetch: Fetcher = fetch,
 ): Promise<GeminiResult<Selection>> {
@@ -73,11 +73,11 @@ export async function cvSelector(
   return callGemini<Selection>(env, {
     temperature: 0.3,
     instruction:
-      'Eres el cv_selector. Elige los IDs de blocks mas relevantes para esta vacante: ' +
-      '1 de summary, 4-8 de skills, 4-8 de experience (prioriza el angle que pida la vacante: ' +
-      'data/compliance/operations/leadership), 0-2 de projects. Selecciona SOLO IDs del catalogo. ' +
-      'En rationale explica en 1 frase el enfoque elegido.',
-    input: `CATALOGO:\n${catalogText}\n\nVACANTE (titulo: ${job.title})\n` + wrapUntrusted(job.description.slice(0, 6000)),
+      'You are the cv_selector. Choose the most relevant block IDs for this job: ' +
+      '1 from summary, 4-8 from skills, 4-8 from experience (prioritize the angle the job calls for: ' +
+      'data/compliance/operations/leadership), 0-2 from projects. Select ONLY IDs from the catalog. ' +
+      'In rationale, explain the chosen approach in 1 sentence.',
+    input: `CATALOG:\n${catalogText}\n\nJOB (title: ${job.title})\n` + wrapUntrusted(job.description.slice(0, 6000)),
     responseSchema: {
       type: 'OBJECT',
       required: ['summary', 'skills', 'experience', 'projects', 'rationale'],
@@ -104,10 +104,10 @@ export async function cvVerifier(
   return callGemini<VerifierNotes>(env, {
     temperature: 0,
     instruction:
-      'Eres el cv_verifier (temperatura 0). Compara el CV renderizado contra la vacante. ' +
-      'Devuelve 0-5 sugerencias CORTAS de mejora (reordenar, enfatizar, brecha visible). ' +
-      'Son SUGERENCIAS para el propietario: no reescribas el CV ni propongas texto nuevo literal.',
-    input: `CV RENDERIZADO:\n${renderedBody.slice(0, 5000)}\n\nVACANTE (titulo: ${job.title})\n` +
+      'You are the cv_verifier (temperature 0). Compare the rendered CV against the job. ' +
+      'Return 0-5 SHORT improvement suggestions (reorder, emphasize, visible gap). ' +
+      'These are SUGGESTIONS for the owner: do not rewrite the CV or propose literal new text.',
+    input: `RENDERED CV:\n${renderedBody.slice(0, 5000)}\n\nJOB (title: ${job.title})\n` +
       wrapUntrusted(job.description.slice(0, 5000)),
     responseSchema: {
       type: 'OBJECT',

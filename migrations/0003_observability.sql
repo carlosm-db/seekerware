@@ -1,4 +1,4 @@
--- Migration number: 0003 	 Observabilidad (DATABASE.md §9) + salud de empresas
+-- Migration number: 0003 	 Observability (DATABASE.md §9) + company health
 
 CREATE TABLE runs (
   id              INTEGER PRIMARY KEY,
@@ -61,7 +61,7 @@ ALTER TABLE companies ADD COLUMN fetch_fail_total INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE companies ADD COLUMN last_fail        TEXT;
 ALTER TABLE companies ADD COLUMN last_error       TEXT;
 
--- Defaults operativos neutrales (editables sin deploy)
+-- Neutral operational defaults (editable without deploy)
 INSERT OR IGNORE INTO config (key, value) VALUES
   ('quota_limits', '{"subrequests_per_invocation":50,"d1_reads_day":5000000,"d1_writes_day":100000,"gemini_rpd":1000,"workers_invocations_day":100000}'),
   ('observability', '{"maintenance_fail_streak":3,"subrequests_warn":40,"quota_warn_pct":80,"cv_pending_max":3,"digest":{"dow":1,"hour_utc":11},"retention_days":{"runs":400,"events":90,"notifications":180}}'),

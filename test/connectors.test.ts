@@ -28,7 +28,7 @@ describe('connector lever', () => {
     },
   ];
 
-  it('normaliza: fecha desde epoch ms, ubicaciones combinadas, listas al texto', async () => {
+  it('normalizes: date from epoch ms, combined locations, lists into text', async () => {
     mockFetch(FEED);
     const [j] = await lever.fetchJobs(leverCo);
     expect(j).toMatchObject({
@@ -44,12 +44,12 @@ describe('connector lever', () => {
     expect(j!.description).toContain('SQL');
   });
 
-  it('payload no-array lanza (parse_fail aguas arriba)', async () => {
+  it('non-array payload throws (parse_fail upstream)', async () => {
     mockFetch({ error: 'Document not found' });
-    await expect(lever.fetchJobs(leverCo)).rejects.toThrow('payload inesperado');
+    await expect(lever.fetchJobs(leverCo)).rejects.toThrow('unexpected payload');
   });
 
-  it('isLive: 404 = muerto', async () => {
+  it('isLive: 404 = dead', async () => {
     mockFetch({}, 404);
     const job = { id: 'abc-123' } as Job;
     expect(await lever.isLive(leverCo, job)).toBe(false);
@@ -72,14 +72,14 @@ describe('connector ashby', () => {
       },
       {
         id: 'uuid-2',
-        title: 'Oculto',
+        title: 'Hidden',
         jobUrl: 'https://jobs.ashbyhq.com/trulioo/uuid-2',
         isListed: false,
       },
     ],
   };
 
-  it('normaliza y excluye no listados', async () => {
+  it('normalizes and excludes unlisted', async () => {
     mockFetch(BOARD);
     const jobs = await ashby.fetchJobs(ashbyCo);
     expect(jobs).toHaveLength(1);
@@ -94,7 +94,7 @@ describe('connector ashby', () => {
     expect(j.description).toContain('Compliance & identity.');
   });
 
-  it('isLive verifica contra el BOARD re-consultado (jamas HTML): presente=vivo, ausente o deslistado=muerto', async () => {
+  it('isLive checks against the re-fetched BOARD (never HTML): present=alive, absent or unlisted=dead', async () => {
     mockFetch(BOARD);
     expect(await ashby.isLive(ashbyCo, { id: 'uuid-1' } as Job)).toBe(true);
     mockFetch(BOARD);

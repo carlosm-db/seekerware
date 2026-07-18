@@ -1,5 +1,5 @@
-// Motor de scoring (docs/TRD.md §3): 100% determinista, funcion pura.
-// El conocimiento vive en la tabla `config` (clave 'scoring'); cero keywords en codigo.
+// Scoring engine (docs/TRD.md §3): 100% deterministic, pure function.
+// The knowledge lives in the `config` table (key 'scoring'); zero keywords in code.
 
 import type { Job, Verdict } from './types';
 
@@ -8,40 +8,40 @@ export const CATEGORIES: Category[] = ['domain', 'role_type', 'tool_overlap', 'l
 
 export interface Keyword {
   term: string;
-  /** Peso; negativo = senal en contra (resta dentro de la categoria, piso 0). */
+  /** Weight; negative = signal against (subtracts within the category, floor 0). */
   weight: number;
 }
 
 export interface Gate {
   id: string;
   type: 'hard' | 'penalty';
-  /** Puntos que resta un penalty (ignorado en hard). */
+  /** Points a penalty subtracts (ignored on hard). */
   points?: number;
-  /** Pasa si AL MENOS UNO matchea; hard falla / penalty resta si ninguno matchea. */
+  /** Passes if AT LEAST ONE matches; hard fails / penalty subtracts if none match. */
   require?: string[];
-  /** Falla (hard) / resta (penalty) si ALGUNO matchea. */
+  /** Fails (hard) / subtracts (penalty) if ANY matches. */
   reject?: string[];
-  /** Donde buscar. Default: 'text' (titulo + ubicacion + descripcion). */
+  /** Where to search. Default: 'text' (title + location + description). */
   scope?: 'title' | 'location' | 'title_location' | 'text';
 }
 
 export interface TrackConfig {
   id: string;
   gates: Gate[];
-  /** Umbrales propios del track (opcional); si faltan, aplican los globales. */
+  /** Track-specific thresholds (optional); if missing, the global ones apply. */
   thresholds?: { apply: number; stretch: number };
 }
 
 export interface ScoringConfig {
-  /** Pesos por categoria (suman 100) y saturacion (peso matcheado que equivale a 1.0). */
+  /** Weights per category (sum to 100) and saturation (matched weight that equals 1.0). */
   weights: Record<Category, { weight: number; saturation: number }>;
-  /** Multiplicador cuando el match ocurre en el titulo. */
+  /** Multiplier when the match occurs in the title. */
   title_multiplier: number;
   thresholds: { apply: number; stretch: number };
   keywords: Record<Category, Keyword[]>;
-  /** Negativos de level_fit condicionados: solo aplican si role_type matcheo alguno de estos terminos. */
+  /** Conditional level_fit negatives: apply only if role_type matched one of these terms. */
   level_negatives_only_if_role?: string[];
-  /** Terminos negativos de level_fit sujetos a la condicion anterior (p. ej. 'senior'). */
+  /** level_fit negative terms subject to the condition above (e.g. 'senior'). */
   conditional_level_negatives?: Keyword[];
   tracks: TrackConfig[];
 }
@@ -54,11 +54,11 @@ export interface KeywordMatch {
 
 export interface CategoryBreakdown {
   matches: KeywordMatch[];
-  /** Peso bruto matcheado (con multiplicador de titulo; piso 0). */
+  /** Raw matched weight (with title multiplier; floor 0). */
   raw: number;
-  /** raw / saturation, tope 1. */
+  /** raw / saturation, capped at 1. */
   normalized: number;
-  /** normalized * weight — aporte a los 100. */
+  /** normalized * weight — contribution to the 100. */
   points: number;
 }
 
@@ -66,7 +66,7 @@ export interface GateResult {
   id: string;
   type: 'hard' | 'penalty';
   passed: boolean;
-  /** Evidencia: termino que matcheo (en reject) o que falto (en require). */
+  /** Evidence: term that matched (in reject) or that was missing (in require). */
   evidence: string;
   points_delta: number;
 }
@@ -79,21 +79,21 @@ export interface TrackResult {
 }
 
 export interface ScoreResult {
-  /** Score core 0-100, previo a gates. */
+  /** Core score 0-100, before gates. */
   score: number;
   breakdown: Record<Category, CategoryBreakdown>;
   tracks: Record<string, TrackResult>;
   best: { track: string | null; verdict: Verdict; adjusted_score: number };
-  /** Solo cuando best.verdict === 'Skip': la razon mas cercana, en lenguaje claro. */
+  /** Only when best.verdict === 'Skip': the closest reason, in plain language. */
   near_miss_reason?: string;
 }
 
-/** Normaliza para matching: lowercase + sin diacriticos (matchea EN/ES sin importar tildes). */
+/** Normalizes for matching: lowercase + no diacritics (matches EN/ES regardless of accents). */
 export function normalizeText(text: string): string {
   return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 }
 
-/** Titulo normalizado para el radar de similares: sin parentesis ni tokens de seniority. */
+/** Normalized title for the similar-jobs radar: no parentheses, no seniority tokens. */
 export function normalizeTitle(title: string): string {
   return normalizeText(title)
     .replace(/\([^)]*\)/g, ' ')
@@ -105,7 +105,7 @@ export function normalizeTitle(title: string): string {
 
 const regexCache = new Map<string, RegExp>();
 
-/** Word-boundary Unicode, case/acento-insensible (el texto llega ya normalizado). */
+/** Unicode word-boundary, case/accent-insensitive (the text arrives already normalized). */
 function termRegex(term: string): RegExp {
   let re = regexCache.get(term);
   if (!re) {
@@ -182,7 +182,7 @@ function evaluateGate(gate: Gate, corpus: Corpus): GateResult {
     if (hit) {
       return {
         id: gate.id, type: gate.type, passed: false,
-        evidence: `matcheo '${hit}'`,
+        evidence: `matched '${hit}'`,
         points_delta: gate.type === 'penalty' ? -points : 0,
       };
     }
@@ -192,13 +192,13 @@ function evaluateGate(gate: Gate, corpus: Corpus): GateResult {
     if (!hit) {
       return {
         id: gate.id, type: gate.type, passed: false,
-        evidence: `sin match de: ${gate.require.slice(0, 4).join(', ')}…`,
+        evidence: `no match for: ${gate.require.slice(0, 4).join(', ')}…`,
         points_delta: gate.type === 'penalty' ? -points : 0,
       };
     }
-    return { id: gate.id, type: gate.type, passed: true, evidence: `matcheo '${hit}'`, points_delta: 0 };
+    return { id: gate.id, type: gate.type, passed: true, evidence: `matched '${hit}'`, points_delta: 0 };
   }
-  return { id: gate.id, type: gate.type, passed: true, evidence: 'sin condiciones que fallen', points_delta: 0 };
+  return { id: gate.id, type: gate.type, passed: true, evidence: 'no failing conditions', points_delta: 0 };
 }
 
 function verdictFor(score: number, thresholds: ScoringConfig['thresholds']): Verdict {
@@ -209,7 +209,7 @@ function verdictFor(score: number, thresholds: ScoringConfig['thresholds']): Ver
 
 const VERDICT_RANK: Record<Verdict, number> = { 'Apply': 2, 'Stretch-worth-it': 1, 'Skip': 0 };
 
-/** Funcion pura del motor: job + config -> resultado completo (persistible en jobs.score_breakdown). */
+/** Pure engine function: job + config -> complete result (persistable in jobs.score_breakdown). */
 export function scoreJob(job: Job, config: ScoringConfig): ScoreResult {
   const corpus = buildCorpus(job);
 
@@ -259,18 +259,18 @@ export function scoreJob(job: Job, config: ScoringConfig): ScoreResult {
   return result;
 }
 
-/** Explicador "por que NO" en lenguaje claro (chip de la consola). */
+/** Plain-language "why NOT" explainer (console chip). */
 function nearMissReason(result: ScoreResult, config: ScoringConfig): string {
   let closest: { track: string; t: TrackResult } | null = null;
   for (const [track, t] of Object.entries(result.tracks)) {
     if (!closest || t.adjusted_score > closest.t.adjusted_score) closest = { track, t };
   }
-  if (!closest) return 'sin tracks configurados';
+  if (!closest) return 'no tracks configured';
   const { track, t } = closest;
   const failedHard = t.gates.find((g) => g.type === 'hard' && !g.passed);
   if (failedHard) return `gate: ${failedHard.id} (${track}) — ${failedHard.evidence}`;
   const stretch =
     config.tracks.find((tc) => tc.id === track)?.thresholds?.stretch ?? config.thresholds.stretch;
   const gap = stretch - t.adjusted_score;
-  return `score ${t.adjusted_score} < ${stretch} (${track}, faltan ${gap})`;
+  return `score ${t.adjusted_score} < ${stretch} (${track}, short by ${gap})`;
 }

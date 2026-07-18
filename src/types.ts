@@ -1,10 +1,10 @@
-// Tipos canonicos del glosario (docs/CONVENTIONS.md §1).
+// Canonical glossary types (docs/CONVENTIONS.md §1).
 
 export type Ats = 'greenhouse' | 'lever' | 'ashby';
 
 export type Verdict = 'Apply' | 'Stretch-worth-it' | 'Skip';
 
-/** Empresa a vigilar (fila de la tabla `companies`). */
+/** Company to watch (row of the `companies` table). */
 export interface Company {
   id: number;
   name: string;
@@ -13,30 +13,30 @@ export interface Company {
   active: boolean;
 }
 
-/** Job normalizado que devuelve todo connector. */
+/** Normalized job returned by every connector. */
 export interface Job {
-  /** ID externo del job en el ATS. */
+  /** External ID of the job in the ATS. */
   id: string;
   company: string;
   title: string;
   location: string;
   url: string;
   description: string;
-  /** ISO 8601, o null si el feed no trae fecha confiable. */
+  /** ISO 8601, or null if the feed carries no reliable date. */
   posted_at: string | null;
   ats: Ats;
   raw: unknown;
 }
 
-/** Bindings y secretos del worker. */
+/** Worker bindings and secrets. */
 export interface Env {
   DB: D1Database;
-  /** Worker secret: protege fetch() completo hasta el login por cookie (paso 4). */
+  /** Worker secret: protects the whole fetch() until cookie login (step 4). */
   API_TOKEN?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
   GEMINI_API_KEY?: string;
-  /** JSON completo del service account de GCP (paso 6). */
+  /** Full JSON of the GCP service account (step 6). */
   GOOGLE_SA_KEY?: string;
   DRIVE_FOLDER_ID?: string;
   CV_TEMPLATE_DOC_ID?: string;

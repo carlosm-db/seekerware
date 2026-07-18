@@ -1,9 +1,9 @@
-// Connector Ashby (docs/TRD.md §2).
+// Ashby connector (docs/TRD.md §2).
 // Feed:            api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=true
-// Campo de fecha:  publishedAt (o publishedDate en payloads antiguos)
-// verify-on-notify: re-fetch del board y buscar el id. La pagina HTML es una
-//                   SPA que devuelve 200 aunque el job este muerto — NUNCA
-//                   verificar contra HTML (regla de dominio).
+// Date field:      publishedAt (or publishedDate in older payloads)
+// verify-on-notify: re-fetch the board and look for the id. The HTML page is a
+//                   SPA that returns 200 even when the job is dead — NEVER
+//                   verify against HTML (domain rule).
 
 import type { Company, Job } from '../types';
 import { canonicalUrl, stripHtml } from './common';
@@ -37,7 +37,7 @@ export async function fetchJobs(company: Company, doFetch: Fetcher = fetch): Pro
   return (board.jobs ?? []).filter((j) => j.isListed !== false).map((j) => normalize(company, j));
 }
 
-/** Ashby no tiene endpoint de posting individual publico: re-fetch del board y buscar el id. */
+/** Ashby has no public individual-posting endpoint: re-fetch the board and look for the id. */
 export async function isLive(company: Company, job: Job, doFetch: Fetcher = fetch): Promise<boolean> {
   const res = await doFetch(`${BASE}/${company.token}`);
   if (!res.ok) throw new Error(`ashby verify ${company.token}: HTTP ${res.status}`);

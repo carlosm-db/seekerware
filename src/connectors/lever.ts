@@ -1,7 +1,7 @@
-// Connector Lever (docs/TRD.md §2).
+// Lever connector (docs/TRD.md §2).
 // Feed:            api.lever.co/v0/postings/{token}?mode=json
-// Campo de fecha:  createdAt (epoch ms)
-// verify-on-notify: GET del posting individual en modo JSON -> 404 = muerto
+// Date field:      createdAt (epoch ms)
+// verify-on-notify: GET of the individual posting in JSON mode -> 404 = dead
 
 import type { Company, Job } from '../types';
 import { canonicalUrl, stripHtml } from './common';
@@ -26,7 +26,7 @@ export async function fetchJobs(company: Company, doFetch: Fetcher = fetch): Pro
   const res = await doFetch(`${BASE}/${company.token}?mode=json`);
   if (!res.ok) throw new Error(`lever feed ${company.token}: HTTP ${res.status}`);
   const postings = (await res.json()) as LeverPosting[];
-  if (!Array.isArray(postings)) throw new Error(`lever feed ${company.token}: payload inesperado`);
+  if (!Array.isArray(postings)) throw new Error(`lever feed ${company.token}: unexpected payload`);
   return postings.map((p) => normalize(company, p));
 }
 

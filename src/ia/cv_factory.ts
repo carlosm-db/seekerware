@@ -1,6 +1,6 @@
-// CV factory (docs/TRD.md §6): seleccion-only + render determinista.
-// El cuerpo del Doc contiene EXCLUSIVAMENTE texto de blocks (verificable por
-// diff); la IA selecciona y sugiere, JAMAS redacta contenido del CV.
+// CV factory (docs/TRD.md §6): selection-only + deterministic render.
+// The Doc body contains EXCLUSIVELY block text (verifiable by
+// diff); the AI selects and suggests, NEVER writes CV content.
 
 import type { Env, Job } from '../types';
 import { cvSelector, cvVerifier, type CatalogBlock, type Selection } from './agents';
@@ -53,8 +53,8 @@ export async function generateCv(
 ): Promise<FactoryResult> {
   let geminiCalls = 0;
   try {
-    // 1) Catalogo: SOLO approved (regla 1). En modo MUESTRA se admiten drafts —
-    //    es el mecanismo de revision ligera: el propietario aprueba viendo CVs.
+    // 1) Catalog: ONLY approved (rule 1). In SAMPLE mode drafts are allowed —
+    //    it's the lightweight review mechanism: the owner approves by viewing CVs.
     const statusFilter = sample ? "('draft','review','approved')" : "('approved')";
     const rows = (
       await env.DB.prepare(
@@ -65,24 +65,24 @@ export async function generateCv(
     const usable = rows.filter((b) => {
       const text = lang === 'es' ? b.text_es : b.text_en;
       if (!text) return false;
-      if (lang === 'es' && !sample && b.es_status !== 'approved') return false; // paridad ES obligatoria
+      if (lang === 'es' && !sample && b.es_status !== 'approved') return false; // mandatory ES parity
       return true;
     });
     if (usable.length < 8) {
-      return { ok: false, gemini_calls: 0, error: `banco insuficiente para render ${lang}${sample ? '' : ' (approved)'}: ${usable.length} blocks` };
+      return { ok: false, gemini_calls: 0, error: `insufficient bank to render ${lang}${sample ? '' : ' (approved)'}: ${usable.length} blocks` };
     }
     const catalog: CatalogBlock[] = usable.map((b) => ({
       id: b.id, section: b.section, anchor_id: b.anchor_id, angle: b.angle,
       tags: b.tags ?? '', text: (lang === 'es' ? b.text_es : b.text_en) ?? '',
     }));
 
-    // 2) Seleccion (enum de IDs forzado por schema)
+    // 2) Selection (enum of IDs forced by schema)
     const sel = await cvSelector(env, job, catalog, doFetch);
     geminiCalls += sel.calls;
     if (!sel.ok || !sel.data) return { ok: false, gemini_calls: geminiCalls, error: `cv_selector: ${sel.error}` };
     const selection = sel.data;
 
-    // 3) Render determinista (cero IA): texto EXACTO de los blocks
+    // 3) Deterministic render (zero AI): EXACT text from the blocks
     const anchors = new Map(
       ((await env.DB.prepare('SELECT id, kind, company, dates, titles FROM anchors').all<AnchorRow>()).results)
         .map((a) => [a.id, a]),
@@ -90,28 +90,28 @@ export async function generateCv(
     const byId = new Map(catalog.map((b) => [b.id, b]));
     const body = renderBody(job, lang, selection, byId, anchors);
 
-    // 4) Verifier (temp 0) sobre el cuerpo renderizado
+    // 4) Verifier (temp 0) over the rendered body
     const ver = await cvVerifier(env, job, body, doFetch);
     geminiCalls += ver.calls;
     const tweaks = ver.ok && ver.data ? ver.data.tweaks : [];
 
-    // 5) Google: copiar plantilla -> cuerpo -> PDF LIMPIO -> apendice al Doc
+    // 5) Google: copy template -> body -> CLEAN PDF -> appendix to the Doc
     const token = await googleAccessToken(env, doFetch);
     const today = new Date().toISOString().slice(0, 10);
-    const name = `${sample ? 'MUESTRA — ' : ''}CV — ${job.company} — ${job.title.slice(0, 60)} — ${today}`;
+    const name = `${sample ? 'SAMPLE — ' : ''}CV — ${job.company} — ${job.title.slice(0, 60)} — ${today}`;
     const doc = await copyTemplate(env, token, name, doFetch);
     await appendDocText(token, doc.id, body, doFetch);
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').slice(0, 12);
     const pdfId = await exportAndArchivePdf(env, token, doc.id, `${stamp} — ${job.company} — generated.pdf`, doFetch);
     const appendix = [
       '\n\n────────────────────────────────',
-      lang === 'es' ? 'SUGGESTED TWEAKS (borrar antes de enviar)' : 'SUGGESTED TWEAKS (delete before sending)',
-      `Seleccion: ${selection.rationale}`,
+      lang === 'es' ? 'SUGGESTED TWEAKS (delete before sending)' : 'SUGGESTED TWEAKS (delete before sending)',
+      `Selection: ${selection.rationale}`,
       ...tweaks.map((t) => `• ${t}`),
     ].join('\n');
     await appendDocText(token, doc.id, appendix, doFetch);
 
-    // 6) Persistencia
+    // 6) Persistence
     const nowIso = new Date().toISOString();
     const cvRow = await env.DB.prepare(
       `INSERT INTO cvs (url_hash, doc_id, doc_url, lang, pdf_file_id, blocks_used, verifier_notes, rationale, sample, pending, created_at)

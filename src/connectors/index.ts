@@ -1,4 +1,4 @@
-// Registro de connectors: interfaz comun fetchJobs/isLive por ATS (TRD §2).
+// Connector registry: common fetchJobs/isLive interface per ATS (TRD §2).
 
 import type { Ats, Company, Job } from '../types';
 import * as greenhouse from './greenhouse';

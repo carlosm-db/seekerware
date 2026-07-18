@@ -1,5 +1,5 @@
-// Acceso a D1 (docs/DATABASE.md). Unica puerta al store: statements preparados,
-// nunca SQL interpolado. Las escrituras del run viajan en UN db.batch() final.
+// D1 access (docs/DATABASE.md). Single door to the store: prepared statements,
+// never interpolated SQL. The run's writes travel in ONE final db.batch().
 
 import type { Company, Env } from './types';
 import type { RunStats } from './runstats';
@@ -24,7 +24,7 @@ export async function getConfigValue(env: Env, key: string): Promise<string | nu
   return row?.value ?? null;
 }
 
-/** Pagina round-robin de empresas activas (cursor en config['poll_cursor']). */
+/** Round-robin page of active companies (cursor in config['poll_cursor']). */
 export async function getCompaniesPage(
   env: Env,
   stats: RunStats,
@@ -39,7 +39,7 @@ export async function getCompaniesPage(
   stats.d1(res.meta);
   let rows = res.results;
   if (rows.length < pageSize) {
-    // wrap-around: completa la pagina desde el inicio
+    // wrap-around: fill the page from the beginning
     const res2 = await q.bind(0, pageSize - rows.length).all<CompanyRow>();
     stats.d1(res2.meta);
     const seen = new Set(rows.map((r) => r.id));
@@ -50,7 +50,7 @@ export async function getCompaniesPage(
   return { companies, nextCursor };
 }
 
-/** Estado actual de los jobs de una empresa (para dedup y auto-expire). */
+/** Current state of a company's jobs (for dedup and auto-expire). */
 export async function getCompanyJobs(
   env: Env,
   stats: RunStats,
@@ -63,7 +63,7 @@ export async function getCompanyJobs(
   return new Map(res.results.map((r) => [r.url_hash, r.status]));
 }
 
-/** Abre la fila del run (INSERT inmediato: un crash debe ser dato, no silencio) y estampa huerfanos. */
+/** Opens the run row (immediate INSERT: a crash must be data, not silence) and stamps orphans. */
 export async function openRun(env: Env, trigger: 'cron' | 'manual', nowIso: string): Promise<number> {
   await env.DB.prepare(
     "UPDATE runs SET status = 'crashed', finished_at = ? WHERE status = 'running' AND started_at < datetime(?, '-10 minutes')",
@@ -73,7 +73,7 @@ export async function openRun(env: Env, trigger: 'cron' | 'manual', nowIso: stri
   const row = await env.DB.prepare('INSERT INTO runs (started_at, trigger) VALUES (?, ?) RETURNING id')
     .bind(nowIso, trigger)
     .first<{ id: number }>();
-  if (!row) throw new Error('no se pudo abrir la fila del run');
+  if (!row) throw new Error('could not open run row');
   return row.id;
 }
 
@@ -102,7 +102,7 @@ export interface JobInsert {
   title_norm: string;
 }
 
-/** Constructor de statements para el batch final del run. */
+/** Statement builder for the run's final batch. */
 export class RunBatch {
   private statements: D1PreparedStatement[] = [];
 
@@ -125,9 +125,9 @@ export class RunBatch {
   }
 
   /**
-   * Auto-expire: SOLO se llama para empresas con fetch exitoso en este run.
-   * Estampa last_seen = ahora (ultimo momento de presencia confirmada, con
-   * error maximo de un intervalo de cron).
+   * Auto-expire: called ONLY for companies with a successful fetch in this run.
+   * Stamps last_seen = now (last moment of confirmed presence, with a maximum
+   * error of one cron interval).
    */
   closeJobs(urlHashes: string[], nowIso: string): void {
     for (const h of urlHashes) {
@@ -161,7 +161,7 @@ export class RunBatch {
     );
   }
 
-  /** Vuelca eventos, entregas y el cierre del run; ejecuta TODO atomicamente. */
+  /** Flushes events, deliveries and the run close; runs EVERYTHING atomically. */
   async flush(runId: number, stats: RunStats, status: string, nowIso: string, startedMs: number): Promise<void> {
     for (const e of stats.events) {
       this.statements.push(
@@ -177,13 +177,13 @@ export class RunBatch {
         ).bind(runId, n.url_hash ?? null, n.kind, nowIso, n.status, n.tg_message_id ?? null, n.error ?? null),
       );
     }
-    // 1) Ejecuta el trabajo del run y acumula la contabilidad D1 exacta de sus metas
+    // 1) Run the run's work and accumulate the exact D1 accounting from its metas
     if (this.statements.length) {
       const results = await this.env.DB.batch(this.statements);
       for (const r of results) stats.d1(r.meta);
       this.statements = [];
     }
-    // 2) Cierra la fila del run con los contadores COMPLETOS (incluido el batch anterior)
+    // 2) Close the run row with the COMPLETE counters (including the batch above)
     await this.env.DB.prepare(
       `UPDATE runs SET finished_at = ?, status = ?, duration_ms = ?,
          companies_total = ?, companies_ok = ?, companies_fail = ?,
@@ -202,7 +202,7 @@ export class RunBatch {
   }
 }
 
-/** Conteos por tabla — prueba de vida de la migration y el binding (ruta /api/health). */
+/** Per-table counts — proof of life of the migration and the binding (route /api/health). */
 export async function counts(env: Env): Promise<Record<string, number>> {
   const tables = ['companies', 'jobs', 'anchors', 'blocks', 'config', 'runs', 'events', 'notifications'] as const;
   const out: Record<string, number> = {};

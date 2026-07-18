@@ -1,4 +1,4 @@
-// Login por cookie firmada (TRD §8). Sin dominio -> sin Access; el worker es su propio portero.
+// Signed-cookie login (TRD §8). No domain -> no Access; the worker is its own gatekeeper.
 
 import type { Context, Next } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
@@ -60,7 +60,7 @@ export function setSessionCookie(c: Context, token: string): void {
   });
 }
 
-/** Middleware global: cookie valida O Bearer API_TOKEN (scripts/curl); /login es la unica puerta abierta. */
+/** Global middleware: valid cookie OR Bearer API_TOKEN (scripts/curl); /login is the only open door. */
 export function authMiddleware() {
   return async (c: Context<{ Bindings: ConsoleEnv }>, next: Next) => {
     if (c.req.path === '/login') return next();
@@ -71,7 +71,7 @@ export function authMiddleware() {
       if (c.req.path.startsWith('/api/')) return c.json({ error: 'unauthorized' }, 401);
       return c.redirect('/login');
     }
-    // CSRF minimo: mutaciones solo mismo origen
+    // Minimal CSRF: mutations same-origin only
     if (c.req.method !== 'GET' && !bearerOk) {
       const origin = c.req.header('origin');
       if (origin && new URL(origin).host !== new URL(c.req.url).host) {

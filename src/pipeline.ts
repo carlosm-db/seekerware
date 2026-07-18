@@ -1,5 +1,5 @@
-// Orquestacion del run (docs/TRD.md §7): aislamiento por empresa, dedup,
-// freshness, verify-on-notify, notificacion, auto-expire, instrumentacion.
+// Run orchestration (docs/TRD.md §7): per-company isolation, dedup,
+// freshness, verify-on-notify, notification, auto-expire, instrumentation.
 
 import type { Env, Job } from './types';
 import { connectors } from './connectors/index';
@@ -25,16 +25,16 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
   try {
     const config = await loadScoringConfig(env);
     const maxDays = Number((await getConfigValue(env, 'FRESHNESS_MAX_DAYS')) ?? '3');
-    // Tope de jobs NUEVOS puntuados por run: protege el limite de CPU del free
-    // tier (error 1102 comprobado sembrando 1,336 de una vez). La siembra se
-    // completa en tandas por runs sucesivos; el regimen permanente ni lo roza.
+    // Cap on NEW jobs scored per run: protects the free tier's CPU limit
+    // (error 1102 confirmed by seeding 1,336 at once). Seeding completes in
+    // batches over successive runs; steady state never comes close.
     const maxNewPerRun = Number((await getConfigValue(env, 'max_new_jobs_per_run')) ?? '100');
     const observability = JSON.parse((await getConfigValue(env, 'observability')) ?? '{}') as {
       maintenance_fail_streak?: number;
     };
     const failStreak = observability.maintenance_fail_streak ?? 3;
 
-    // CV factory: fabrica UN pendiente por run (el mas antiguo notificado)
+    // CV factory: builds ONE pending item per run (the oldest notified one)
     if (env.GOOGLE_SA_KEY) {
       const pending = await env.DB.prepare(
         `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, c.name company
@@ -66,12 +66,12 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
         batch.companySuccess(company.id, nowIso);
       } catch (err) {
         stats.companiesFail++;
-        const detail = err instanceof Error ? err.message : 'error desconocido';
+        const detail = err instanceof Error ? err.message : 'unknown error';
         stats.event({ type: 'fetch_fail', severity: 'error', company_id: company.id, detail });
         batch.companyFailure(company.id, nowIso, detail);
-        // Alerta MANTENIMIENTO exactamente al cruzar el umbral (anti-spam: solo en la igualdad)
+        // MAINTENANCE alert exactly when crossing the threshold (anti-spam: only on equality)
         if (company.fail_count + 1 === failStreak) {
-          const msg = formatMaintenance(`Feed de ${company.name} fallo ${failStreak} runs seguidos: ${detail}`);
+          const msg = formatMaintenance(`${company.name} feed failed ${failStreak} runs in a row: ${detail}`);
           const sent = await sendTelegram(env, msg, doFetch);
           stats.notifications.push({
             kind: 'maintenance',
@@ -87,7 +87,7 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
     batch.setConfig('poll_cursor', String(nextCursor));
     if (stats.companiesFail > 0) runStatus = 'partial';
 
-    // Cuota: aviso si el pico de subrequests roza el limite por invocacion
+    // Quota: warn if the subrequests peak approaches the per-invocation limit
     const obsCfg = JSON.parse((await getConfigValue(env, 'observability')) ?? '{}') as {
       subrequests_warn?: number;
       retention_days?: { runs?: number; events?: number; notifications?: number };
@@ -97,11 +97,11 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
       stats.event({ type: 'quota_warn', severity: 'warn', detail: `subrequests ${stats.subrequests} > ${obsCfg.subrequests_warn ?? 40}` });
     }
 
-    // Retencion: el primer run de cada dia poda las tablas de observabilidad.
-    // Cutoffs en ISO de JS (los timestamps almacenados son toISOString(); compararlos
-    // contra datetime() de SQLite incluye de mas el dia frontera: 'T' > ' ').
-    // Orden FK-seguro: primero los HIJOS (events/notifications, incluidos los que
-    // referencian runs por podar), despues runs — si no, DELETE FROM runs viola la FK.
+    // Retention: the first run of each day prunes the observability tables.
+    // Cutoffs in JS ISO (stored timestamps are toISOString(); comparing them
+    // against SQLite's datetime() would over-include the boundary day: 'T' > ' ').
+    // FK-safe order: CHILDREN first (events/notifications, including those that
+    // reference runs to be pruned), then runs — otherwise DELETE FROM runs violates the FK.
     const today = nowIso.slice(0, 10);
     if ((await getConfigValue(env, 'prune_last')) !== today) {
       const ret = obsCfg.retention_days ?? {};
@@ -120,7 +120,7 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
       stats.event({ type: 'prune', severity: 'info', detail: `events:${changes[0]} notifications:${changes[1]} runs:${changes[2]}` });
     }
 
-    // Digest semanal: primer run tras el dia/hora configurados (lunes ~06:00 Bogota)
+    // Weekly digest: first run after the configured day/hour (Monday ~06:00 Bogota)
     const digestCfg = obsCfg.digest ?? { dow: 1, hour_utc: 11 };
     const nowDate = new Date(nowIso);
     const weekKey = `${nowDate.getUTCFullYear()}-W${isoWeek(nowDate)}`;
@@ -129,23 +129,23 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
       nowDate.getUTCHours() >= (digestCfg.hour_utc ?? 11) &&
       (await getConfigValue(env, 'digest_last_sent')) !== weekKey
     ) {
-      // Claim-first (escritura INMEDIATA, no en el batch final): garantiza
-      // at-most-once aunque un run manual y el cron se solapen o el run muera
-      // despues del envio. Si el envio falla, se pierde el digest de esa
-      // semana (tolerable, queda el evento) — jamas se duplica.
+      // Claim-first (IMMEDIATE write, not in the final batch): guarantees
+      // at-most-once even if a manual run and the cron overlap or the run dies
+      // after sending. If the send fails, that week's digest is lost
+      // (tolerable, the event remains) — it is never duplicated.
       await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('digest_last_sent', ?)")
         .bind(weekKey).run();
       const digest = await buildDigest(env);
       const sent = await sendTelegram(env, formatDigest(digest), doFetch);
       stats.notifications.push({ kind: 'digest', status: sent.ok ? 'sent' : 'fail', tg_message_id: sent.message_id, error: sent.error });
-      stats.event({ type: 'digest_sent', severity: sent.ok ? 'info' : 'warn', detail: `${weekKey}${sent.ok ? '' : ` FALLO: ${sent.error}`}` });
+      stats.event({ type: 'digest_sent', severity: sent.ok ? 'info' : 'warn', detail: `${weekKey}${sent.ok ? '' : ` FAILED: ${sent.error}`}` });
     }
   } catch (err) {
     runStatus = 'fail';
     stats.event({
       type: 'run_crash',
       severity: 'error',
-      detail: err instanceof Error ? err.message : 'error de run',
+      detail: err instanceof Error ? err.message : 'run error',
     });
   } finally {
     await batch.flush(runId, stats, runStatus, new Date().toISOString(), startedMs);
@@ -161,8 +161,8 @@ function isoWeek(d: Date): number {
 }
 
 async function buildDigest(env: Env) {
-  // Cutoff en ISO de JS: mismos numeros exactos que /semana (los timestamps
-  // guardados son toISOString(); datetime() de SQLite no compara bien contra ellos).
+  // Cutoff in JS ISO: same exact numbers as /week (stored timestamps are
+  // toISOString(); SQLite's datetime() does not compare well against them).
   const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
   const wk = await env.DB.prepare(
     `SELECT
@@ -207,7 +207,7 @@ async function processCompany(
   doFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
 ): Promise<void> {
   const connector = connectors[company.ats];
-  // Primer run de la empresa = seeding: se siembra el historico SIN notificar (regla 4).
+  // A company's first run = seeding: the history is seeded WITHOUT notifying (rule 4).
   const seeding = company.last_ok_fetch === null;
 
   const jobs = await connector.fetchJobs(company, doFetch);
@@ -220,14 +220,14 @@ async function processCompany(
     const hash = await urlHash(job.url);
     seenHashes.add(hash);
     if (existing.has(hash)) {
-      // Dedup: existente -> continuar. NO se escribe last_seen por presencia:
-      // costaria ~129k filas/dia (>100k free tier). La presencia de un job
-      // abierto la garantiza el auto-expire; last_seen se estampa al cerrar.
+      // Dedup: existing -> continue. last_seen is NOT written on presence:
+      // it would cost ~129k rows/day (>100k free tier). An open job's presence
+      // is guaranteed by auto-expire; last_seen is stamped on close.
       continue;
     }
     if (stats.jobsNew >= maxNewPerRun) {
-      // Tope de CPU alcanzado: el resto queda para el proximo run (siguen
-      // siendo "nuevos"; al no estar en el store, el auto-expire no los toca).
+      // CPU cap reached: the rest waits for the next run (they are still
+      // "new"; not being in the store, auto-expire does not touch them).
       continue;
     }
     stats.jobsNew++;
@@ -246,21 +246,21 @@ async function processCompany(
     } else if (isSurvivor) {
       stats.survivors++;
       if (freshness.fresh) {
-        // verify-on-notify inmediatamente antes del push
+        // verify-on-notify immediately before the push
         let alive: boolean | null = null;
         try {
           alive = await connector.isLive(company, job, doFetch);
         } catch (err) {
           stats.event({
             type: 'verify_fail', severity: 'warn', company_id: company.id, url_hash: hash,
-            detail: err instanceof Error ? err.message : 'verify indeterminado',
+            detail: err instanceof Error ? err.message : 'verify indeterminate',
           });
         }
         if (alive === false) {
           status = 'closed';
           stats.event({ type: 'verify_dead', severity: 'info', company_id: company.id, url_hash: hash });
         } else if (alive === true) {
-          // Enricher (solo survivors, TRD §4): mejora los textos; jamas el verdict
+          // Enricher (survivors only, TRD §4): improves the texts; never the verdict
           let ruleBased = true;
           if (env.GEMINI_API_KEY) {
             const enriched = await enricher(env, job, {
@@ -294,15 +294,15 @@ async function processCompany(
             status = 'notified';
             notifiedAt = nowIso;
             stats.notified++;
-            // CV factory solo para verdict Apply: queda cv_pending=1 y lo
-            // fabrica el arranque del run (1 fabrica/run, presupuesto fijo).
+            // CV factory only for verdict Apply: leaves cv_pending=1 and the
+            // run's startup builds it (1 build/run, fixed budget).
             if (result.best.verdict === 'Apply') cvPending = 1;
           } else {
             stats.event({ type: 'telegram_fail', severity: 'error', url_hash: hash, detail: sent.error });
-            // queda 'new': el run siguiente reintenta
+            // stays 'new': the next run retries
           }
         }
-        // alive === null (indeterminado): queda 'new', NUNCA se notifica sin verificar
+        // alive === null (indeterminate): stays 'new', NEVER notified without verifying
       }
     }
 
@@ -319,7 +319,7 @@ async function processCompany(
     });
   }
 
-  // Auto-expire SOLO con fetch exitoso (estamos aqui = exito): ausentes del feed -> closed
+  // Auto-expire ONLY on a successful fetch (being here = success): absent from the feed -> closed
   const disappeared = [...existing.entries()]
     .filter(([hash, status]) => !seenHashes.has(hash) && (status === 'new' || status === 'notified'))
     .map(([hash]) => hash);

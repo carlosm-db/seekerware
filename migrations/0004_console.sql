@@ -1,4 +1,4 @@
--- Migration number: 0004 	 Consola v1 (DATABASE.md §10-§11)
+-- Migration number: 0004 	 Console v1 (DATABASE.md §10-§11)
 
 CREATE TABLE applications (
   url_hash      TEXT PRIMARY KEY REFERENCES jobs(url_hash),

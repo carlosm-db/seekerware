@@ -1,5 +1,5 @@
-// Instrumentacion del run (TRD §7): contadores en memoria, cero escrituras
-// intermedias; todo se vuelca en UN flush dentro del db.batch() final.
+// Run instrumentation (TRD §7): in-memory counters, zero intermediate
+// writes; everything is flushed in ONE flush inside the final db.batch().
 
 export interface PendingEvent {
   type: string;
@@ -47,14 +47,14 @@ export class RunStats {
     this.events.push(e);
   }
 
-  /** Contabilidad D1 exacta y gratis: acumula meta de cada resultado. */
+  /** Exact, free D1 accounting: accumulates the meta of each result. */
   d1(meta: { rows_read?: number; rows_written?: number } | undefined): void {
     this.d1Reads += meta?.rows_read ?? 0;
     this.d1Writes += meta?.rows_written ?? 0;
   }
 }
 
-/** Envuelve TODO fetch saliente del pipeline: cuenta subrequests contra el limite de 50. */
+/** Wraps EVERY outbound fetch of the pipeline: counts subrequests against the limit of 50. */
 export function trackedFetch(stats: RunStats) {
   return (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     stats.subrequests++;

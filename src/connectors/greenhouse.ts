@@ -1,7 +1,7 @@
-// Connector Greenhouse (docs/TRD.md §2).
+// Greenhouse connector (docs/TRD.md §2).
 // Feed:            boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true
-// Campo de fecha:  first_published (preferido sobre updated_at, que algunos boards tocan constantemente)
-// verify-on-notify: GET /boards/{token}/jobs/{id} -> 404 = cerrado
+// Date field:      first_published (preferred over updated_at, which some boards touch constantly)
+// verify-on-notify: GET /boards/{token}/jobs/{id} -> 404 = closed
 
 import type { Company, Job } from '../types';
 import { canonicalUrl, stripHtml } from './common';
@@ -24,7 +24,7 @@ interface GreenhouseFeed {
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-/** Lee el feed publico del board y devuelve jobs normalizados. Lanza si el fetch falla (el caller aisla por empresa). */
+/** Reads the board's public feed and returns normalized jobs. Throws if the fetch fails (the caller isolates per company). */
 export async function fetchJobs(company: Company, doFetch: Fetcher = fetch): Promise<Job[]> {
   const res = await doFetch(`${BASE}/${company.token}/jobs?content=true`);
   if (!res.ok) {
@@ -34,7 +34,7 @@ export async function fetchJobs(company: Company, doFetch: Fetcher = fetch): Pro
   return (feed.jobs ?? []).map((j) => normalize(company, j));
 }
 
-/** verify-on-notify: re-consulta el job individual en la API. 404 = muerto. Otros errores lanzan (indeterminado). */
+/** verify-on-notify: re-queries the individual job in the API. 404 = dead. Other errors throw (indeterminate). */
 export async function isLive(company: Company, job: Job, doFetch: Fetcher = fetch): Promise<boolean> {
   const res = await doFetch(`${BASE}/${company.token}/jobs/${job.id}`);
   if (res.status === 404) return false;

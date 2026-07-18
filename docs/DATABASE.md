@@ -1,40 +1,40 @@
 # DATABASE — Seekerware
 
-El store del sistema es **una base D1 (SQLite serverless de Cloudflare)**,
-binding `DB` del worker, con schema versionado en `migrations/`. Terminologia
-en [`CONVENTIONS.md`](CONVENTIONS.md).
+The system store is **a single D1 database (Cloudflare's serverless SQLite)**,
+the worker's `DB` binding, with the schema versioned in `migrations/`.
+Terminology in [`CONVENTIONS.md`](CONVENTIONS.md).
 
 ---
 
-## 1. Principios
+## 1. Principles
 
-- Una sola base. Tablas nucleo: `companies`, `jobs`, `anchors`, `blocks`,
-  `config`. Observabilidad (§9): `runs`, `events`, `notifications`.
-  Candidaturas (§10): `applications`, `job_events`. Consola: `config_history`
-  (§11). Futuras: `cvs` (paso 6), `answers` (paso 8) — §12.
-- Todo cambio de schema es una migration versionada (`wrangler d1 migrations`);
-  nunca DDL manual contra produccion.
-- Acceso SOLO via `src/store.ts`: statements preparados con bindings;
-  `db.batch()` para las escrituras del run.
-- Cada columna tiene UN escritor: o el usuario (via dashboard) o el sistema
-  (marcado abajo).
-- Sin datos personales del propietario mas alla de lo operativo (los blocks son
-  contenido de CV aprobado por el; la base y el dashboard son privados).
+- One single database. Core tables: `companies`, `jobs`, `anchors`, `blocks`,
+  `config`. Observability (§9): `runs`, `events`, `notifications`.
+  Applications (§10): `applications`, `job_events`. Console: `config_history`
+  (§11). Future: `cvs` (step 6), `answers` (step 8) — §12.
+- Every schema change is a versioned migration (`wrangler d1 migrations`);
+  never manual DDL against production.
+- Access ONLY via `src/store.ts`: prepared statements with bindings;
+  `db.batch()` for the run's writes.
+- Each column has ONE writer: either the user (via the dashboard) or the system
+  (marked below).
+- No personal data of the owner beyond the operational (the blocks are CV
+  content he has approved; the database and the dashboard are private).
 
-## 2. Tabla `companies` — empresas a vigilar
+## 2. `companies` table — companies to watch
 
-| Columna | Tipo | Escribe | Descripcion |
-|---------|------|---------|-------------|
-| id | INTEGER PK | sistema | Autoincremental |
-| name | TEXT | usuario | Nombre legible de la empresa |
-| ats | TEXT enum `greenhouse\|lever\|ashby` | usuario | Connector a usar |
-| token | TEXT | usuario | Slug del board publico del ATS |
-| active | INTEGER 0/1 | usuario | 0 = no se pollea |
-| notes | TEXT | usuario | Libre |
-| last_ok_fetch | TEXT (ISO) | sistema | Ultimo fetch exitoso del feed; condiciona el auto-expire (§6) |
-| fail_count | INTEGER | sistema | Fallos consecutivos; dispara mensaje MANTENIMIENTO al superar umbral |
-| fetch_ok_total / fetch_fail_total | INTEGER | sistema | Acumulados para tasa de exito (salud en la consola) |
-| last_fail / last_error | TEXT | sistema | Ultimo fallo y su mensaje (visibles en `/companies` sin ir al log) |
+| Column | Type | Writer | Description |
+|--------|------|--------|-------------|
+| id | INTEGER PK | system | Autoincrement |
+| name | TEXT | user | Human-readable company name |
+| ats | TEXT enum `greenhouse\|lever\|ashby` | user | Connector to use |
+| token | TEXT | user | Slug of the ATS public board |
+| active | INTEGER 0/1 | user | 0 = not polled |
+| notes | TEXT | user | Free text |
+| last_ok_fetch | TEXT (ISO) | system | Last successful feed fetch; governs auto-expire (§6) |
+| fail_count | INTEGER | system | Consecutive failures; triggers the MAINTENANCE message when the threshold is exceeded |
+| fetch_ok_total / fetch_fail_total | INTEGER | system | Accumulators for the success rate (health in the console) |
+| last_fail / last_error | TEXT | system | Last failure and its message (visible in `/companies` without going to the log) |
 
 ```sql
 CREATE TABLE companies (
@@ -48,41 +48,41 @@ CREATE TABLE companies (
   fail_count    INTEGER NOT NULL DEFAULT 0,
   UNIQUE (ats, token)
 );
--- 0003 (paso 3): observabilidad de empresa
+-- 0003 (step 3): company observability
 ALTER TABLE companies ADD COLUMN fetch_ok_total   INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE companies ADD COLUMN fetch_fail_total INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE companies ADD COLUMN last_fail        TEXT;
 ALTER TABLE companies ADD COLUMN last_error       TEXT;
 ```
 
-## 3. Tabla `jobs` — el store
+## 3. `jobs` table — the store
 
-Clave: `url_hash` (SHA-256 de la URL canonica, sin query params). Todas las
-columnas las escribe el sistema; unica edicion del usuario (via dashboard):
-`status` a `skipped`.
+Key: `url_hash` (SHA-256 of the canonical URL, without query params). All
+columns are written by the system; the only user edit (via the dashboard):
+`status` to `skipped`.
 
-| Columna | Tipo | Descripcion |
-|---------|------|-------------|
-| url_hash | TEXT PK | Identidad del job para dedup |
-| url | TEXT | URL canonica |
-| company_id | INTEGER FK -> companies | Empresa de origen |
-| ats / ext_id | TEXT | ATS y ID externo del job en el ATS |
-| title / location | TEXT | Del feed |
-| posted_at | TEXT (ISO) | Segun campo correcto por ATS (TRD §2); NULL si no confiable |
-| freshness_ok | TEXT `true\|unknown` | `unknown` = sin fecha confiable; se uso first_seen |
-| track | TEXT | Mejor track que paso gates |
-| score | INTEGER 0-100 | Del motor de reglas |
+| Column | Type | Description |
+|--------|------|-------------|
+| url_hash | TEXT PK | Job identity for dedup |
+| url | TEXT | Canonical URL |
+| company_id | INTEGER FK -> companies | Source company |
+| ats / ext_id | TEXT | ATS and the job's external ID in the ATS |
+| title / location | TEXT | From the feed |
+| posted_at | TEXT (ISO) | From the correct field per ATS (TRD §2); NULL if not reliable |
+| freshness_ok | TEXT `true\|unknown` | `unknown` = no reliable date; first_seen was used |
+| track | TEXT | Best track that passed the gates |
+| score | INTEGER 0-100 | From the rules engine |
 | verdict | TEXT enum | Apply / Stretch-worth-it / Skip |
-| status | TEXT enum | Ver maquina de estados (§4) |
-| first_seen / last_seen | TEXT (ISO) | Ciclo de vida en el feed. `last_seen` se estampa AL CERRAR (ultima presencia confirmada, error max. de un intervalo); para jobs abiertos la presencia la garantiza el auto-expire — escribirla en cada run costaria >100k filas/dia (decision 2026-07-17, cuota D1) |
-| notified_at | TEXT (ISO) | Cuando se envio a Telegram |
-| cv_doc_url | TEXT | Doc generado (solo Apply); cache del ultimo — historial en `cvs` (paso 6) |
-| cv_pending | INTEGER 0/1 | 1 = CV quedo pendiente (Gemini caido); se reintenta el run siguiente |
-| why_it_fits / positioning_lead | TEXT | Version final enviada (rule-based o enriquecida) |
-| description_text | TEXT | Texto plano de la descripcion (post stripHtml) — habilita replay, por-que-no, prep, radar. Se escribe UNA vez al ingerir |
-| score_breakdown | TEXT JSON | ScoreResult completo del motor (matches por categoria, gates por track, verdicts) — transparencia y replay |
-| title_norm | TEXT | Titulo normalizado (lowercase, sin parentesis ni tokens de seniority) — radar de similares |
-| cv_pdf_key | TEXT | Ultimo snapshot `generated` en R2 (paso 6) |
+| status | TEXT enum | See the state machine (§4) |
+| first_seen / last_seen | TEXT (ISO) | Lifecycle in the feed. `last_seen` is stamped ON CLOSE (last confirmed presence, max error of one interval); for open jobs presence is guaranteed by auto-expire — writing it every run would cost >100k rows/day (decision 2026-07-17, D1 quota) |
+| notified_at | TEXT (ISO) | When it was sent to Telegram |
+| cv_doc_url | TEXT | Generated Doc (Apply only); cache of the latest — history in `cvs` (step 6) |
+| cv_pending | INTEGER 0/1 | 1 = the CV was left pending (Gemini down); retried on the next run |
+| why_it_fits / positioning_lead | TEXT | Final version sent (rule-based or enriched) |
+| description_text | TEXT | Plain text of the description (post stripHtml) — enables replay, why-not, prep, radar. Written ONCE on ingest |
+| score_breakdown | TEXT JSON | Full ScoreResult from the engine (matches per category, gates per track, verdicts) — transparency and replay |
+| title_norm | TEXT | Normalized title (lowercase, without parentheses or seniority tokens) — similar-jobs radar |
+| cv_pdf_key | TEXT | Latest `generated` snapshot in R2 (step 6) |
 
 ```sql
 CREATE TABLE jobs (
@@ -111,53 +111,53 @@ CREATE TABLE jobs (
 );
 CREATE INDEX idx_jobs_status  ON jobs (status);
 CREATE INDEX idx_jobs_company ON jobs (company_id, last_seen);
--- 0002 (paso 2): campos de scoring/consola — imposibles de reconstruir despues
+-- 0002 (step 2): scoring/console fields — impossible to reconstruct later
 ALTER TABLE jobs ADD COLUMN description_text TEXT;
 ALTER TABLE jobs ADD COLUMN score_breakdown  TEXT;
 ALTER TABLE jobs ADD COLUMN title_norm       TEXT;
--- 0005 (paso 6): archivo R2
+-- 0005 (step 6): R2 archive
 ALTER TABLE jobs ADD COLUMN cv_pdf_key TEXT;
 ```
 
-## 4. Maquina de estados de `jobs.status`
+## 4. `jobs.status` state machine
 
 ```
-                    (verdict Skip, o seeding de primer run, o manual)
-        nuevo job ────────────────────────────────────────> skipped
+                    (verdict Skip, or first-run seeding, or manual)
+        new job ─────────────────────────────────────────> skipped
             │
             │ (verdict Apply|Stretch + freshness + verify-on-notify OK
-            │  + push Telegram exitoso)
+            │  + successful Telegram push)
             v
            new ──────────────────────────────────────────> notified
             │                                                  │
-            │ (ausente del feed con fetch OK,                  │ (idem)
-            │  o verify-on-notify fallido)                     │
+            │ (absent from feed with fetch OK,                 │ (idem)
+            │  or verify-on-notify failed)                     │
             v                                                  v
           closed <─────────────────────────────────────────────
 ```
 
-- `closed` es terminal: si el job reaparece en el feed, se actualiza
-  `last_seen` pero NO se re-notifica (anti-spam).
-- Los verdicts se calculan al descubrir el job; cambios de config aplican a
-  jobs futuros (re-score manual: evolucion futura).
+- `closed` is terminal: if the job reappears in the feed, `last_seen` is
+  updated but it is NOT re-notified (anti-spam).
+- Verdicts are computed when the job is discovered; config changes apply to
+  future jobs (manual re-score: future evolution).
 
-## 5. Tablas `anchors` y `blocks` — el banco de blocks
+## 5. `anchors` and `blocks` tables — the blocks bank
 
-El banco es el activo nucleo de la capa de CV: el registro canonico,
-gobernado y con evidencia de las afirmaciones profesionales del propietario.
-Modelo: un **fact** (hecho verificable, con metrica exacta unica) puede tener
-varios **blocks** (fraseos aprobados), diferenciados por **angle** (la
-proyeccion que sirven) e idioma. La garantia select-only vale lo que valga la
-completitud y exactitud de este banco.
+The bank is the core asset of the CV layer: the canonical, governed record,
+with evidence, of the owner's professional claims. Model: one **fact**
+(verifiable fact, with a single exact metric) can have several **blocks**
+(approved phrasings), differentiated by **angle** (the projection they serve)
+and language. The select-only guarantee is only as good as the completeness and
+accuracy of this bank.
 
-### `anchors` — registro de roles y proyectos reales
+### `anchors` — registry of real roles and projects
 
-| Columna | Tipo | Escribe | Descripcion |
-|---------|------|---------|-------------|
-| id | TEXT PK | usuario | p. ej. `scotiatech-2021`, `prj-chequeguardai` |
-| kind | TEXT enum `role\|project` | usuario | Tipo de anchor |
-| company / dates | TEXT | usuario | Metadata de render |
-| titles | TEXT JSON | usuario | Titulos mostrados por mercado: `{internal, market_canada, market_colombia, contractor}` — el anchor es neutro; el titulo es proyeccion |
+| Column | Type | Writer | Description |
+|--------|------|--------|-------------|
+| id | TEXT PK | user | e.g. `scotiatech-2021`, `prj-chequeguardai` |
+| kind | TEXT enum `role\|project` | user | Anchor type |
+| company / dates | TEXT | user | Render metadata |
+| titles | TEXT JSON | user | Titles shown per market: `{internal, market_canada, market_colombia, contractor}` — the anchor is neutral; the title is a projection |
 
 ```sql
 CREATE TABLE anchors (
@@ -169,23 +169,23 @@ CREATE TABLE anchors (
 );
 ```
 
-### `blocks` — fraseos aprobados de facts
+### `blocks` — approved phrasings of facts
 
-| Columna | Tipo | Escribe | Descripcion |
-|---------|------|---------|-------------|
-| id | TEXT PK | usuario | `{sec}-{anchor\|topic}-{nn}[-{angle}]`, p. ej. `exp-scotiatech-01-data` |
-| section | TEXT enum `summary\|skills\|experience\|projects` | usuario | Seccion del CV |
-| anchor_id | TEXT FK -> anchors | usuario | Null en summary/skills |
-| fact_key | TEXT | usuario | Agrupa todos los fraseos/idiomas de un mismo fact |
-| angle | TEXT enum `data\|compliance\|operations\|leadership` o NULL | usuario | Proyeccion que sirve este fraseo |
-| text_en / text_es | TEXT | usuario | Fraseos del MISMO fact en cada idioma (paridad obligatoria) |
-| es_status | TEXT enum `missing\|draft\|approved` | usuario | Estado de paridad ES |
-| tags | TEXT csv | usuario | Vocabulario controlado COMPARTIDO con `config` (familias domain/tool/signal + track-fit) |
-| evidence | TEXT | usuario | Hecho real verificable que respalda la afirmacion |
-| source | TEXT | usuario | Procedencia (CV variante, caso del portfolio, proyecto) |
-| status | TEXT enum `draft\|review\|approved\|retired` | usuario | Ciclo de vida; solo `approved` entra al enum del cv_selector; `retired` nunca se borra (audit trail) |
-| suggested | TEXT | sistema | Propuesta de la IA (tweak o block nuevo) pendiente de revision; NUNCA se usa en render |
-| updated_at | TEXT ISO | sistema | Ultima modificacion |
+| Column | Type | Writer | Description |
+|--------|------|--------|-------------|
+| id | TEXT PK | user | `{sec}-{anchor\|topic}-{nn}[-{angle}]`, e.g. `exp-scotiatech-01-data` |
+| section | TEXT enum `summary\|skills\|experience\|projects` | user | CV section |
+| anchor_id | TEXT FK -> anchors | user | Null in summary/skills |
+| fact_key | TEXT | user | Groups all phrasings/languages of the same fact |
+| angle | TEXT enum `data\|compliance\|operations\|leadership` or NULL | user | The projection this phrasing serves |
+| text_en / text_es | TEXT | user | Phrasings of the SAME fact in each language (parity required) |
+| es_status | TEXT enum `missing\|draft\|approved` | user | ES parity status |
+| tags | TEXT csv | user | Controlled vocabulary SHARED with `config` (domain/tool/signal families + track-fit) |
+| evidence | TEXT | user | Real verifiable fact backing the claim |
+| source | TEXT | user | Provenance (CV variant, portfolio case, project) |
+| status | TEXT enum `draft\|review\|approved\|retired` | user | Lifecycle; only `approved` enters the cv_selector enum; `retired` is never deleted (audit trail) |
+| suggested | TEXT | system | AI proposal (tweak or new block) pending review; NEVER used in render |
+| updated_at | TEXT ISO | system | Last modification |
 
 ```sql
 CREATE TABLE blocks (
@@ -209,14 +209,14 @@ CREATE TABLE blocks (
 );
 ```
 
-El registro de facts (fact_key -> hecho + metrica exacta + evidencia +
-fuente) vive en el documento maestro del banco (recurso privado del
-propietario, fuera del repo); `fact_key` lo referencia desde D1.
+The fact registry (fact_key -> fact + exact metric + evidence + source) lives
+in the bank's master document (the owner's private resource, outside the repo);
+`fact_key` references it from D1.
 
-## 6. Tabla `config` — tuning del motor de reglas y operacion
+## 6. `config` table — rules-engine tuning and operation
 
-Key/value con JSON en `value`; editable desde el dashboard sin deploy y
-parseable en una sola lectura por run.
+Key/value with JSON in `value`; editable from the dashboard without a deploy
+and parseable in a single read per run.
 
 ```sql
 CREATE TABLE config (
@@ -225,42 +225,42 @@ CREATE TABLE config (
 );
 ```
 
-Contenido: pesos de categorias, keywords por categoria con peso, definicion de
-tracks y gates, umbrales de verdict (`apply=75`, `stretch=55` iniciales),
-`title_multiplier` (2.0), `FRESHNESS_MAX_DAYS` (=3, operacion). El detalle de
-las claves y sub-formatos JSON **se decide en build 2** con jobs reales.
+Contents: category weights, keywords per category with weight, track and gate
+definitions, verdict thresholds (`apply=75`, `stretch=55` initial),
+`title_multiplier` (2.0), `FRESHNESS_MAX_DAYS` (=3, operation). The detail of
+the keys and JSON sub-formats **is decided in build 2** with real jobs.
 
-## 7. Reglas de integridad
+## 7. Integrity rules
 
-- `url_hash` es PK: existente -> solo actualizar `last_seen` (dedup por
-  construccion).
-- Auto-expire SOLO sobre empresas con fetch exitoso en el run.
-- Primer run de una empresa: seeding con `status = 'skipped'`, sin notificar.
-- `closed` no se reabre ni re-notifica.
-- El cv_selector solo ve blocks con `status = 'approved'`.
-- Un block `approved` DEBE tener `evidence`, `fact_key` y >= 1 tag.
-- Render en ES exige `es_status = 'approved'` en todos los blocks
-  seleccionados (reporte de paridad antes de renderizar colombia_perm).
-- `retired` nunca se borra (audit trail del banco).
-- Escrituras del run en `db.batch()` (atomicidad por lote).
+- `url_hash` is the PK: existing -> only update `last_seen` (dedup by
+  construction).
+- Auto-expire ONLY over companies with a successful fetch in the run.
+- A company's first run: seeding with `status = 'skipped'`, without notifying.
+- `closed` is not reopened nor re-notified.
+- The cv_selector only sees blocks with `status = 'approved'`.
+- An `approved` block MUST have `evidence`, `fact_key`, and >= 1 tag.
+- Rendering in ES requires `es_status = 'approved'` on all selected blocks
+  (parity report before rendering colombia_perm).
+- `retired` is never deleted (bank audit trail).
+- The run's writes in `db.batch()` (per-batch atomicity).
 
-## 8. Limites y escala
+## 8. Limits and scale
 
-D1 free tier: 5 GB de storage, 5M lecturas de fila/dia, 100k escrituras de
-fila/dia — ordenes de magnitud por encima del caso de uso (decenas de empresas,
-cientos de jobs/dia). Si `jobs` crece demasiado en años, archivado anual a
-tabla `jobs_archive` (evolucion futura). La observabilidad completa (§9)
-consume ~1-5k escrituras/dia ≈ 1-5% del presupuesto.
+D1 free tier: 5 GB of storage, 5M row reads/day, 100k row writes/day — orders
+of magnitude above the use case (dozens of companies, hundreds of jobs/day). If
+`jobs` grows too large over the years, annual archiving to a `jobs_archive`
+table (future evolution). Full observability (§9) consumes ~1-5k writes/day ≈
+1-5% of the budget.
 
-## 9. Observabilidad — `runs`, `events`, `notifications` (migration 0003, paso 3)
+## 9. Observability — `runs`, `events`, `notifications` (migration 0003, step 3)
 
-Principio: **la consola solo puede mostrar lo que esta en D1** (el worker no
-puede leer sus propias metricas de Cloudflare). Patron de instrumentacion:
-contadores en memoria durante el run (`RunStats` + `trackedFetch` +
-`meta.rows_read/rows_written` de cada resultado D1 — contabilidad exacta,
-gratis) y UN solo flush dentro del `db.batch()` final. La fila de `runs` se
-inserta al INICIO del run; si el isolate muere, el run siguiente la marca
-`crashed` (el crash es dato, no silencio). Detalle: TRD §Instrumentacion y
+Principle: **the console can only show what is in D1** (the worker cannot read
+its own Cloudflare metrics). Instrumentation pattern: in-memory counters during
+the run (`RunStats` + `trackedFetch` + `meta.rows_read/rows_written` from each
+D1 result — exact accounting, free) and ONE single flush inside the final
+`db.batch()`. The `runs` row is inserted at the START of the run; if the
+isolate dies, the next run marks it `crashed` (the crash is data, not silence).
+Detail: TRD §Instrumentation and
 `docs/audits/2026-07-17-diseno-monitoreo-datos.md`.
 
 ```sql
@@ -321,17 +321,17 @@ CREATE TABLE notifications (
 CREATE INDEX idx_notifications_ts ON notifications (ts);
 ```
 
-Reglas: `events.detail` corto y legible — NUNCA payloads completos, secretos
-ni datos personales. Si Telegram falla, el job queda `new` (reintenta el run
-siguiente); el log hace visible el reintento. Salud y ROI por empresa se
-DERIVAN al leer (aggregates sobre `jobs`, ventana 90 dias) — no se duplican.
+Rules: `events.detail` short and readable — NEVER full payloads, secrets, or
+personal data. If Telegram fails, the job stays `new` (retries on the next
+run); the log makes the retry visible. Per-company health and ROI are DERIVED
+at read time (aggregates over `jobs`, 90-day window) — not duplicated.
 
-## 10. Candidaturas — `applications` + `job_events` (migration 0004, paso 4)
+## 10. Applications — `applications` + `job_events` (migration 0004, step 4)
 
-Ciclo de vida DEL USUARIO, paralelo a `jobs.status` (que sigue siendo 100%
-del sistema — la regla un-escritor-por-columna se preserva separando tablas).
-El humano SIEMPRE envia la aplicacion (CLAUDE.md §7.8); estas tablas registran
-su proceso, no envios del sistema.
+The USER's lifecycle, parallel to `jobs.status` (which remains 100% the
+system's — the one-writer-per-column rule is preserved by splitting tables).
+The human ALWAYS submits the application (CLAUDE.md §7.8); these tables record
+their process, not submissions by the system.
 
 ```sql
 CREATE TABLE applications (
@@ -344,28 +344,28 @@ CREATE TABLE applications (
   outcome_at    TEXT,
   follow_up_at  TEXT,
   snoozed_until TEXT,
-  cv_pdf_key    TEXT,   -- snapshot R2 'submitted': el CV EXACTO enviado (paso 6)
+  cv_pdf_key    TEXT,   -- R2 'submitted' snapshot: the EXACT CV sent (step 6)
   notes         TEXT,
   updated_at    TEXT NOT NULL
 );
 CREATE INDEX idx_applications_stage ON applications (stage);
 
--- Historial append-only de jobs Y applications: JAMAS se borra ni actualiza.
+-- Append-only history of jobs AND applications: NEVER deleted or updated.
 CREATE TABLE job_events (
   id       INTEGER PRIMARY KEY,
   url_hash TEXT NOT NULL,
   ts       TEXT NOT NULL,
   actor    TEXT NOT NULL CHECK (actor IN ('user','system')),
-  event    TEXT NOT NULL,   -- p. ej. notified, stage:applied, snoozed, note
+  event    TEXT NOT NULL,   -- e.g. notified, stage:applied, snoozed, note
   detail   TEXT
 );
 CREATE INDEX idx_job_events_hash ON job_events (url_hash, ts);
 ```
 
-Escritores: `applications` la escribe el usuario (via consola/Telegram);
-`job_events` ambos, cada fila declara su `actor`.
+Writers: `applications` is written by the user (via console/Telegram);
+`job_events` by both, each row declaring its `actor`.
 
-## 11. Historial de configuracion — `config_history` (migration 0004)
+## 11. Configuration history — `config_history` (migration 0004)
 
 ```sql
 CREATE TABLE config_history (
@@ -374,25 +374,24 @@ CREATE TABLE config_history (
   key            TEXT NOT NULL,
   old_value      TEXT,
   new_value      TEXT NOT NULL,
-  replay_summary TEXT   -- JSON del resumen de replay al guardar (si hubo)
+  replay_summary TEXT   -- JSON of the replay summary at save time (if any)
 );
 ```
 
-Escrito en cada guardado desde la consola; habilita "revertir a esta version".
+Written on every save from the console; enables "revert to this version".
 
-## 12. Tablas futuras y retenciones
+## 12. Future tables and retention
 
-- **`cvs`** (paso 6): un CV generado por fila — `url_hash`, `doc_url`, `lang`,
+- **`cvs`** (step 6): one generated CV per row — `url_hash`, `doc_url`, `lang`,
   `pdf_key`, `blocks_used` JSON, `verifier_notes`, `rationale`, `created_at`,
-  `superseded_by`, `pending`. Reemplaza como historial a `jobs.cv_doc_url`
-  (que queda como cache del ultimo).
-- **`answers`** (paso 8): banco de respuestas para formularios — gobernanza
-  identica a `blocks` (autoria del propietario, draft/approved, EN/ES con
-  paridad); el sistema selecciona, JAMAS redacta.
-- **Retenciones** (ejecutadas por el primer run del dia, evento `prune`):
-  `runs` 400 dias · `events` 90 dias · `notifications` 180 dias ·
-  `applications`/`job_events` NUNCA (audit trail) · `jobs` sin cambio.
-- **Claves de `config` operativas**: `quota_limits` (limites free tier
-  editables), `observability` (umbrales de alerta, digest lunes ~06:00
-  America/Bogota, retenciones), `weekly_goal` (objetivo semanal de
-  aplicaciones, inicial 5).
+  `superseded_by`, `pending`. Replaces `jobs.cv_doc_url` as history (which
+  remains the cache of the latest).
+- **`answers`** (step 8): answer bank for forms — governance identical to
+  `blocks` (owner authorship, draft/approved, EN/ES with parity); the system
+  selects, NEVER writes.
+- **Retention** (executed by the day's first run, `prune` event):
+  `runs` 400 days · `events` 90 days · `notifications` 180 days ·
+  `applications`/`job_events` NEVER (audit trail) · `jobs` unchanged.
+- **Operational `config` keys**: `quota_limits` (editable free-tier limits),
+  `observability` (alert thresholds, Monday digest ~06:00 America/Bogota,
+  retention), `weekly_goal` (weekly application target, initially 5).

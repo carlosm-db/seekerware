@@ -1,96 +1,94 @@
-# Convenciones — Seekerware
+# Conventions — Seekerware
 
-Reglas de coherencia entre codigo y documentacion. Complemento de
-[`../CLAUDE.md`](../CLAUDE.md): el codigo es la fuente de verdad; estas
-convenciones existen para que codigo, docs, commits y debugging hablen el mismo
-idioma.
+Consistency rules between code and documentation. A complement to
+[`../CLAUDE.md`](../CLAUDE.md): the code is the source of truth; these
+conventions exist so that code, docs, commits and debugging speak the same
+language.
 
-## 1. Terminologia canonica (glosario)
+## 1. Canonical terminology (glossary)
 
-Un concepto = UN termino, identico en codigo, docs, commits y mensajes de
-debugging. La columna "evitar" lista sinonimos prohibidos. El glosario se
-actualiza en el mismo commit que introduce el termino nuevo.
+One concept = ONE term, identical in code, docs, commits and debugging
+messages. The "avoid" column lists forbidden synonyms. The glossary is updated
+in the same commit that introduces the new term.
 
-| Termino | Significado | Evitar |
-|---------|-------------|--------|
-| job | vacante normalizada `{id, company, title, location, url, description, posted_at, ats, raw}` | vacante, posting, opening, oferta |
-| connector | modulo que lee el feed de un ATS y devuelve jobs normalizados | poller, fetcher, scraper |
-| track | via de busqueda: `canada_coop`, `colombia_perm`, `contractor_usd` | variante, canal, linea |
-| gate | condicion por track, tipo `hard` (elimina) o `penalty` (resta puntos) | filtro duro, regla, restriccion |
-| score | puntaje 0-100 del motor de reglas | rating, puntuacion, calificacion |
-| verdict | `Apply`, `Stretch-worth-it` o `Skip`; lo deciden las reglas, nunca la IA | resultado, decision, clasificacion |
-| survivor | job con verdict Apply o Stretch-worth-it que paso gates y freshness | finalista, candidato, seleccionado |
-| freshness | edad de publicacion <= `FRESHNESS_MAX_DAYS` (3 dias) | vigencia, antiguedad |
-| verify-on-notify | re-consulta del job en la API del ATS inmediatamente antes de notificar | liveness check, verificacion de vida |
-| store | persistencia del sistema en D1 (tabla `jobs`), accedida solo via `src/store.ts` | base de datos, DB, registro, historico |
-| block | fraseo aprobado de un fact en el banco (tabla `blocks`), anclado a un anchor y diferenciado por angle e idioma | frase, snippet, bullet, oracion |
-| fact | hecho profesional verificable del registro canonico, con metrica exacta unica; los blocks son sus fraseos | logro, claim, afirmacion, dato |
-| anchor | rol o proyecto real al que se ancla un block (tabla `anchors`); neutro — los titulos mostrados son proyecciones por mercado | role_anchor, puesto, cargo |
-| angle | proyeccion de un fact para un tipo de rol: `data`, `compliance`, `operations`, `leadership` | enfoque, variante, version |
-| run | una ejecucion completa del pipeline disparada por el cron | corrida, ciclo, iteracion |
-| dry-run | run sin escrituras al store ni notificaciones; via `GET /api/dry-run` o `wrangler dev` local | simulacion, test run |
-| pipeline | orquestacion poll -> score -> gates -> dedup -> notify | flujo, proceso |
-| worker | el servicio Cloudflare que ejecuta el pipeline (handler `scheduled`) y el dashboard (handler `fetch`) | funcion, lambda, script |
-| dashboard | consola web servida por el worker (config, tracking, banco de blocks), detras de login | panel, admin, webapp, consola |
-| migration | cambio versionado del schema D1, archivo en `migrations/` | script SQL, patch de schema |
-| enricher | agente IA que mejora los textos de un survivor | analyst, mejorador |
-| cv_selector | agente IA que selecciona IDs de blocks por seccion (JSON con enum de IDs) | selector de frases |
-| cv_verifier | agente IA a temperatura 0 que verifica el Doc renderizado y sugiere tweaks | verifier, validador |
-| consola | la webapp multipagina servida por el worker (10 paginas, UI.md §2) | dashboard (obsoleto), panel, admin |
-| triage | revision diaria de survivors notificados hasta decision (preparar/aplicado/descartar/posponer) | inbox, revision, bandeja |
-| application | ciclo de vida de postulacion de un job, propiedad del usuario (tabla `applications`) | postulacion, candidatura, proceso |
-| stage | etapa de una application: `prepared\|applied\|interview\|offer\|rejected\|dismissed` | fase, estado (reservado a jobs.status) |
-| snooze | posponer un item de triage hasta una fecha (`snoozed_until`) | recordatorio, aplazar |
-| replay | re-score simulado de jobs almacenados contra una config borrador; NUNCA escribe en `jobs` | simulacion, preview, what-if |
-| event | suceso tipado del log de observabilidad (tabla `events`) | error log, suceso, incidencia |
-| notification | registro de un intento de entrega push (tabla `notifications`) | alerta, aviso, mensaje |
-| meter | medidor de cuota consumida vs limite free tier (derivado de `runs`) | quota gauge, indicador |
-| digest | resumen semanal del funnel (pagina Semana + mensaje Telegram del lunes) | reporte, resumen semanal |
-| cluster | agrupacion soft de jobs por `title_norm` + tags (radar de similares) | grupo, familia de roles |
-| answer | respuesta estandar aprobada para formularios de aplicacion (tabla `answers`, gobernanza tipo blocks) | respuesta enlatada, plantilla, profile_answer |
-| kit | vista por job con CV en PDF, answers y links para aplicar en minutos; el humano SIEMPRE envia | paquete, bundle, auto-apply |
+| Term | Meaning | avoid |
+|------|---------|-------|
+| job | normalized job posting `{id, company, title, location, url, description, posted_at, ats, raw}` | posting, opening, listing, vacancy |
+| connector | module that reads an ATS feed and returns normalized jobs | poller, fetcher, scraper |
+| track | search path: `canada_coop`, `colombia_perm`, `contractor_usd` | variant, channel, lane |
+| gate | per-track condition, type `hard` (eliminates) or `penalty` (subtracts points) | hard filter, rule, restriction |
+| score | 0-100 score from the rules engine | rating, points, grade |
+| verdict | `Apply`, `Stretch-worth-it` or `Skip`; decided by the rules, never the AI | result, decision, classification |
+| survivor | job with an Apply or Stretch-worth-it verdict that passed gates and freshness | finalist, candidate, selected |
+| freshness | publication age <= `FRESHNESS_MAX_DAYS` (3 days) | validity, age |
+| verify-on-notify | re-query of the job against the ATS API immediately before notifying | liveness check, liveness verification |
+| store | the system's persistence in D1 (`jobs` table), accessed only via `src/store.ts` | database, DB, registry, history |
+| block | approved phrasing of a fact in the bank (`blocks` table), anchored to an anchor and differentiated by angle and language | phrase, snippet, bullet, sentence |
+| fact | verifiable professional fact from the canonical record, with a single exact metric; blocks are its phrasings | achievement, claim, assertion, datum |
+| anchor | real role or project a block is anchored to (`anchors` table); neutral — the displayed titles are per-market projections | role_anchor, position, title |
+| angle | projection of a fact for a role type: `data`, `compliance`, `operations`, `leadership` | focus, variant, version |
+| run | a full pipeline execution triggered by the cron | cycle, iteration, pass |
+| dry-run | a run with no writes to the store and no notifications; via `GET /api/dry-run` or local `wrangler dev` | simulation, test run |
+| pipeline | orchestration poll -> score -> gates -> dedup -> notify | flow, process |
+| worker | the Cloudflare service that runs the pipeline (`scheduled` handler) and the dashboard (`fetch` handler) | function, lambda, script |
+| dashboard | web console served by the worker (config, tracking, blocks bank), behind login | panel, admin, webapp, console |
+| migration | versioned change to the D1 schema, file in `migrations/` | SQL script, schema patch |
+| enricher | AI agent that improves a survivor's texts | analyst, improver |
+| cv_selector | AI agent that selects block IDs per section (JSON with an enum of IDs) | phrase selector |
+| cv_verifier | temperature-0 AI agent that verifies the rendered Doc and suggests tweaks | verifier, validator |
+| console | the multipage webapp served by the worker (10 pages, UI.md §2) | dashboard (obsolete), panel, admin |
+| triage | daily review of notified survivors until a decision (prepare/applied/dismiss/snooze) | inbox, review, tray |
+| application | the application lifecycle of a job, owned by the user (`applications` table) | submission, candidacy, process |
+| stage | stage of an application: `prepared\|applied\|interview\|offer\|rejected\|dismissed` | phase, state (reserved for jobs.status) |
+| snooze | postpone a triage item until a date (`snoozed_until`) | reminder, defer |
+| replay | simulated re-score of stored jobs against a draft config; NEVER writes to `jobs` | simulation, preview, what-if |
+| event | typed occurrence in the observability log (`events` table) | error log, occurrence, incident |
+| notification | record of a push delivery attempt (`notifications` table) | alert, notice, message |
+| meter | gauge of quota consumed vs the free-tier limit (derived from `runs`) | quota gauge, indicator |
+| digest | weekly funnel summary (Week page + Monday Telegram message) | report, weekly summary |
+| cluster | soft grouping of jobs by `title_norm` + tags (similar-jobs radar) | group, role family |
+| answer | approved standard answer for application forms (`answers` table, blocks-style governance) | canned answer, template, profile_answer |
+| kit | per-job view with the CV as PDF, answers and links to apply in minutes; the human ALWAYS submits | package, bundle, auto-apply |
 
-Regla de vocabulario compartido: los `tags` del banco de blocks y las
-keywords de la tabla `config` usan los MISMOS terminos canonicos (familias
-domain / tool / signal). Un termino nuevo se agrega en ambos lados en el
-mismo cambio — son la superficie de matching job <-> contenido.
+Shared-vocabulary rule: the blocks bank's `tags` and the `config` table's
+keywords use the SAME canonical terms (domain / tool / signal families). A new
+term is added on both sides in the same change — they are the job <-> content
+matching surface.
 
-## 2. Codigo (TypeScript / Cloudflare Workers)
+## 2. Code (TypeScript / Cloudflare Workers)
 
-- TypeScript estricto (`strict: true`), modulos ES, imports explicitos. Sin
-  `any`: usar `unknown` + narrowing y tipos por concepto canonico (`Job`,
-  `Company`, `Verdict`, `Block`).
-- Un modulo por concepto del glosario: `src/connectors/greenhouse.ts`,
+- Strict TypeScript (`strict: true`), ES modules, explicit imports. No `any`:
+  use `unknown` + narrowing and types per canonical concept (`Job`, `Company`,
+  `Verdict`, `Block`).
+- One module per glossary concept: `src/connectors/greenhouse.ts`,
   `src/scoring.ts`, `src/freshness.ts`, `src/store.ts`, `src/notify.ts`.
-  Funciones exportadas usan el termino canonico (`scoreJob()`, `isFresh()`);
-  privado = no exportado (el ambito de modulo reemplaza el prefijo `_` de GAS).
-- Superficie publica invocable = rutas `/api/*` del worker (protegidas por el
-  mismo login del dashboard).
-- Secretos SOLO como Worker secrets, leidos del binding `env`. Jamas en codigo,
-  comentarios, logs, commits ni en `wrangler.jsonc` (alli solo vars no
-  sensibles).
-- HTTP saliente con `fetch` y manejo explicito de errores: verificar `res.ok`,
-  capturar por empresa; un fallo externo nunca tumba el run (equivalente al
-  `muteHttpExceptions` de GAS).
-- Acceso a D1 SOLO desde `src/store.ts`: statements preparados con bindings
-  (nunca interpolacion de strings en SQL); `db.batch()` para escrituras
-  multiples por run.
-- Tests con vitest en `test/`, con fixtures de respuestas reales de los ATS
-  (anonimizadas). Todo connector y el motor de scoring tienen tests; el
-  pipeline se prueba localmente con `wrangler dev --test-scheduled`.
+  Exported functions use the canonical term (`scoreJob()`, `isFresh()`);
+  private = not exported (module scope replaces GAS's `_` prefix).
+- Invocable public surface = the worker's `/api/*` routes (protected by the
+  same dashboard login).
+- Secrets ONLY as Worker secrets, read from the `env` binding. Never in code,
+  comments, logs, commits or in `wrangler.jsonc` (only non-sensitive vars
+  there).
+- Outbound HTTP with `fetch` and explicit error handling: check `res.ok`, catch
+  per company; an external failure never takes down the run (equivalent to
+  GAS's `muteHttpExceptions`).
+- D1 access ONLY from `src/store.ts`: prepared statements with bindings (never
+  string interpolation in SQL); `db.batch()` for multiple writes per run.
+- Tests with vitest in `test/`, with fixtures of real ATS responses
+  (anonymized). Every connector and the scoring engine have tests; the pipeline
+  is tested locally with `wrangler dev --test-scheduled`.
 
-## 3. Documentacion
+## 3. Documentation
 
-- Los .md documentan intencion; ante discrepancia manda el codigo (CLAUDE.md).
-- Toda decision de diseno se fecha (yyyy-mm-dd).
-- Sin datos personales del propietario en ningun archivo del repo.
-- Mismo glosario en docs, codigo, commits y debugging; si un documento necesita
-  un concepto nuevo, primero se agrega la fila al glosario.
+- The .md files document intent; on any discrepancy the code wins (CLAUDE.md).
+- Every design decision is dated (yyyy-mm-dd).
+- No personal owner data in any repo file.
+- Same glossary in docs, code, commits and debugging; if a document needs a new
+  concept, the glossary row is added first.
 
 ## 4. Commits
 
-- Mensajes en ingles, convencionales, en presente ("add lever connector").
-- Nunca secretos, tokens ni IDs privados (carpeta Drive, plantilla de Doc, chat
-  de Telegram, account id de Cloudflare) en mensajes ni en contenido commiteado.
-- Un cambio de terminologia = commit propio que toca codigo + docs + glosario
-  a la vez.
+- Messages in English, conventional, present tense ("add lever connector").
+- Never secrets, tokens or private IDs (Drive folder, Doc template, Telegram
+  chat, Cloudflare account id) in messages or in committed content.
+- A terminology change = its own commit touching code + docs + glossary at once.
