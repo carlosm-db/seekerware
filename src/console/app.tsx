@@ -620,16 +620,19 @@ export function consoleApp(): App {
               {neg.length ? (
                 <div style="margin:8px 0"><span class="muted">Works against me: </span>{neg.map((k) => chip(cat, k.term, k.weight))}</div>
               ) : null}
-              <form method="post" action="/config/word-add" class="actions">
+              <form method="post" action="/config/word-add" class="actions" style="align-items:flex-end">
                 <input type="hidden" name="category" value={cat} />
-                <input type="text" name="term" placeholder="add a word or phrase" required />
-                <select name="weight">
-                  {WEIGHT_LABELS.map(([w, l]) => <option value={String(w)} selected={w === 2}>{l}</option>)}
-                </select>
-                <select name="lang">
-                  <option value="">English</option>
-                  <option value="es">Español</option>
-                </select>
+                <div class="field" style="margin:0; flex:1 1 220px"><label>Add a word or phrase</label>
+                  <input type="text" name="term" required /></div>
+                <div class="field" style="margin:0"><label>Strength (points it adds)</label>
+                  <select name="weight">
+                    {WEIGHT_LABELS.map(([w, l]) => <option value={String(w)} selected={w === 2}>{l}</option>)}
+                  </select></div>
+                <div class="field" style="margin:0"><label>Language</label>
+                  <select name="lang">
+                    <option value="">English</option>
+                    <option value="es">Español</option>
+                  </select></div>
                 <button type="submit">Add</button>
               </form>
             </div>
@@ -647,14 +650,16 @@ export function consoleApp(): App {
                   {(g.reject?.length ? g.reject : g.require ?? []).map((term) =>
                     gateChip(t.id, g.id, g.reject?.length ? 'reject' : 'require', term))}
                 </div>
-                <form method="post" action="/config/gate-add" class="actions">
+                <form method="post" action="/config/gate-add" class="actions" style="align-items:flex-end">
                   <input type="hidden" name="track" value={t.id} />
                   <input type="hidden" name="gate" value={g.id} />
                   <input type="hidden" name="list" value={g.reject?.length ? 'reject' : 'require'} />
-                  <input type="text" name="term" placeholder="add a word or phrase" required />
+                  <div class="field" style="margin:0; flex:1 1 220px"><label>Add a word or phrase</label>
+                    <input type="text" name="term" required /></div>
                   {g.type === 'penalty' ? (
-                    <label class="muted">penalty <input type="number" name="points" value={String(g.points ?? 0)} style="width:60px"
-                      onchange="this.form.action='/config/gate-points'" /></label>
+                    <div class="field" style="margin:0"><label>Penalty (points subtracted)</label>
+                      <input type="number" name="points" value={String(g.points ?? 0)} style="width:80px"
+                        onchange="this.form.action='/config/gate-points'" /></div>
                   ) : null}
                   <button type="submit">Add</button>
                 </form>
