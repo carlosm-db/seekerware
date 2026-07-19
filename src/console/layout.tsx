@@ -225,7 +225,10 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
 /* ---- utilities (design tokens; retire inline style= progressively) ---- */
 .card h2:first-child, .card h1:first-child { margin-top:0 }
 .mt-0 { margin-top:0 } .mt-1 { margin-top:var(--sp-3) } .mt-2 { margin-top:var(--sp-2) } .mt-3 { margin-top:var(--sp-1) }
-.my-1 { margin:var(--sp-1) 0 } .my-2 { margin:var(--sp-2) 0 } .mb-1 { margin-bottom:var(--sp-4) }
+.my-1 { margin:var(--sp-1) 0 } .my-2 { margin:var(--sp-2) 0 }
+.mb-1 { margin-bottom:var(--sp-4) } .mb-2 { margin-bottom:var(--sp-2) } .mb-3 { margin-bottom:var(--sp-3) } .mb-4 { margin-bottom:var(--sp-5) }
+.py-1 { padding:var(--sp-1) 0 }
+.stackform { margin-top:var(--sp-2); display:grid; gap:var(--sp-1) }
 .w-full { width:100% } .w-xs { width:60px } .w-sm { width:70px } .w-md { width:80px }
 .right { margin-left:auto; display:flex; gap:var(--sp-3); align-items:center }
 .hidden { display:none } .cap { text-transform:capitalize } .bd-warn { border-color:var(--warn) }

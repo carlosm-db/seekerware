@@ -472,9 +472,9 @@ export function consoleApp(): App {
         </form>
         <form method="post" action="/companies/add-urls" class="card">
           <strong>Add by URL (bulk)</strong>
-          <p class="muted" style="margin:6px 0">Paste career/board URLs — one per line. Greenhouse / Lever / Ashby are detected automatically; each is validated on the next poll (see the health column).</p>
-          <textarea name="urls" rows={4} style="width:100%" placeholder={'https://jobs.lever.co/acme\nhttps://boards.greenhouse.io/acme\nhttps://jobs.ashbyhq.com/acme'} />
-          <div class="actions" style="margin-top:8px"><button type="submit" class="primary">Add all</button></div>
+          <p class="muted my-2">Paste career/board URLs — one per line. Greenhouse / Lever / Ashby are detected automatically; each is validated on the next poll (see the health column).</p>
+          <textarea name="urls" rows={4} class="w-full" placeholder={'https://jobs.lever.co/acme\nhttps://boards.greenhouse.io/acme\nhttps://jobs.ashbyhq.com/acme'} />
+          <div class="actions mt-1"><button type="submit" class="primary">Add all</button></div>
         </form>
         <div class="table-wrap"><table>
           <tr><th>company</th><th>ats</th><th>token</th><th>active</th><th>health</th><th>jobs 90d</th><th>survivors</th><th>yield</th></tr>
@@ -710,7 +710,7 @@ export function consoleApp(): App {
     const SHOW = 8;
     const cellEl = (chips: Chip[]) => (
       <div class="mcell">
-        {chips.length === 0 ? <span class="muted" style="font-size:12.5px">none</span>
+        {chips.length === 0 ? <span class="muted fs-sm">none</span>
           : chips.map((ch, i) => chipEl(ch, i >= SHOW))}
         {chips.length > SHOW ? (
           <div><button type="button" class="morebtn">show {chips.length - SHOW} more</button></div>
@@ -721,7 +721,7 @@ export function consoleApp(): App {
     return page(c, 'Calibration', (
       <>
         {isDraft ? (
-          <div class="card" style="border-color:var(--warn)">
+          <div class="card bd-warn">
             <div class="actions">
               <strong>⚠ You have unsaved calibration changes.</strong>
               <form class="inline" method="post" action="/config/replay">
@@ -737,9 +737,9 @@ export function consoleApp(): App {
         ) : null}
 
         <form method="post" action="/config/quick" class="card actions">
-          <label>Notify me at score ≥ <input type="number" name="apply" value={String(cfg.thresholds.apply)} style="width:70px" /></label>
-          <label>Show borderline from ≥ <input type="number" name="stretch" value={String(cfg.thresholds.stretch)} style="width:70px" /></label>
-          <label>Ignore postings older than <input type="number" name="freshness" value={freshness} style="width:60px" /> days</label>
+          <label>Notify me at score ≥ <input type="number" name="apply" value={String(cfg.thresholds.apply)} class="w-sm" /></label>
+          <label>Show borderline from ≥ <input type="number" name="stretch" value={String(cfg.thresholds.stretch)} class="w-sm" /></label>
+          <label>Ignore postings older than <input type="number" name="freshness" value={freshness} class="w-xs" /> days</label>
           <button type="submit" class="primary">Save</button>
         </form>
 
@@ -771,12 +771,12 @@ export function consoleApp(): App {
           </div>
         </div>
 
-        <p class="muted" style="margin:0 0 6px">
+        <p class="muted mb-2">
           Weight: <strong>+3</strong> strong · <strong>+2</strong> medium · <strong>+1</strong> light ·
           <strong> −2</strong> against · <strong>−3</strong> strongly against — ✕ removes a word in BOTH
           languages; adding happens in ONE place, below.
         </p>
-        <p class="muted" style="margin:0 0 8px">
+        <p class="muted mb-3">
           <strong>Path</strong> — the track a word unlocks (or, on an against word, blocks):
           {cfg.tracks.map((t) => <span class={pathClass(t.id)}>{trackLabel(t.id)}</span>)}
           <span> · no badge = scores every track · path words are gates: absolute, not points (−N = penalty)</span>
@@ -796,7 +796,7 @@ export function consoleApp(): App {
         ) : null}
         <div class="card">
           <strong>＋ Add word</strong>
-          <form method="post" action="/config/word-add" style="margin-top:8px">
+          <form method="post" action="/config/word-add" class="mt-1">
             <div class="formgrid">
               <div class="field f-en"><label>Word — English (required)</label>
                 <input type="text" name="term_en" required placeholder="e.g. remote latam" /></div>
@@ -826,7 +826,7 @@ export function consoleApp(): App {
                 </select></label>
               <button type="submit" class="primary">Add to draft</button>
             </div>
-            <p class="muted" style="margin:6px 0 0">Location words REQUIRE a path (they are the track gates; weight does not apply there).</p>
+            <p class="muted mt-2">Location words REQUIRE a path (they are the track gates; weight does not apply there).</p>
           </form>
         </div>
 
@@ -838,12 +838,12 @@ export function consoleApp(): App {
 
         <details class="card">
           <summary>Advanced: raw JSON</summary>
-          <form method="post" action="/config/scoring" style="margin-top:8px">
+          <form method="post" action="/config/scoring" class="mt-1">
             <textarea name="scoring" rows={18}>{JSON.stringify(cfg, null, 2)}</textarea>
-            <div class="actions" style="margin-top:8px">
+            <div class="actions mt-1">
               <button type="submit" class="primary">Save as active config</button>
               <button type="submit" formaction="/config/replay">Preview impact (Replay)</button>
-              <label>against last <input type="number" name="n" value="200" min="50" max="1000" style="width:80px" /> jobs</label>
+              <label>against last <input type="number" name="n" value="200" min="50" max="1000" class="w-md" /> jobs</label>
             </div>
           </form>
         </details>
@@ -968,12 +968,12 @@ export function consoleApp(): App {
         <form method="post" action="/contact" class="card">
           <div class="cols-2">
             <div>
-              <h2 style="margin-top:0">🇨🇴 Colombia</h2>
+              <h2 class="mt-0">🇨🇴 Colombia</h2>
               {SIMPLE_CO.map(([key, label]) => field(key, label, str(profile[key])))}
               {ADDR_CO.map(([key, label]) => field(`address_co__${key}`, label, addr('address_co')[key] ?? ''))}
             </div>
             <div>
-              <h2 style="margin-top:0">🇨🇦 Canada</h2>
+              <h2 class="mt-0">🇨🇦 Canada</h2>
               {SIMPLE_CA.map(([key, label]) => field(key, label, str(profile[key])))}
               {ADDR_CA.map(([key, label]) => field(`address_ca__${key}`, label, addr('address_ca')[key] ?? ''))}
             </div>
@@ -1059,7 +1059,7 @@ export function consoleApp(): App {
       <>
         {due.length > 0 ? (
           <div class="card">
-            <h2 style="margin-top:0">Overdue follow-ups</h2>
+            <h2 class="mt-0">Overdue follow-ups</h2>
             {due.map((r) => <div><a href={`/jobs/${r.url_hash}`}>{r.title}</a> @ {r.company} — follow-up {String(r.follow_up_at).slice(0, 10)}</div>)}
           </div>
         ) : null}
@@ -1069,13 +1069,13 @@ export function consoleApp(): App {
             const col = rows.filter((r) => r.stage === stage);
             return (
               <div class="kancol">
-                <h2 style="margin-top:0">{STAGE_LABEL[stage]} <span class="muted">({col.length})</span></h2>
+                <h2 class="mt-0">{STAGE_LABEL[stage]} <span class="muted">({col.length})</span></h2>
                 {col.map((r) => (
                   <div class="card">
                     <a href={`/jobs/${r.url_hash}`}><strong>{r.title}</strong></a>
                     <div class="muted">{r.company} · <span class="chip">{r.track}</span> · {daysIn(r.updated_at)}d in stage</div>
                     {r.notes ? <div class="muted">📝 {String(r.notes).slice(0, 80)}</div> : null}
-                    <form method="post" action="/tracker/update" style="margin-top:6px; display:grid; gap:4px">
+                    <form method="post" action="/tracker/update" class="stackform">
                       <input type="hidden" name="hash" value={String(r.url_hash)} />
                       <div class="actions">
                         <select name="stage">
@@ -1183,7 +1183,7 @@ export function consoleApp(): App {
       <>
         <div class="card">
           <p>Simulating the draft against the last {n} stored jobs. <strong id="bar">starting…</strong></p>
-          <div id="apply-form" style="display:none">
+          <div id="apply-form" class="hidden">
             <form method="post" action="/config/replay/apply" class="inline">
               <input type="hidden" name="summary" id="summary-input" />
               <button type="submit" class="primary">Activate</button>
@@ -1353,7 +1353,7 @@ export function consoleApp(): App {
         <div class="editpane">
           <form method="post" action={a ? '/roles/save' : '/roles/create'} id={fid}>
             {a ? <input type="hidden" name="id" value={a.id} /> : <input type="hidden" name="kind" value="role" />}
-            <div class="fld" style="margin-bottom:8px"><label>Title</label>
+            <div class="fld mb-3"><label>Title</label>
               <input type="text" name="title" value={a?.title ?? ''} /></div>
             <div class="fields2">
               <div class="fld grow"><label>Company{a ? '' : ' (required)'}</label>
@@ -1366,7 +1366,7 @@ export function consoleApp(): App {
                   <input type="text" name="code" required /></div>
               )}
             </div>
-            <div class="fields2" style="margin-top:6px">
+            <div class="fields2 mt-2">
               <label class="chk"><input type="checkbox" name="current" checked={!!a && !a.date_to && !!a.date_from}
                 onchange="this.form.elements.date_to.disabled=this.checked; if(this.checked) this.form.elements.date_to.value=''" />
                 I currently work here</label>
@@ -1461,7 +1461,7 @@ export function consoleApp(): App {
           <details class="rc">
             <summary class="rc-head">
               <span class="caret" />
-              <span class="rc-title" style="text-transform:capitalize">{title}</span>
+              <span class="rc-title cap">{title}</span>
               {sub ? <span class="rc-sub">{sub}</span> : null}
               <span class="rc-meta">{items.length} items
                 {pencilBtn(dlgId, 'Edit all items')}
@@ -1518,7 +1518,7 @@ export function consoleApp(): App {
 
     return page(c, 'Blocks bank', (
       <>
-        <div class="actions" style="margin-bottom:12px">
+        <div class="actions mb-4">
           <span><strong>{rows.length}</strong> <span class="muted">bullets</span> · <strong>{roleCount}</strong> <span class="muted">roles</span></span>
           <a href="/blocks/template-check">Check template ↗</a>
         </div>
@@ -1541,15 +1541,15 @@ export function consoleApp(): App {
 
         <details class="sect" open>
           <summary>My roles</summary>
-          <p class="muted" style="margin:4px 0 10px">newest first · tap a card to read · ✏️ edits everything</p>
-          <div class="actions" style="margin-bottom:10px">{openDlg('dlg-addrole', 'Add role')}</div>
+          <p class="muted mt-3 mb-1">newest first · tap a card to read · ✏️ edits everything</p>
+          <div class="actions mb-1">{openDlg('dlg-addrole', 'Add role')}</div>
           {anchors.filter((a) => a.kind === 'role').map(anchorCard)}
         </details>
 
         <details class="sect" open>
           <summary>My projects</summary>
-          <p class="muted" style="margin:4px 0 10px">static text in the CV template for now — bullets kept for the future project-tailoring option</p>
-          <div class="actions" style="margin-bottom:10px">{openDlg('dlg-addproject', 'Add project')}</div>
+          <p class="muted mt-3 mb-1">static text in the CV template for now — bullets kept for the future project-tailoring option</p>
+          <div class="actions mb-1">{openDlg('dlg-addproject', 'Add project')}</div>
           {anchors.filter((a) => a.kind === 'project').map(anchorCard)}
         </details>
 
@@ -1754,7 +1754,7 @@ export function consoleApp(): App {
           <p>Compared your CV template Doc ({tokenCount} tokens) against the bank ({roles.length} active roles). <a href="/blocks">← back to the Bank</a></p>
         </div>
         <div class="card">
-          {findings.map((f) => <div class={cls[f.level]} style="padding:4px 0">{f.level === 'ok' ? '✓' : f.level === 'warn' ? '⚠' : '✗'} {f.text}</div>)}
+          {findings.map((f) => <div class={`${cls[f.level]} py-1`}>{f.level === 'ok' ? '✓' : f.level === 'warn' ? '⚠' : '✗'} {f.text}</div>)}
         </div>
       </>
     ));
@@ -1777,7 +1777,7 @@ export function consoleApp(): App {
     return page(c, 'CV library', (
       <>
         {!contactSet ? (
-          <div class="card" style="border-color:var(--warn)">
+          <div class="card bd-warn">
             ⚠️ No contact profile set — generated CVs will have empty phone/location.{' '}
             <a href="/contact">Set it now →</a>
           </div>

@@ -7,7 +7,7 @@ import { counts } from './store';
 import { loadScoringConfig } from './config-store';
 import { scoreJob, type ScoreResult, type ScoringConfig } from './scoring';
 import { runPipeline } from './pipeline';
-import { sendTelegram } from './notify';
+import { ruleBasedTexts, sendTelegram } from './notify';
 import { consoleApp } from './console/app';
 import type { ConsoleEnv } from './console/auth';
 
@@ -105,7 +105,8 @@ app.post('/api/rescore-batch', async (c) => {
 
   const rows = (
     await c.env.DB.prepare(
-      `SELECT j.url_hash, j.title, j.location, j.description_text, j.score, j.verdict, j.track, co.name company
+      `SELECT j.url_hash, j.title, j.location, j.description_text, j.score, j.verdict, j.track,
+              j.why_it_fits, j.positioning_lead, j.enriched_by, co.name company
        FROM jobs j JOIN companies co ON co.id = j.company_id
        WHERE j.status IN ('new','notified') AND j.description_text IS NOT NULL
        ORDER BY j.first_seen DESC, j.url_hash LIMIT ? OFFSET ?`,
@@ -122,14 +123,23 @@ app.post('/api/rescore-batch', async (c) => {
       ats: 'greenhouse', raw: null,
     };
     const res = scoreJob(job, config);
-    const changed =
+    const scoreChanged =
       res.best.verdict !== String(r.verdict) ||
       (res.best.track ?? null) !== (r.track ?? null) ||
       res.best.adjusted_score !== Number(r.score);
-    if (!changed) continue;
+    // Refresh rule-based texts too — fixes stale pre-English rows. NEVER clobber
+    // Gemini-enriched prose (enriched_by = a model name).
+    const isRule = r.enriched_by == null || r.enriched_by === 'rule';
+    const texts = ruleBasedTexts(res);
+    const textChanged = isRule &&
+      (String(r.why_it_fits ?? '') !== texts.whyItFits || String(r.positioning_lead ?? '') !== texts.positioningLead);
+    if (!scoreChanged && !textChanged) continue;
     writes.push(
-      c.env.DB.prepare('UPDATE jobs SET score = ?, track = ?, verdict = ?, score_breakdown = ? WHERE url_hash = ?')
-        .bind(res.best.adjusted_score, res.best.track, res.best.verdict, JSON.stringify(res), r.url_hash),
+      isRule
+        ? c.env.DB.prepare('UPDATE jobs SET score = ?, track = ?, verdict = ?, score_breakdown = ?, why_it_fits = ?, positioning_lead = ? WHERE url_hash = ?')
+            .bind(res.best.adjusted_score, res.best.track, res.best.verdict, JSON.stringify(res), texts.whyItFits, texts.positioningLead, r.url_hash)
+        : c.env.DB.prepare('UPDATE jobs SET score = ?, track = ?, verdict = ?, score_breakdown = ? WHERE url_hash = ?')
+            .bind(res.best.adjusted_score, res.best.track, res.best.verdict, JSON.stringify(res), r.url_hash),
     );
     if (res.best.verdict !== String(r.verdict) || (res.best.track ?? null) !== (r.track ?? null)) {
       writes.push(
