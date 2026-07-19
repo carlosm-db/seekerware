@@ -279,6 +279,7 @@ async function processCompany(
     let status: 'new' | 'notified' | 'skipped' | 'closed' = isSurvivor ? 'new' : 'skipped';
     let notifiedAt: string | null = null;
     let cvPending: 0 | 1 = 0;
+    let enrichedBy = 'rule';
     const texts = ruleBasedTexts(result);
 
     if (seeding) {
@@ -312,6 +313,7 @@ async function processCompany(
               texts.gapToAddress = enriched.data.gap_to_address;
               texts.positioningLead = enriched.data.positioning_lead;
               ruleBased = false;
+              enrichedBy = enriched.modelUsed ?? 'gemini';
               if (enriched.modelUsed !== 'gemini-3.1-flash-lite') {
                 stats.event({ type: 'gemini_fallback', severity: 'info', url_hash: hash, detail: enriched.modelUsed });
               }
@@ -359,7 +361,7 @@ async function processCompany(
       cv_pending: cvPending,
       why_it_fits: texts.whyItFits, positioning_lead: texts.positioningLead,
       description_text: job.description, score_breakdown: JSON.stringify(result),
-      title_norm: normalizeTitle(job.title),
+      title_norm: normalizeTitle(job.title), enriched_by: enrichedBy,
     });
   }
 

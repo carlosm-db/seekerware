@@ -1926,6 +1926,106 @@ export function consoleApp(): App {
     return c.redirect('/answers?m=answer deleted');
   });
 
+  // ---------- AI (enrichment pipeline visibility + ML tooling over stored data) ----------
+  app.get('/ai', async (c) => {
+    const enabled = !!c.env.GEMINI_API_KEY;
+    const calls = await c.env.DB.prepare(
+      "SELECT COALESCE(SUM(gemini_calls),0) n FROM runs WHERE started_at >= datetime('now','-7 days')",
+    ).first<{ n: number }>();
+    const prov = (
+      await c.env.DB.prepare(
+        "SELECT COALESCE(enriched_by,'(legacy)') src, COUNT(*) n FROM jobs GROUP BY COALESCE(enriched_by,'(legacy)') ORDER BY n DESC",
+      ).all<{ src: string; n: number }>()
+    ).results;
+    const aiEvents = (
+      await c.env.DB.prepare(
+        "SELECT ts, type, severity, url_hash, detail FROM events WHERE type IN ('gemini_fail','gemini_fallback') ORDER BY id DESC LIMIT 20",
+      ).all<Record<string, string | null>>()
+    ).results;
+
+    // ML tooling over the last 400 stored breakdowns (bounded CPU).
+    const rows = (
+      await c.env.DB.prepare(
+        `SELECT j.url_hash, j.title, j.verdict, j.score, j.score_breakdown, c.name company
+         FROM jobs j JOIN companies c ON c.id = j.company_id
+         ORDER BY j.first_seen DESC LIMIT 400`,
+      ).all<Record<string, string | number | null>>()
+    ).results;
+    const impact = new Map<string, { hits: number; surv: number; cat: string }>();
+    const nearMiss: Array<{ hash: string; title: string; company: string; score: number; reason: string }> = [];
+    for (const r of rows) {
+      let b: ScoreResult | null = null;
+      try { b = JSON.parse(String(r.score_breakdown ?? '')) as ScoreResult; } catch { continue; }
+      if (!b?.breakdown) continue;
+      const surv = r.verdict !== 'Skip';
+      for (const [cat, cb] of Object.entries(b.breakdown)) {
+        for (const m of cb.matches) {
+          if (m.weight <= 0) continue;
+          const e = impact.get(m.term) ?? { hits: 0, surv: 0, cat };
+          e.hits++; if (surv) e.surv++;
+          impact.set(m.term, e);
+        }
+      }
+      if (r.verdict === 'Skip' && b.near_miss_reason) {
+        nearMiss.push({ hash: String(r.url_hash), title: String(r.title), company: String(r.company), score: Number(r.score), reason: b.near_miss_reason });
+      }
+    }
+    const topImpact = [...impact.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 20);
+    nearMiss.sort((a, b) => b.score - a.score);
+    const topNear = nearMiss.slice(0, 15);
+
+    return page(c, 'AI', (
+      <>
+        <div class="card">
+          <h2>Enrichment pipeline</h2>
+          <div class="kv">
+            <div><span class="k">Enricher:</span>{enabled ? <span class="ok">enabled</span> : <span class="warn">disabled (no GEMINI_API_KEY)</span>}</div>
+            <div><span class="k">Gemini calls (7d):</span>{calls?.n ?? 0}</div>
+          </div>
+          <p class="muted mt-2">Provenance of stored jobs — who wrote the why-it-fits / positioning text:</p>
+          <div class="actions">{prov.map((p) => <span class="chip">{p.src}: {p.n}</span>)}</div>
+          <p class="muted mt-2">The enricher only improves survivor wording — it never changes verdicts or gates.</p>
+        </div>
+        <div class="card">
+          <h2>Recent AI events</h2>
+          {aiEvents.length === 0 ? <p class="muted">no Gemini failures or fallbacks recorded</p> : (
+            <div class="table-wrap"><table>
+              <tr><th>when</th><th>type</th><th>job</th><th>detail</th></tr>
+              {aiEvents.map((e) => (
+                <tr>
+                  <td class="muted">{fmt(String(e.ts))}</td>
+                  <td class={e.severity === 'warn' ? 'warn' : ''}>{e.type}</td>
+                  <td>{e.url_hash ? <a href={`/jobs/${e.url_hash}`}>open</a> : '—'}</td>
+                  <td class="muted">{e.detail}</td>
+                </tr>
+              ))}
+            </table></div>
+          )}
+        </div>
+        <div class="card">
+          <h2>Keyword impact <span class="muted">(last {rows.length} jobs)</span></h2>
+          <p class="muted my-1">How often each favor-keyword matches, and in how many survivors — the signal behind the scores. Tune these in <a href="/config">Calibration</a>.</p>
+          <div class="table-wrap"><table>
+            <tr><th>keyword</th><th>category</th><th>matches</th><th>in survivors</th></tr>
+            {topImpact.map(([term, e]) => (
+              <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.hits}</td><td>{e.surv}</td></tr>
+            ))}
+          </table></div>
+        </div>
+        <div class="card">
+          <h2>Near-miss mining <span class="muted">({topNear.length})</span></h2>
+          <p class="muted my-1">Skipped jobs closest to the threshold — candidates for a calibration tweak.</p>
+          {topNear.length === 0 ? <p class="muted">no near-misses in the sample</p> : topNear.map((n) => (
+            <div class="bullet">
+              <a href={`/jobs/${n.hash}`}>{n.title}</a> @ {n.company} · <strong>{n.score}</strong>
+              <div class="muted">{n.reason}</div>
+            </div>
+          ))}
+        </div>
+      </>
+    ));
+  });
+
   // ---------- Health ----------
   app.get('/health', async (c) => {
     const pg = pageNum(c);
