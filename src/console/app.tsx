@@ -1231,12 +1231,14 @@ export function consoleApp(): App {
         <div class="btokenrow"><span class="btoken">{label}</span>
           <button type="button" class="bdel">Delete</button></div>
         <input type="hidden" class="delflag" name={`del_${b.id}`} value="" />
-        <div class="field"><label>Text — English</label><textarea name={`en_${b.id}`} required>{b.text_en}</textarea></div>
-        <div class="field"><label>Text — Español</label><textarea name={`es_${b.id}`} required>{b.text_es}</textarea></div>
+        <div class="bbox-langs">
+          <div class="field"><label>English</label><textarea class="bank-ta" name={`en_${b.id}`} required>{b.text_en}</textarea></div>
+          <div class="field"><label>Español</label><textarea class="bank-ta" name={`es_${b.id}`} required>{b.text_es}</textarea></div>
+        </div>
       </div>
     );
 
-    /** The ＋add-a-bullet section (shared by role and group forms). */
+    /** The ＋add-a-bullet section (shared by role, project and group forms). */
     const bulletsSection = (label: string, boxes: unknown) => (
       <>
         <div class="bsecthead"><span class="t">{label}</span>
@@ -1246,22 +1248,42 @@ export function consoleApp(): App {
           <div class="bbox">
             <div class="btokenrow"><span class="btoken">new</span>
               <button type="button" class="bdel">Delete</button></div>
-            <div class="field"><label>Text — English</label><textarea name="new_en___K__" required /></div>
-            <div class="field"><label>Text — Español</label><textarea name="new_es___K__" required /></div>
+            <div class="bbox-langs">
+              <div class="field"><label>English</label><textarea class="bank-ta" name="new_en___K__" required /></div>
+              <div class="field"><label>Español</label><textarea class="bank-ta" name="new_es___K__" required /></div>
+            </div>
           </div>
         </template>
       </>
     );
 
-    /** The owner's sketch: role fields + ALL its bullets, one form, one Save.
-        a = existing role (edit); null = create (kind decides role/project). */
-    const roleForm = (a: AnchorOpt | null, bl: Array<Record<string, string | null>>, kind: 'role' | 'project') => {
-      const fid = a ? `rf-${a.id}` : `rf-new-${kind}`;
-      const noun = kind === 'project' ? 'project' : 'role';
+    /** One action bar shared by every editor: primary + Cancel left, the
+        destructive Delete pushed right — all on ONE row. The submit lives
+        outside its <form> via form=<id> so it can sit beside the Delete form. */
+    const formActions = (fid: string, primaryLabel: string, del?: { id: string; noun: string }) => (
+      <div class="rowactions">
+        <button type="submit" form={fid} class="primary">{primaryLabel}</button>
+        <button type="button" onclick="this.closest('dialog').close()">Cancel</button>
+        {del ? (
+          <>
+            <span class="spacer" />
+            <form class="inline" method="post" action="/roles/delete"
+              onsubmit={`return confirm('Delete ${del.id} AND all its bullets permanently? This cannot be undone.')`}>
+              <input type="hidden" name="id" value={del.id} />
+              <button type="submit">Delete {del.noun}</button>
+            </form>
+          </>
+        ) : null}
+      </div>
+    );
+
+    /** ROLE: job semantics — Title, Company + Code, current + From/To, bullets. */
+    const roleForm = (a: AnchorOpt | null, bl: Array<Record<string, string | null>>) => {
+      const fid = a ? `rf-${a.id}` : 'rf-new-role';
       return (
         <div class="editpane">
           <form method="post" action={a ? '/roles/save' : '/roles/create'} id={fid}>
-            {a ? <input type="hidden" name="id" value={a.id} /> : <input type="hidden" name="kind" value={kind} />}
+            {a ? <input type="hidden" name="id" value={a.id} /> : <input type="hidden" name="kind" value="role" />}
             <div class="fld" style="margin-bottom:8px"><label>Title</label>
               <input type="text" name="title" value={a?.title ?? ''} /></div>
             <div class="fields2">
@@ -1285,37 +1307,50 @@ export function consoleApp(): App {
                 <input type="month" name="date_to" value={a?.date_to ?? ''} disabled={!!a && !a.date_to && !!a.date_from} /></div>
             </div>
             {bulletsSection('responsibility bullets', a ? bl.map((b, i) => bulletBox(b, `${a.id}R${i + 1}`)) : null)}
-            <div class="rowactions">
-              <button type="submit" class="primary">{a ? 'Save everything' : `Add ${noun}`}</button>
-              <button type="button" onclick="this.closest('dialog').close()">Cancel</button>
-            </div>
           </form>
-          {a ? (
-            <div class="delrolerow">
-              <form class="inline" method="post" action="/roles/delete"
-                onsubmit={`return confirm('Delete ${a.id} AND all its bullets permanently? This cannot be undone.')`}>
-                <input type="hidden" name="id" value={a.id} />
-                <button type="submit">Delete {noun}</button>
-              </form>
+          {formActions(fid, a ? 'Save everything' : 'Add role', a ? { id: a.id, noun: 'role' } : undefined)}
+        </div>
+      );
+    };
+
+    /** PROJECT: no employment semantics — Name, Code, bullets only. */
+    const projectForm = (a: AnchorOpt | null, bl: Array<Record<string, string | null>>) => {
+      const fid = a ? `pf-${a.id}` : 'pf-new';
+      return (
+        <div class="editpane">
+          <form method="post" action={a ? '/roles/save' : '/roles/create'} id={fid}>
+            {a ? <input type="hidden" name="id" value={a.id} /> : <input type="hidden" name="kind" value="project" />}
+            <div class="fields2">
+              <div class="fld grow"><label>Project name (required)</label>
+                <input type="text" name="title" value={a?.title ?? ''} required /></div>
+              {a ? (
+                <div class="fld w-sm"><label>Code (template-coupled)</label>
+                  <input type="text" name="new_code" placeholder={a.id} /></div>
+              ) : (
+                <div class="fld w-sm"><label>Code (required — e.g. PRJ1)</label>
+                  <input type="text" name="code" required /></div>
+              )}
             </div>
-          ) : null}
+            {bulletsSection('bullets', a ? bl.map((b, i) => bulletBox(b, `${a.id}R${i + 1}`)) : null)}
+          </form>
+          {formActions(fid, a ? 'Save everything' : 'Add project', a ? { id: a.id, noun: 'project' } : undefined)}
         </div>
       );
     };
 
     /** Skills category / summary: same ONE-form pattern over the group's items. */
-    const groupForm = (items: Array<Record<string, string | null>>, hidden: Record<string, string>) => (
-      <div class="editpane">
-        <form method="post" action="/blocks/group-save">
-          {Object.entries(hidden).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
-          {bulletsSection('items', items.map((b, i) => bulletBox(b, `item ${i + 1}`)))}
-          <div class="rowactions">
-            <button type="submit" class="primary">Save everything</button>
-            <button type="button" onclick="this.closest('dialog').close()">Cancel</button>
-          </div>
-        </form>
-      </div>
-    );
+    const groupForm = (key: string, items: Array<Record<string, string | null>>, hidden: Record<string, string>) => {
+      const fid = `gf-${key}`;
+      return (
+        <div class="editpane">
+          <form method="post" action="/blocks/group-save" id={fid}>
+            {Object.entries(hidden).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
+            {bulletsSection('items', items.map((b, i) => bulletBox(b, `item ${i + 1}`)))}
+          </form>
+          {formActions(fid, 'Save everything')}
+        </div>
+      );
+    };
 
     /** Opens the card's <dialog> popup; preventDefault stops the details toggle. */
     const pencilBtn = (dlgId: string, titleTxt: string) => (
@@ -1323,10 +1358,11 @@ export function consoleApp(): App {
         onclick={`event.preventDefault(); event.stopPropagation(); document.getElementById('${dlgId}').showModal()`}>✏️</button>
     );
 
-    const roleCard = (a: AnchorOpt) => {
-      const section = a.kind === 'role' ? 'experience' : 'projects';
+    const anchorCard = (a: AnchorOpt) => {
+      const isProject = a.kind === 'project';
+      const section = isProject ? 'projects' : 'experience';
       const bl = rows.filter((r) => r.anchor_id === a.id && r.section === section);
-      const dates = fmtDates(a.date_from, a.date_to);
+      const dates = isProject ? '' : fmtDates(a.date_from, a.date_to);
       const dlgId = `dlg-role-${a.id}`;
       return (
         <>
@@ -1334,17 +1370,17 @@ export function consoleApp(): App {
             <summary class="rc-head">
               <span class="caret" />
               <span class="rc-title">{a.title ?? a.company ?? a.id}</span>
-              {a.title && a.company ? <span class="rc-sub">{a.company}</span> : null}
+              {!isProject && a.title && a.company ? <span class="rc-sub">{a.company}</span> : null}
               {dates ? <span class="rc-dates">{dates}</span> : null}
               <span class="rc-meta">{bl.length} bullets · <span class="chip">{a.id}</span>
-                {pencilBtn(dlgId, 'Edit everything in this role')}
+                {pencilBtn(dlgId, isProject ? 'Edit everything in this project' : 'Edit everything in this role')}
               </span>
             </summary>
             <div class="rc-body">
               {bl.length ? bl.map(readRow) : <p class="muted">no bullets yet — ✏️ to add</p>}
             </div>
           </details>
-          <dialog id={dlgId}>{roleForm(a, bl, a.kind === 'project' ? 'project' : 'role')}</dialog>
+          <dialog id={dlgId}>{isProject ? projectForm(a, bl) : roleForm(a, bl)}</dialog>
         </>
       );
     };
@@ -1366,7 +1402,7 @@ export function consoleApp(): App {
               {items.length ? items.map(readRow) : <p class="muted">none yet — ✏️ to add</p>}
             </div>
           </details>
-          <dialog id={dlgId}>{groupForm(items, hidden)}</dialog>
+          <dialog id={dlgId}>{groupForm(key, items, hidden)}</dialog>
         </>
       );
     };
@@ -1393,9 +1429,18 @@ export function consoleApp(): App {
       box.hidden = true;
     } else box.remove();
   });
+  // Textareas follow their text (fallback for browsers without field-sizing).
+  const grow = (t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; };
+  document.addEventListener('input', (e) => { if (e.target.classList.contains('bank-ta')) grow(e.target); });
+  // On dialog open, size every prefilled textarea to its content.
+  document.querySelectorAll('dialog').forEach((d) => d.addEventListener('close', () => {}));
+  const sizeAll = (root) => root.querySelectorAll('textarea.bank-ta').forEach(grow);
+  document.querySelectorAll('.pencil, [onclick*="showModal"]').forEach((btn) => btn.addEventListener('click', () => {
+    setTimeout(() => document.querySelectorAll('dialog[open]').forEach(sizeAll), 0);
+  }));
   // A failed save redirects with ?reopen=<dialog id>: reopen it, message visible.
   const rp = new URLSearchParams(location.search).get('reopen');
-  if (rp) { const d = document.getElementById(rp); if (d && d.showModal) d.showModal(); }
+  if (rp) { const d = document.getElementById(rp); if (d && d.showModal) { d.showModal(); sizeAll(d); } }
 })();`;
 
     const openDlg = (id: string, label: string) => (
@@ -1429,18 +1474,18 @@ export function consoleApp(): App {
           <summary>My roles</summary>
           <p class="muted" style="margin:4px 0 10px">newest first · tap a card to read · ✏️ edits everything</p>
           <div class="actions" style="margin-bottom:10px">{openDlg('dlg-addrole', 'Add role')}</div>
-          {anchors.filter((a) => a.kind === 'role').map(roleCard)}
+          {anchors.filter((a) => a.kind === 'role').map(anchorCard)}
         </details>
 
         <details class="sect" open>
           <summary>My projects</summary>
           <p class="muted" style="margin:4px 0 10px">static text in the CV template for now — bullets kept for the future project-tailoring option</p>
           <div class="actions" style="margin-bottom:10px">{openDlg('dlg-addproject', 'Add project')}</div>
-          {anchors.filter((a) => a.kind === 'project').map(roleCard)}
+          {anchors.filter((a) => a.kind === 'project').map(anchorCard)}
         </details>
 
-        <dialog id="dlg-addrole">{roleForm(null, [], 'role')}</dialog>
-        <dialog id="dlg-addproject">{roleForm(null, [], 'project')}</dialog>
+        <dialog id="dlg-addrole">{roleForm(null, [])}</dialog>
+        <dialog id="dlg-addproject">{projectForm(null, [])}</dialog>
 
         <script dangerouslySetInnerHTML={{ __html: bankJs }} />
       </>
@@ -1494,19 +1539,23 @@ export function consoleApp(): App {
     const b = await c.req.parseBody();
     const code = String(b.code ?? '').trim().toUpperCase();
     const kind = String(b.kind ?? 'role') === 'project' ? 'project' : 'role';
-    const company = String(b.company ?? '').trim();
+    const isProject = kind === 'project';
     const title = String(b.title ?? '').trim() || null;
-    const dateFrom = normalizeMonth(String(b.date_from ?? ''));
+    // Projects carry no employment semantics: no company, no dates.
+    const company = isProject ? null : (String(b.company ?? '').trim() || null);
+    const dateFrom = isProject ? null : normalizeMonth(String(b.date_from ?? ''));
     // "I currently work here" wins over any stale To value.
-    const dateTo = b.current != null ? null : normalizeMonth(String(b.date_to ?? ''));
-    const reopen = kind === 'project' ? 'dlg-addproject' : 'dlg-addrole';
-    if (!company) return c.redirect(`/blocks?reopen=${reopen}&m=add ${kind} failed: company/name is required`);
+    const dateTo = isProject || b.current != null ? null : normalizeMonth(String(b.date_to ?? ''));
+    const reopen = isProject ? 'dlg-addproject' : 'dlg-addrole';
+    if (isProject ? !title : !company) {
+      return c.redirect(`/blocks?reopen=${reopen}&m=add ${kind} failed: ${isProject ? 'project name' : 'company/name'} is required`);
+    }
     const edits = parseBulletEdits(b);
     if ('error' in edits) return c.redirect(`/blocks?reopen=${reopen}&m=${encodeURIComponent(`add ${kind} failed: ${edits.error}`)}`);
     const existing = ((await c.env.DB.prepare('SELECT id FROM anchors').all<{ id: string }>()).results).map((a) => a.id);
     const err = validateRoleCode(code, existing);
     if (err) return c.redirect(`/blocks?reopen=${reopen}&m=${encodeURIComponent(`add ${kind} failed: ${err}`)}`);
-    const section = kind === 'role' ? 'experience' : 'projects';
+    const section = isProject ? 'projects' : 'experience';
     await c.env.DB.batch([
       c.env.DB.prepare(
         "INSERT INTO anchors (id, kind, company, title, date_from, date_to, status) VALUES (?,?,?,?,?,?,'active')",
@@ -1523,15 +1572,17 @@ export function consoleApp(): App {
   app.post('/roles/save', async (c) => {
     const b = await c.req.parseBody();
     const id = String(b.id ?? '');
-    const company = String(b.company ?? '').trim();
     const title = String(b.title ?? '').trim() || null;
-    const dateFrom = normalizeMonth(String(b.date_from ?? ''));
-    // "I currently work here" wins over any stale To value.
-    const dateTo = b.current != null ? null : normalizeMonth(String(b.date_to ?? ''));
     const newCode = String(b.new_code ?? '').trim().toUpperCase();
     const row = await c.env.DB.prepare('SELECT id, kind, company FROM anchors WHERE id = ?')
       .bind(id).first<{ id: string; kind: string; company: string | null }>();
     if (!row) return c.redirect('/blocks?m=role not found');
+    const isProject = row.kind === 'project';
+    // Projects carry no employment semantics: company/dates stay null.
+    const company = isProject ? null : (String(b.company ?? '').trim() || row.company);
+    const dateFrom = isProject ? null : normalizeMonth(String(b.date_from ?? ''));
+    // "I currently work here" wins over any stale To value.
+    const dateTo = isProject || b.current != null ? null : normalizeMonth(String(b.date_to ?? ''));
     const edits = parseBulletEdits(b);
     if ('error' in edits) return c.redirect(`/blocks?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${edits.error}`)}`);
     const renaming = !!newCode && newCode !== id;
@@ -1559,18 +1610,18 @@ export function consoleApp(): App {
       }
     }
     const finalCode = renaming ? newCode : id;
-    const section = row.kind === 'role' ? 'experience' : 'projects';
+    const section = isProject ? 'projects' : 'experience';
     await c.env.DB.batch([
       ...(renaming
         ? [
             c.env.DB.prepare(
               "INSERT INTO anchors (id, kind, company, title, date_from, date_to, status) VALUES (?,?,?,?,?,?,'active')",
-            ).bind(newCode, row.kind, company || row.company, title, dateFrom, dateTo),
+            ).bind(newCode, row.kind, company, title, dateFrom, dateTo),
             c.env.DB.prepare('UPDATE blocks SET anchor_id = ? WHERE anchor_id = ?').bind(newCode, id),
           ]
         : [
             c.env.DB.prepare('UPDATE anchors SET company = ?, title = ?, date_from = ?, date_to = ? WHERE id = ?')
-              .bind(company || row.company, title, dateFrom, dateTo, id),
+              .bind(company, title, dateFrom, dateTo, id),
           ]),
       ...bulletStmts(c.env, edits, { section, anchor_id: finalCode, skcat: null }),
       ...(renaming ? [c.env.DB.prepare('DELETE FROM anchors WHERE id = ?').bind(id)] : []),

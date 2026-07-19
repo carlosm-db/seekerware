@@ -116,10 +116,15 @@ details[open] > summary .caret::before { content:'▾' }
 .btokenrow { display:flex; align-items:center; gap:8px; margin-bottom:6px }
 .btoken { font-size:12px; color:var(--muted); font-family:ui-monospace, monospace; flex:1 }
 .bdel { min-height:0; padding:5px 12px; font-size:13px }
-.delrolerow { display:flex; justify-content:flex-end; margin-top:8px }
-/* Editors live in native <dialog> popups: no reload, no scroll jump. */
+/* EN | ES: stacked on phone, side by side on desktop (see media query). */
+.bbox-langs { display:grid; grid-template-columns:1fr; gap:12px }
+.bbox-langs .field { margin-bottom:0 }
+/* Textareas follow their text: field-sizing where supported + JS fallback. */
+textarea.bank-ta { min-height:2.6em; max-height:40vh; field-sizing:content; overflow-y:auto }
+/* Editors live in native <dialog> popups: no reload, no scroll jump.
+   Mobile: near full screen. Desktop (>=720px): 80% (see media query). */
 dialog { border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--fg);
-  width:min(820px, calc(100vw - 32px)); max-height:calc(100vh - 48px); overflow-y:auto; padding:16px }
+  width:calc(100vw - 24px); max-height:calc(100vh - 32px); overflow-y:auto; padding:16px }
 dialog::backdrop { background:rgba(0,0,0,.45) }
 dialog .editpane { border:none; padding:0; margin:0 }
 /* Top-level section toggles: Summary / Skills / Roles / Projects. */
@@ -221,6 +226,9 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
   .hide-sm { display:table-cell }
   .kanban { flex-direction:row; align-items:flex-start; overflow-x:auto }
   .kancol { flex:1; min-width:230px }
+  /* Bank editors: 80% of the screen; EN | ES side by side. */
+  dialog { width:80vw; height:80vh; max-height:none; padding:20px }
+  .bbox-langs { grid-template-columns:1fr 1fr }
 }
 
 /* ---- desktop: DISTRIBUTE the width (never cap/center the page) ---- */
