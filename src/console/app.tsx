@@ -9,7 +9,7 @@ import { validateScoringConfig } from '../config-store';
 import { SKCATS, newBlockId, parseBulletEdits } from './blocks-form';
 import { fmtDates, normalizeMonth, tokensOfRole, validateRoleCode } from './roles';
 import {
-  applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES, parityGaps, parseMeta,
+  applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES, parseMeta,
   type Chip, type MatrixCategory, type MatrixMeta, type RemoveTarget,
 } from './matrix';
 import { connectors } from '../connectors';
@@ -681,7 +681,6 @@ export function consoleApp(): App {
     const { cfg, isDraft } = await loadDraftOrLive(c.env);
     const meta = await loadMeta(c.env);
     const matrix = buildMatrix(cfg, meta);
-    const gaps = parityGaps(cfg, meta);
     const trackLabel = (t: string) => TRACK_LABELS[t] ?? t;
     const pathClass = (t: string) => `path p-${Math.max(0, cfg.tracks.findIndex((x) => x.id === t))}`;
 
@@ -782,18 +781,6 @@ export function consoleApp(): App {
           <span> · no badge = scores every track · path words are gates: absolute, not points (−N = penalty)</span>
         </p>
 
-        {gaps.length ? (
-          <div class="card bd-warn">
-            <strong class="warn">⚠ EN/ES parity: {gaps.length} term{gaps.length === 1 ? '' : 's'} not linked to a twin</strong>
-            <p class="muted my-1">Seeded before the pairing system. Add the missing-language twin below (same Category/Path) so each concept scores in both languages:</p>
-            {gaps.map((g) => (
-              <div class="bullet">
-                <span class="chip">{g.term}</span>
-                <span class="muted"> {MATRIX_LABELS[g.category][0]} · has {g.lang.toUpperCase()} · add the {g.lang === 'en' ? 'ES' : 'EN'} twin</span>
-              </div>
-            ))}
-          </div>
-        ) : null}
         <div class="card">
           <strong>＋ Add word</strong>
           <form method="post" action="/config/word-add" class="mt-1">

@@ -147,33 +147,6 @@ export function buildMatrix(cfg: ScoringConfig, meta: MatrixMeta): MatrixRow[] {
   });
 }
 
-export interface ParityGap { category: MatrixCategory; term: string; lang: 'en' | 'es'; kind: 'keyword' | 'gate' }
-
-/**
- * EN/ES parity check: terms NOT linked as an EN/ES twin. New adds via
- * applyWordAdd always create both twins, so this flags LEGACY terms (seeded
- * before the pairing system) that lack a counterpart — location gates included.
- * Pure projection; the caller surfaces it so the owner can add the missing twin.
- */
-export function parityGaps(cfg: ScoringConfig, meta: MatrixMeta): ParityGap[] {
-  const gaps: ParityGap[] = [];
-  const kw = new Set<string>();
-  for (const cat of CATEGORIES) {
-    for (const k of cfg.keywords[cat] ?? []) {
-      kw.add(k.term);
-      if (!k.pair) gaps.push({ category: cat, term: k.term, lang: k.lang === 'es' ? 'es' : 'en', kind: 'keyword' });
-    }
-  }
-  for (const [term, hit] of indexGates(cfg)) {
-    if (kw.has(term) || meta.gate_pairs[term]) continue;
-    gaps.push({
-      category: hit.titleScope ? 'role_type' : 'location',
-      term, lang: meta.gate_langs[term] === 'es' ? 'es' : 'en', kind: 'gate',
-    });
-  }
-  return gaps;
-}
-
 // ---------- Mutations (draft-side; the caller persists) ----------
 
 export interface WordAddInput {
