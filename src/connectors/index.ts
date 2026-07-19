@@ -11,6 +11,13 @@ type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respons
 export interface Connector {
   fetchJobs(company: Company, doFetch?: Fetcher): Promise<Job[]>;
   isLive(company: Company, job: Job, doFetch?: Fetcher): Promise<boolean>;
+  /**
+   * Optional: for connectors whose LIST feed lacks the job description
+   * (SuccessFactors <urlset>, Workday CxS), fetch the per-job detail. The
+   * pipeline calls this only for location-gate-passing new jobs, capped by
+   * `max_detail_fetches_per_run`. Returns fields to merge onto the Job.
+   */
+  fetchDetail?(company: Company, job: Job, doFetch?: Fetcher): Promise<Partial<Job>>;
 }
 
 export const connectors: Record<Ats, Connector> = { greenhouse, lever, ashby, successfactors };

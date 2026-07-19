@@ -24,6 +24,7 @@ export class RunStats {
   jobsSeen = 0;
   jobsNew = 0;
   jobsScored = 0;
+  detailFetches = 0;
   survivors = 0;
   notified = 0;
   closed = 0;

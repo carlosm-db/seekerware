@@ -54,6 +54,8 @@ export function decodeEntities(text: string): string {
 export function stripHtml(html: string): string {
   // two passes: some feeds (Greenhouse, SF/RMK) escape the content's HTML
   let text = decodeEntities(decodeEntities(html));
+  // drop <script>/<style> CONTENTS (matters when stripping a whole job page, not just a feed snippet)
+  text = text.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ');
   text = text.replace(/<[^>]*>/g, ' ');
   return text.replace(/\s+/g, ' ').trim();
 }
@@ -90,6 +92,11 @@ export function parseAtsUrl(input: string): { ats: Ats; token: string } | null {
   }
   if (host === 'jobs.ashbyhq.com' || host === 'ashbyhq.com') {
     return first ? { ats: 'ashby', token: first } : null;
+  }
+  // SuccessFactors / RMK: jobs2web.com subdomains are detectable; custom-domain SF
+  // career sites (e.g. empleo.grupobancolombia.com) are added via the single-add form.
+  if (host.endsWith('.jobs2web.com')) {
+    return { ats: 'successfactors', token: host };
   }
   return null;
 }

@@ -146,6 +146,29 @@ describe('connector successfactors', () => {
     mockText(FEED);
     expect(await successfactors.isLive(sfCo, { id: '999' } as Job)).toBe(false);
   });
+
+  const URLSET = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.google.com/schemas/sitemap/0.9">
+<url><loc>https://empleo.grupobancolombia.com/job/Bogota-Analista-de-Datos-Senior-CO/604033/</loc><lastmod>2026-07-18</lastmod></url>
+</urlset>`;
+
+  it('parses the <urlset> flavor: url, lastmod date, slug title, empty description', async () => {
+    mockText(URLSET);
+    const jobs = await successfactors.fetchJobs(sfCo);
+    expect(jobs).toHaveLength(1);
+    const j = jobs[0]!;
+    expect(j.id).toBe('604033');
+    expect(j.url).toBe('https://empleo.grupobancolombia.com/job/Bogota-Analista-de-Datos-Senior-CO/604033/');
+    expect(j.posted_at).toBe('2026-07-18');
+    expect(j.title.toLowerCase()).toContain('analista de datos');
+    expect(j.description).toBe(''); // filled later by fetchDetail
+  });
+
+  it('fetchDetail: pulls description + clean title from the job page HTML', async () => {
+    mockText('<html><head><title>x</title></head><body><h1>Analista de Datos</h1><p>SQL, Power BI, reconciliación de pagos.</p></body></html>');
+    const d = await successfactors.fetchDetail(sfCo, { url: 'https://empleo.grupobancolombia.com/job/x/604033/' } as Job);
+    expect(d.title).toBe('Analista de Datos');
+    expect(d.description).toContain('Power BI');
+  });
 });
 
 describe('parseAtsUrl', () => {
@@ -158,6 +181,10 @@ describe('parseAtsUrl', () => {
   it('detects lever and ashby', () => {
     expect(parseAtsUrl('https://jobs.lever.co/dlocal')).toEqual({ ats: 'lever', token: 'dlocal' });
     expect(parseAtsUrl('https://jobs.ashbyhq.com/ramp/uuid?utm=x')).toEqual({ ats: 'ashby', token: 'ramp' });
+  });
+
+  it('detects SuccessFactors jobs2web subdomains (token = host)', () => {
+    expect(parseAtsUrl('https://assaabloy.jobs2web.com/search')).toEqual({ ats: 'successfactors', token: 'assaabloy.jobs2web.com' });
   });
 
   it('returns null for unsupported hosts and junk', () => {

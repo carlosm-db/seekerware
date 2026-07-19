@@ -29,6 +29,9 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
     // (error 1102 confirmed by seeding 1,336 at once). Seeding completes in
     // batches over successive runs; steady state never comes close.
     const maxNewPerRun = Number((await getConfigValue(env, 'max_new_jobs_per_run')) ?? '100');
+    // Cap on per-job description fetches per run (list-only connectors: SF <urlset>,
+    // Workday). Protects the 50-subrequest budget; overflow spills to the next run.
+    const maxDetailPerRun = Number((await getConfigValue(env, 'max_detail_fetches_per_run')) ?? '12');
     const observability = JSON.parse((await getConfigValue(env, 'observability')) ?? '{}') as {
       maintenance_fail_streak?: number;
       cv_pending_max?: number;
@@ -78,7 +81,7 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
 
     for (const company of companies) {
       try {
-        await processCompany(env, company, config, maxDays, maxNewPerRun, nowIso, stats, batch, doFetch);
+        await processCompany(env, company, config, maxDays, maxNewPerRun, maxDetailPerRun, nowIso, stats, batch, doFetch);
         stats.companiesOk++;
         batch.companySuccess(company.id, nowIso);
       } catch (err) {
@@ -216,6 +219,7 @@ async function processCompany(
   config: ScoringConfig,
   maxDays: number,
   maxNewPerRun: number,
+  maxDetailPerRun: number,
   nowIso: string,
   stats: RunStats,
   batch: RunBatch,
@@ -246,6 +250,25 @@ async function processCompany(
       continue;
     }
     stats.jobsNew++;
+    // Bounded description enrichment for list-only connectors (SF <urlset>, Workday):
+    // fetch the per-job detail ONLY for jobs that clear a track's hard (location) gate,
+    // capped per run. Jobs that hard-fail every track are a real Skip — no fetch.
+    if (connector.fetchDetail && !job.description) {
+      const pre = scoreJob(job, config);
+      const locViable = Object.values(pre.tracks).some((t) => !t.hard_failed);
+      if (locViable) {
+        if (stats.detailFetches >= maxDetailPerRun) { stats.jobsNew--; continue; } // budget spent → next run
+        stats.detailFetches++;
+        try {
+          Object.assign(job, await connector.fetchDetail(company, job, doFetch));
+        } catch (err) {
+          stats.event({
+            type: 'fetch_fail', severity: 'warn', company_id: company.id, url_hash: hash,
+            detail: err instanceof Error ? err.message : 'detail fetch failed',
+          });
+        }
+      }
+    }
     const result = scoreJob(job, config);
     stats.jobsScored++;
     const isSurvivor = result.best.verdict !== 'Skip';
