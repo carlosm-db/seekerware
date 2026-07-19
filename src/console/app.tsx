@@ -9,7 +9,7 @@ import { validateScoringConfig } from '../config-store';
 import { SKCATS, newBlockId, parseBulletEdits } from './blocks-form';
 import { fmtDates, normalizeMonth, tokensOfRole, validateRoleCode } from './roles';
 import {
-  applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES, parseMeta,
+  applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES, parityGaps, parseMeta,
   type Chip, type MatrixCategory, type MatrixMeta, type RemoveTarget,
 } from './matrix';
 import { connectors } from '../connectors';
@@ -598,13 +598,9 @@ export function consoleApp(): App {
     ).results;
     const freshness = rows.find((r) => r.key === 'FRESHNESS_MAX_DAYS')?.value ?? '3';
     const { cfg, isDraft } = await loadDraftOrLive(c.env);
-    const history = (
-      await c.env.DB.prepare('SELECT id, ts, key, replay_summary, diff_summary FROM config_history ORDER BY id DESC LIMIT 30')
-        .all<{ id: number; ts: string; key: string; replay_summary: string | null; diff_summary: string | null }>()
-    ).results;
-
     const meta = await loadMeta(c.env);
     const matrix = buildMatrix(cfg, meta);
+    const gaps = parityGaps(cfg, meta);
     const trackLabel = (t: string) => TRACK_LABELS[t] ?? t;
     const pathClass = (t: string) => `path p-${Math.max(0, cfg.tracks.findIndex((x) => x.id === t))}`;
 
@@ -705,6 +701,18 @@ export function consoleApp(): App {
           <span> · no badge = scores every track · path words are gates: absolute, not points (−N = penalty)</span>
         </p>
 
+        {gaps.length ? (
+          <div class="card bd-warn">
+            <strong class="warn">⚠ EN/ES parity: {gaps.length} term{gaps.length === 1 ? '' : 's'} not linked to a twin</strong>
+            <p class="muted my-1">Seeded before the pairing system. Add the missing-language twin below (same Category/Path) so each concept scores in both languages:</p>
+            {gaps.map((g) => (
+              <div class="bullet">
+                <span class="chip">{g.term}</span>
+                <span class="muted"> {MATRIX_LABELS[g.category][0]} · has {g.lang.toUpperCase()} · add the {g.lang === 'en' ? 'ES' : 'EN'} twin</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div class="card">
           <strong>＋ Add word</strong>
           <form method="post" action="/config/word-add" style="margin-top:8px">
@@ -759,25 +767,6 @@ export function consoleApp(): App {
           </form>
         </details>
 
-        <details class="card">
-          <summary>Change history &amp; revert</summary>
-          <div class="table-wrap" style="margin-top:8px"><table>
-            {history.map((h) => (
-              <tr>
-                <td class="muted">{fmt(h.ts)}</td>
-                <td>{h.key}</td>
-                <td>{h.diff_summary ?? <span class="muted">{h.replay_summary ? 'with replay' : '—'}</span>}</td>
-                <td>
-                  <form class="inline" method="post" action="/config/revert"
-                    onsubmit={`return confirm('Revert this change? It will undo: ${String(h.diff_summary ?? 'the recorded change').replaceAll("'", '’')}')`}>
-                    <input type="hidden" name="id" value={String(h.id)} />
-                    <button type="submit">Revert</button>
-                  </form>
-                </td>
-              </tr>
-            ))}
-          </table></div>
-        </details>
         <script dangerouslySetInnerHTML={{ __html: `
 (() => {
   const q = document.getElementById('calsearch-input');
@@ -853,13 +842,8 @@ export function consoleApp(): App {
     return c.redirect(`/config?m=${encodeURIComponent(`removed ${r.removed.map((t) => `"${t}"`).join(' + ')} — Preview impact to apply`)}`);
   });
 
-  async function saveConfig(env: ConsoleEnv, key: string, value: string, diffSummary?: string): Promise<void> {
-    const old = await env.DB.prepare('SELECT value FROM config WHERE key = ?').bind(key).first<{ value: string }>();
-    await env.DB.batch([
-      env.DB.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').bind(key, value),
-      env.DB.prepare('INSERT INTO config_history (ts, key, old_value, new_value, diff_summary) VALUES (?, ?, ?, ?, ?)')
-        .bind(now(), key, old?.value ?? null, value, diffSummary ?? null),
-    ]);
+  async function saveConfig(env: ConsoleEnv, key: string, value: string): Promise<void> {
+    await env.DB.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').bind(key, value).run();
   }
 
   // ---------- Contact profile (private; fills CV template placeholders) ----------
@@ -938,12 +922,10 @@ export function consoleApp(): App {
     const b = await c.req.parseBody();
     const raw = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
     if (raw) {
-      const old = JSON.parse(raw.value) as import('../scoring').ScoringConfig;
       const cfg = JSON.parse(raw.value) as import('../scoring').ScoringConfig;
       cfg.thresholds = { apply: Number(b.apply), stretch: Number(b.stretch) };
       validateScoringConfig(cfg);
-      const { diffScoring } = await import('./config-diff');
-      await saveConfig(c.env, 'scoring', JSON.stringify(cfg), diffScoring(old, cfg));
+      await saveConfig(c.env, 'scoring', JSON.stringify(cfg));
       // Keep an open draft coherent with the new thresholds.
       const draft = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
       if (draft) {
@@ -1140,7 +1122,6 @@ export function consoleApp(): App {
   });
 
   app.post('/config/replay/apply', async (c) => {
-    const b = await c.req.parseBody();
     const draft = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
     if (!draft) return c.redirect('/config?m=no draft');
     const old = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
@@ -1149,8 +1130,6 @@ export function consoleApp(): App {
     await c.env.DB.batch([
       c.env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring', ?)").bind(draft.value),
       c.env.DB.prepare("DELETE FROM config WHERE key='scoring_draft'"),
-      c.env.DB.prepare('INSERT INTO config_history (ts, key, old_value, new_value, replay_summary, diff_summary) VALUES (?, ?, ?, ?, ?, ?)')
-        .bind(now(), 'scoring', old?.value ?? null, draft.value, String(b.summary ?? ''), diff),
     ]);
     return c.redirect(`/config?m=${encodeURIComponent(`activated: ${diff.slice(0, 120)} — now run Re-score so stored jobs pick it up`)}`);
   });
@@ -1207,15 +1186,6 @@ export function consoleApp(): App {
         <script dangerouslySetInnerHTML={{ __html: runner }} />
       </>
     ));
-  });
-
-  app.post('/config/revert', async (c) => {
-    const b = await c.req.parseBody();
-    const row = await c.env.DB.prepare('SELECT key, old_value FROM config_history WHERE id = ?')
-      .bind(Number(b.id)).first<{ key: string; old_value: string | null }>();
-    if (!row?.old_value) return c.redirect('/config?m=nothing to revert');
-    await saveConfig(c.env, row.key, row.old_value);
-    return c.redirect(`/config?m=${encodeURIComponent(`reverted: ${row.key}`)}`);
   });
 
   // ---------- Bank (v6 2026-07-18, the owner's sketch): a role/group is ONE
