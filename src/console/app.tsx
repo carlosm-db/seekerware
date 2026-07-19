@@ -465,7 +465,7 @@ export function consoleApp(): App {
       <>
         <form method="post" action="/companies" class="card actions">
           <input type="text" name="name" placeholder="name" required />
-          <select name="ats"><option>greenhouse</option><option>lever</option><option>ashby</option><option>successfactors</option></select>
+          <select name="ats">{Object.keys(connectors).map((a) => <option value={a}>{a}</option>)}</select>
           <input type="text" name="token" placeholder="board token / SF host" required />
           <input type="text" name="notes" placeholder="notes" />
           <button type="submit" class="primary">Add company</button>
@@ -480,7 +480,7 @@ export function consoleApp(): App {
           <tr><th>company</th><th>ats</th><th>token</th><th>active</th><th>health</th><th>jobs 90d</th><th>survivors</th><th>yield</th></tr>
           {rows.map((r) => (
             <tr>
-              <td>{r.name}<div class="muted">{r.notes}</div></td>
+              <td><a href={`/companies/${r.id}`}>{r.name}</a><div class="muted">{r.notes}</div></td>
               <td>{r.ats}</td>
               <td class="muted">{r.token}</td>
               <td>
@@ -552,6 +552,87 @@ export function consoleApp(): App {
     const b = await c.req.parseBody();
     await c.env.DB.prepare('UPDATE companies SET active = 1 - active WHERE id = ?').bind(Number(b.id)).run();
     return c.redirect('/companies?m=updated');
+  });
+
+  // View + edit a single company (the token/ATS/notes/active are all editable here).
+  app.get('/companies/:id', async (c) => {
+    const id = Number(c.req.param('id'));
+    const co = await c.env.DB.prepare('SELECT * FROM companies WHERE id = ?').bind(id).first<Record<string, string | number | null>>();
+    if (!co) return c.notFound();
+    const stats = await c.env.DB.prepare(
+      `SELECT COUNT(*) jobs_seen,
+              SUM(CASE WHEN verdict IN ('Apply','Stretch-worth-it') THEN 1 ELSE 0 END) survivors
+       FROM jobs WHERE company_id = ?`,
+    ).bind(id).first<{ jobs_seen: number; survivors: number }>();
+    return page(c, String(co.name), (
+      <>
+        <div class="card">
+          <form method="post" action={`/companies/${id}/edit`}>
+            <div class="field"><label>Name</label><input type="text" name="name" value={String(co.name)} required /></div>
+            <div class="field"><label>ATS</label>
+              <select name="ats">{Object.keys(connectors).map((a) => <option value={a} selected={a === co.ats}>{a}</option>)}</select></div>
+            <div class="field"><label>Board token / host</label><input type="text" name="token" value={String(co.token)} required /></div>
+            <div class="field"><label>Notes</label><input type="text" name="notes" value={String(co.notes ?? '')} /></div>
+            <label class="chk"><input type="checkbox" name="active" checked={!!co.active} /> Active (polled each run)</label>
+            <div class="actions mt-1"><button type="submit" class="primary">Save</button><a class="btnlike" href="/companies">Back to Companies</a></div>
+          </form>
+        </div>
+        <div class="card">
+          <h2>Status</h2>
+          <div class="kv">
+            <div><span class="k">Health:</span>{Number(co.fail_count) > 0 ? <span class="bad">{co.fail_count} failures · {co.last_error}</span> : <span class="ok">ok {fmt(co.last_ok_fetch as string)}</span>}</div>
+            <div><span class="k">Jobs (all-time):</span>{stats?.jobs_seen ?? 0}</div>
+            <div><span class="k">Survivors:</span>{stats?.survivors ?? 0}</div>
+            <div><span class="k">Fetch ok/fail total:</span>{co.fetch_ok_total ?? 0} / {co.fetch_fail_total ?? 0}</div>
+          </div>
+        </div>
+        <div class="card bd-warn">
+          <h2 class="warn">Danger zone</h2>
+          <p class="muted my-1">Deletes the company and everything derived from it (jobs, kits, CVs, events). Prefer deactivating if you might re-add it.</p>
+          <form method="post" action={`/companies/${id}/delete`}
+            onsubmit="return confirm('Delete this company AND all its jobs, kits, CVs and events permanently? This cannot be undone.')">
+            <button type="submit" class="danger">Delete company</button>
+          </form>
+        </div>
+      </>
+    ));
+  });
+
+  app.post('/companies/:id/edit', async (c) => {
+    const id = Number(c.req.param('id'));
+    const b = await c.req.parseBody();
+    const name = String(b.name ?? '').trim();
+    const ats = String(b.ats ?? '') as Ats;
+    const token = String(b.token ?? '').trim();
+    const notes = String(b.notes ?? '');
+    const active = b.active ? 1 : 0;
+    if (!name || !token || !connectors[ats]) {
+      return c.redirect(`/companies/${id}?m=${encodeURIComponent('name, a valid ATS and a token are required')}`);
+    }
+    try {
+      await c.env.DB.prepare('UPDATE companies SET name = ?, ats = ?, token = ?, notes = ?, active = ? WHERE id = ?')
+        .bind(name, ats, token, notes, active, id).run();
+    } catch (err) {
+      return c.redirect(`/companies/${id}?m=${encodeURIComponent(`not saved: ${err instanceof Error ? err.message : 'error'} (ats+token must be unique)`)}`);
+    }
+    return c.redirect(`/companies/${id}?m=saved`);
+  });
+
+  // Delete children first — D1 enforces the jobs/events foreign keys.
+  app.post('/companies/:id/delete', async (c) => {
+    const id = Number(c.req.param('id'));
+    const sub = 'SELECT url_hash FROM jobs WHERE company_id = ?';
+    await c.env.DB.batch([
+      c.env.DB.prepare(`UPDATE cvs SET superseded_by = NULL WHERE url_hash IN (${sub})`).bind(id),
+      c.env.DB.prepare(`DELETE FROM application_kits WHERE url_hash IN (${sub})`).bind(id),
+      c.env.DB.prepare(`DELETE FROM applications WHERE url_hash IN (${sub})`).bind(id),
+      c.env.DB.prepare(`DELETE FROM cvs WHERE url_hash IN (${sub})`).bind(id),
+      c.env.DB.prepare(`DELETE FROM job_events WHERE url_hash IN (${sub})`).bind(id),
+      c.env.DB.prepare('DELETE FROM jobs WHERE company_id = ?').bind(id),
+      c.env.DB.prepare('DELETE FROM events WHERE company_id = ?').bind(id),
+      c.env.DB.prepare('DELETE FROM companies WHERE id = ?').bind(id),
+    ]);
+    return c.redirect('/companies?m=company deleted');
   });
 
   // ---------- Calibration (matrix redesign 2026-07-18, mockups v3.3: ONE grid
