@@ -1,10 +1,14 @@
--- 0002: allow any connector-backed ATS value (adds 'successfactors', and future
--- connectors, with no further migration). SQLite cannot ALTER a CHECK constraint,
--- so recreate `companies` WITHOUT the ats CHECK — the connector registry
+-- 0011: allow any connector-backed ATS value (adds 'successfactors', 'workday', and
+-- future connectors, with no further migration). SQLite cannot ALTER a CHECK, so
+-- recreate `companies` WITHOUT the ats CHECK — the connector registry
 -- (src/connectors/index.ts) is now the single source of truth for valid ATS.
 -- Data and UNIQUE(ats, token) are preserved.
-
-PRAGMA foreign_keys=OFF;
+--
+-- Numbered 0011 (not 0002): prod's d1_migrations already recorded 0001..0010 before
+-- the repo squashed the incremental migrations into a single 0001_initial.sql, so a
+-- NEW migration must sort AFTER 0010 or `wrangler d1 migrations apply` fails
+-- out-of-order. No PRAGMA statements — D1 rejects them over its HTTP API and does not
+-- enforce foreign keys by default, so the drop/rename is safe as-is.
 
 CREATE TABLE companies_new (
   id            INTEGER PRIMARY KEY,
@@ -32,5 +36,3 @@ FROM companies;
 
 DROP TABLE companies;
 ALTER TABLE companies_new RENAME TO companies;
-
-PRAGMA foreign_keys=ON;
