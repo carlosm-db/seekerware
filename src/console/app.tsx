@@ -599,10 +599,10 @@ export function consoleApp(): App {
         </form>
 
         <h2>Keyword matrix (ATS)</h2>
-        <div class="actions" style="margin-bottom:10px">
-          <div class="calsearch">
-            <input type="search" id="calsearch-input" placeholder="Filter words across every list…" aria-label="Filter words" />
-          </div>
+        <div class="calsearch">
+          <span class="cs-ic" aria-hidden="true">🔍</span>
+          <input type="search" id="calsearch-input" placeholder="Filter words across every list…" aria-label="Filter words" />
+          <button type="button" id="calsearch-clear" class="cs-x" aria-label="Clear filter">×</button>
         </div>
 
         <div class="matrix-wrap">
@@ -691,9 +691,9 @@ export function consoleApp(): App {
           </form>
         </details>
 
-        <div class="card">
-          <h2 style="margin-top:0">History (what changed, in words)</h2>
-          <div class="table-wrap"><table>
+        <details class="card">
+          <summary>Change history &amp; revert</summary>
+          <div class="table-wrap" style="margin-top:8px"><table>
             {history.map((h) => (
               <tr>
                 <td class="muted">{fmt(h.ts)}</td>
@@ -709,7 +709,7 @@ export function consoleApp(): App {
               </tr>
             ))}
           </table></div>
-        </div>
+        </details>
         <script dangerouslySetInnerHTML={{ __html: `
 (() => {
   const q = document.getElementById('calsearch-input');
@@ -722,6 +722,8 @@ export function consoleApp(): App {
       else ch.classList.add('dim');
     });
   });
+  const clr = document.getElementById('calsearch-clear');
+  if (clr && q) clr.addEventListener('click', () => { q.value = ''; q.dispatchEvent(new Event('input')); q.focus(); });
   document.querySelectorAll('.morebtn').forEach((b) => b.addEventListener('click', () => {
     const cell = b.closest('.mcell');
     cell.classList.toggle('open');

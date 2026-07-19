@@ -174,8 +174,15 @@ details.sect > summary::-webkit-details-marker { display:none }
 .p-2 { background:var(--ok-soft); color:var(--ok) }
 .morebtn { background:none; border:none; min-height:0; padding:2px 0; color:var(--accent);
   font-size:12px; cursor:pointer; text-decoration:underline; text-underline-offset:3px }
-.calsearch { display:flex; align-items:center; gap:8px; flex:1; min-width:220px }
-.calsearch input { flex:1 }
+.calsearch { display:flex; align-items:center; gap:10px; width:100%; margin-bottom:10px;
+  background:var(--card); border:1px solid var(--line); border-radius:8px; padding:0 12px; min-height:44px }
+.calsearch .cs-ic { flex:none; color:var(--accent); font-size:15px; line-height:1 }
+.calsearch input[type=search] { flex:1; border:none; background:none; outline:none; box-shadow:none;
+  min-height:42px; padding:0; font-size:16px; color:var(--fg); appearance:none; -webkit-appearance:none }
+.calsearch input[type=search]::-webkit-search-cancel-button { -webkit-appearance:none; display:none }
+.calsearch .cs-x { flex:none; background:none; border:none; color:var(--muted); font-size:20px;
+  line-height:1; cursor:pointer; padding:0 4px; min-height:0 }
+.calsearch .cs-x:hover { color:var(--fg) }
 input[type=text], input[type=password], input[type=number], input[type=date], select, textarea {
   background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:8px;
   padding:10px 12px; font-size:16px; min-height:44px; max-width:100% }
