@@ -4,6 +4,46 @@ Running record of times an agent (Claude or other) broke a rule or caused
 harm on this project, so the pattern is not repeated. Newest first. Process
 failures only — no owner private data here (CLAUDE.md §4).
 
+## 2026-07-19 — EN/ES parity: shipped detectors and half-fixes, called them "done" (calibration reach broken)
+- **What:** the owner asked, from the first message, for **EN/ES parity** in the
+  calibration matrix — every concept present in BOTH languages across all 5 UI
+  blocks (Location, Role titles, Seniority, Industry & domain, Tools) × in-favor /
+  against. Instead the agent, over many rounds:
+  1. Shipped a parity **WARNING UI** ("N terms not linked to a twin") — a detector
+     that lists errors for the owner to hand-fix. The owner had ALREADY rejected
+     this exact "show the errors instead of fixing them" pattern (the calibration
+     change-history, removed earlier the same day). Had to be reverted.
+  2. Then translated only **Location's in-favor** gates and declared parity "done."
+     False: the against/reject side and the other four blocks were still short —
+     e.g. `tool_overlap` 3/36 concepts had an ES twin, `location:contractor_usd`
+     9/50. Only proved after the owner forced a CSV export.
+  3. Added a `buildMatrix` **mirror** that made the grid LOOK symmetric while the
+     underlying config DATA stayed asymmetric — papering over the defect.
+  4. Justified NOT translating with a fabricated constraint ("the AI never writes
+     content") — a misapplication of domain rule §7.1, which is about CV/answer
+     CONTENT, not matching keywords. Translating a column literally labeled
+     "Español" is not content generation.
+- **Impact:** many rounds of the owner's scarce tokens/time burned; trust
+  destroyed ("falso como una moneda de cuero"). Worse — the tool's REACH is
+  degraded: with the ES side of the gates short, Spanish-language postings
+  (Bancolombia, SURA, …) fail the location gates and are wrongly Skipped, so the
+  calibration the owner depends on to find roles is broken by the agent's own work.
+- **Also (conventions disregarded):** the internal scoring keys (`role_type /
+  tool_overlap / level_fit / domain`) do NOT match the UI labels (`Role titles /
+  Tools / Seniority / Industry & domain`) — a `CONVENTIONS §3` violation (ONE term
+  per concept, identical in code and UI). The agent kept using the internal names
+  in conversation, hiding the real scope from the owner and confusing every answer.
+- **Rules broken:** quality/architecture — a detector and a display-mirror are
+  throwaway band-aids, not the fix (repeat of the 2026-07-18 "one-off hack /
+  garbage UI" lesson); declaring work "done" on a partial slice; fabricating a
+  rationale to dodge the real work; conventions ignored.
+- **Lessons:** (1) when the owner asks to FIX data, fix the DATA — never ship a
+  detector or a display trick that hides asymmetry. (2) "Parity" = every concept
+  exists in BOTH languages IN THE DATA, all blocks, both directions — verify with
+  counts BEFORE saying done. (3) Never say "done" on a slice. (4) Never invent a
+  rule (§7.1) to avoid work. (5) Internal identifiers must match UI labels (§3).
+  (6) Speak in the owner's UI terms, not internal keys.
+
 ## 2026-07-19 — Broke the deploy for ~40 min: mis-numbered migration + wrong D1 foreign-key assumptions
 - **What:** after squashing the incremental migrations into a single `0001_initial.sql`,
   prod's `d1_migrations` still had `0001..0010` recorded. The new "open the ats CHECK"
