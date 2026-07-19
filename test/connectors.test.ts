@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as lever from '../src/connectors/lever';
 import * as ashby from '../src/connectors/ashby';
 import * as successfactors from '../src/connectors/successfactors';
+import * as workday from '../src/connectors/workday';
 import { parseAtsUrl } from '../src/connectors/common';
 import type { Company, Job } from '../src/types';
 
@@ -171,6 +172,48 @@ describe('connector successfactors', () => {
   });
 });
 
+describe('connector workday', () => {
+  const wdCo: Company = { id: 4, name: 'Acme', ats: 'workday', token: 'acme.wd3.myworkdayjobs.com/AcmeSite', active: true };
+  const LIST = {
+    total: 2,
+    jobPostings: [
+      { title: 'Data Analyst', externalPath: '/job/Toronto/Data-Analyst_JR1', locationsText: 'Toronto, ON', bulletFields: ['JR1'] },
+      { title: 'Ops Manager', externalPath: '/job/Various/Ops-Manager_JR2', locationsText: '2 Locations', bulletFields: ['JR2'] },
+    ],
+  };
+
+  it('fetchJobs: maps CxS postings; collapses "N Locations" to unknown', async () => {
+    mockFetch(LIST);
+    const jobs = await workday.fetchJobs(wdCo);
+    expect(jobs).toHaveLength(2);
+    expect(jobs[0]).toMatchObject({
+      id: 'JR1', ats: 'workday', title: 'Data Analyst', location: 'Toronto, ON',
+      url: 'https://acme.wd3.myworkdayjobs.com/AcmeSite/job/Toronto/Data-Analyst_JR1',
+      description: '', posted_at: null,
+    });
+    expect(jobs[1]!.location).toBe(''); // "2 Locations" -> unknown, enriched later
+  });
+
+  it('fetchDetail: description + real date from the job detail', async () => {
+    mockFetch(LIST);
+    const [j] = await workday.fetchJobs(wdCo);
+    mockFetch({ jobPostingInfo: { jobDescription: '<p>SQL, Power BI, payments reconciliation.</p>', startDate: '2026-07-10', title: 'Data Analyst II' } });
+    const d = await workday.fetchDetail(wdCo, j!);
+    expect(d.posted_at).toBe('2026-07-10');
+    expect(d.title).toBe('Data Analyst II');
+    expect(d.description).toContain('payments reconciliation');
+  });
+
+  it('isLive: 404 = dead, 200 = alive', async () => {
+    mockFetch(LIST);
+    const [j] = await workday.fetchJobs(wdCo);
+    mockFetch({}, 404);
+    expect(await workday.isLive(wdCo, j!)).toBe(false);
+    mockFetch({});
+    expect(await workday.isLive(wdCo, j!)).toBe(true);
+  });
+});
+
 describe('parseAtsUrl', () => {
   it('detects greenhouse (boards / job-boards / subdomain)', () => {
     expect(parseAtsUrl('https://boards.greenhouse.io/stripe')).toEqual({ ats: 'greenhouse', token: 'stripe' });
@@ -187,9 +230,13 @@ describe('parseAtsUrl', () => {
     expect(parseAtsUrl('https://assaabloy.jobs2web.com/search')).toEqual({ ats: 'successfactors', token: 'assaabloy.jobs2web.com' });
   });
 
+  it('detects Workday, skipping the locale segment (token = host/site)', () => {
+    expect(parseAtsUrl('https://acme.wd3.myworkdayjobs.com/en-US/AcmeSite/job/x'))
+      .toEqual({ ats: 'workday', token: 'acme.wd3.myworkdayjobs.com/AcmeSite' });
+  });
+
   it('returns null for unsupported hosts and junk', () => {
-    expect(parseAtsUrl('https://jobs.scotiabank.com/search/?q=')).toBeNull(); // SuccessFactors
-    expect(parseAtsUrl('https://acme.myworkdayjobs.com/en-US/careers')).toBeNull(); // Workday
+    expect(parseAtsUrl('https://jobs.scotiabank.com/search/?q=')).toBeNull(); // custom-domain SF → single-add form
     expect(parseAtsUrl('not a url')).toBeNull();
     expect(parseAtsUrl('https://boards.greenhouse.io/')).toBeNull(); // no token
   });

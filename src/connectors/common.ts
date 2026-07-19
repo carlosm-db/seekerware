@@ -98,5 +98,10 @@ export function parseAtsUrl(input: string): { ats: Ats; token: string } | null {
   if (host.endsWith('.jobs2web.com')) {
     return { ats: 'successfactors', token: host };
   }
+  // Workday: {tenant}.wd{N}.myworkdayjobs.com/{locale?}/{site} -> token '{host}/{site}'.
+  if (host.endsWith('.myworkdayjobs.com')) {
+    const site = seg.find((s) => !/^[a-z]{2}-[A-Za-z]{2,4}$/.test(s));
+    return site ? { ats: 'workday', token: `${host}/${site}` } : null;
+  }
   return null;
 }

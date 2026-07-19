@@ -255,7 +255,9 @@ async function processCompany(
     // capped per run. Jobs that hard-fail every track are a real Skip — no fetch.
     if (connector.fetchDetail && !job.description) {
       const pre = scoreJob(job, config);
-      const locViable = Object.values(pre.tracks).some((t) => !t.hard_failed);
+      // Enrich if a track's hard (location) gate passes, OR the location is unknown
+      // (list gave none — e.g. Workday "N Locations") so we must fetch to learn it.
+      const locViable = !job.location || Object.values(pre.tracks).some((t) => !t.hard_failed);
       if (locViable) {
         if (stats.detailFetches >= maxDetailPerRun) { stats.jobsNew--; continue; } // budget spent → next run
         stats.detailFetches++;
