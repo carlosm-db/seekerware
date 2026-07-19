@@ -10,7 +10,7 @@
 //        posted_at is null (freshness falls back to first_seen upstream).
 
 import type { Company, Job } from '../types';
-import { canonicalUrl, stripHtml } from './common';
+import { canonicalUrl, decodeEntities, stripHtml } from './common';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -55,7 +55,7 @@ function normalize(company: Company, item: string): Job | null {
     company: company.name,
     title: stripHtml(tag(item, 'title')),
     location: stripHtml(tag(item, 'g:location')),
-    url: canonicalUrl(link),
+    url: canonicalUrl(decodeEntities(link)),
     description: stripHtml(cdata(tag(item, 'description'))),
     posted_at: null,
     ats: 'successfactors',

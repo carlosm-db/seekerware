@@ -41,16 +41,19 @@ const ENTITIES: Record<string, string> = {
   '&nbsp;': ' ',
 };
 
+/** Decode numeric + named HTML entities (one pass). */
+export function decodeEntities(text: string): string {
+  let t = text.replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)));
+  for (const [entity, char] of Object.entries(ENTITIES)) {
+    t = t.replaceAll(entity, char);
+  }
+  return t;
+}
+
 /** Descriptions arrive as HTML (sometimes double-escaped) -> plain text for scoring and AI. */
 export function stripHtml(html: string): string {
-  let text = html;
-  // decode entities (two passes: Greenhouse escapes the content's HTML)
-  for (let i = 0; i < 2; i++) {
-    text = text.replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)));
-    for (const [entity, char] of Object.entries(ENTITIES)) {
-      text = text.replaceAll(entity, char);
-    }
-  }
+  // two passes: some feeds (Greenhouse, SF/RMK) escape the content's HTML
+  let text = decodeEntities(decodeEntities(html));
   text = text.replace(/<[^>]*>/g, ' ');
   return text.replace(/\s+/g, ' ').trim();
 }

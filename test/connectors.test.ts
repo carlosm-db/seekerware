@@ -117,7 +117,7 @@ describe('connector successfactors', () => {
   const FEED = `<?xml version="1.0" encoding="UTF-8" ?><rss version="2.0" xmlns:g="http://base.google.com/ns/1.0"><channel><title></title>
 <item><title>Data Analyst (Toronto, ON, CA)</title>
 <description><![CDATA[&lt;p&gt;Payments &amp;amp; reconciliation&lt;/p&gt;&lt;img src=&quot;data:image/png;base64,QUJDQUJD&quot;&gt;]]></description>
-<link>https://jobs.scotiabank.com/job/123?src=rss</link>
+<link>https://jobs.scotiabank.com/job/Data-&amp;-Analytics-123?src=rss</link>
 <guid isPermaLink="false">https://jobs.scotiabank.com/job/123</guid>
 <g:id>123</g:id><g:location>Toronto, ON</g:location><g:employer>Scotiabank</g:employer><g:expiration_date>2026-12-31</g:expiration_date></item>
 </channel></rss>`;
@@ -132,9 +132,10 @@ describe('connector successfactors', () => {
       ats: 'successfactors',
       title: 'Data Analyst (Toronto, ON, CA)',
       location: 'Toronto, ON',
-      url: 'https://jobs.scotiabank.com/job/123',
+      url: 'https://jobs.scotiabank.com/job/Data-&-Analytics-123',
       posted_at: null,
     });
+    expect(j.url).not.toContain('&amp;'); // link entities decoded
     expect(j.description).toContain('Payments & reconciliation');
     expect(j.description).not.toContain('QUJDQUJD'); // base64 image stripped
   });
