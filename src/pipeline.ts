@@ -181,7 +181,7 @@ function isoWeek(d: Date): number {
 }
 
 async function buildDigest(env: Env) {
-  // Cutoff in JS ISO: same exact numbers as /week (stored timestamps are
+  // Cutoff in JS ISO: same exact numbers as the Overview funnel (stored timestamps are
   // toISOString(); SQLite's datetime() does not compare well against them).
   const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
   const wk = await env.DB.prepare(

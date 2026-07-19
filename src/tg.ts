@@ -192,6 +192,6 @@ export async function handleTelegramUpdate(env: Env, update: TgUpdate, doFetch: 
     await sendTelegram(env, `Saved ✓ (draft in the answers bank)\n\n❓ Next:\n<b>${escapeHtml(next.question)}</b>`, doFetch);
   } else {
     await env.DB.prepare("DELETE FROM config WHERE key='tg_pending'").run();
-    await sendTelegram(env, 'Saved ✓ — all red questions answered. The kit is ready in /applications; review draft answers in the console to reuse them.', doFetch);
+    await sendTelegram(env, 'Saved ✓ — all red questions answered. The kit is ready on the job page; review draft answers under Answers to reuse them.', doFetch);
   }
 }

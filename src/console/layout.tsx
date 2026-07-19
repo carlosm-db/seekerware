@@ -230,6 +230,8 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
 .right { margin-left:auto; display:flex; gap:var(--sp-3); align-items:center }
 .hidden { display:none } .cap { text-transform:capitalize } .bd-warn { border-color:var(--warn) }
 .fs-sm { font-size:var(--fs-sm) }
+.kv { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:var(--sp-2) var(--sp-6); margin:var(--sp-4) 0 }
+.kv .k { color:var(--muted); font-size:var(--fs-sm); margin-right:var(--sp-2) }
 
 @media (min-width:720px) {
   main { padding:22px 26px }
@@ -274,7 +276,7 @@ export interface FooterStatus {
 
 const NAV_GROUPS: Array<[string, Array<[string, string]>]> = [
   ['Operate', [['/jobs', 'Jobs'], ['/tracker', 'Tracker']]],
-  ['Profile & setup', [['/contact', 'Contact'], ['/companies', 'Companies'], ['/config', 'Calibration'], ['/blocks', 'Bank']]],
+  ['Profile & setup', [['/contact', 'Contact'], ['/companies', 'Companies'], ['/config', 'Calibration'], ['/blocks', 'Bank'], ['/answers', 'Answers']]],
   ['System', [['/', 'Overview'], ['/health', 'Health']]],
 ];
 
