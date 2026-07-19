@@ -124,31 +124,24 @@ export function consoleApp(): App {
     return c.redirect('/');
   });
 
-  // ---------- Today (triage) ----------
+  // ---------- Overview (indicators) ----------
   app.get('/', async (c) => {
-    const nowIso = now();
     const strip = await c.env.DB.prepare(
       `SELECT
         (SELECT COUNT(*) FROM applications WHERE stage='applied' AND applied_at >= datetime('now','-7 days')) applied_week,
         (SELECT status FROM runs ORDER BY id DESC LIMIT 1) run_status`,
     ).first<{ applied_week: number; run_status: string | null }>();
 
-    const pg = pageNum(c);
-    const rows = (
-      await c.env.DB.prepare(
-        `SELECT j.url_hash, j.title, j.location, j.track, j.verdict, j.score, j.url, j.posted_at,
-                j.why_it_fits, j.positioning_lead, c.name company
-         FROM jobs j
-         JOIN companies c ON c.id = j.company_id
-         LEFT JOIN applications a ON a.url_hash = j.url_hash
-         WHERE j.status IN ('new','notified') AND j.verdict != 'Skip'
-           AND (a.url_hash IS NULL OR (a.stage='prepared' AND a.snoozed_until IS NOT NULL AND a.snoozed_until <= ?))
-         ORDER BY j.score DESC, j.first_seen DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
-      ).bind(nowIso).all<Record<string, string | number>>()
-    ).results;
-    const hasNext = rows.length > PAGE;
-    if (hasNext) rows.pop();
     const pendingTotal = await pendingTriage(c.env);
+    // This week's funnel (folded in from the old Week page).
+    const fromIso = new Date(Date.now() - 7 * 86400000).toISOString();
+    const funnel = await c.env.DB.prepare(
+      `SELECT
+        (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1) seen,
+        (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1 AND verdict != 'Skip') survivors,
+        (SELECT COUNT(*) FROM jobs WHERE notified_at >= ?1) notified,
+        (SELECT COUNT(*) FROM applications WHERE applied_at >= ?1) applied`,
+    ).bind(fromIso).first<Record<string, number>>();
 
     const health = strip?.run_status === 'ok' ? <span class="ok">green</span>
       : strip?.run_status ? <span class="warn">{strip.run_status}</span> : <span class="muted">no runs</span>;
@@ -162,26 +155,30 @@ export function consoleApp(): App {
         (SELECT COUNT(*) FROM jobs) jobs_total,
         (SELECT COUNT(*) FROM blocks WHERE status='approved') blocks_approved,
         (SELECT COUNT(*) FROM blocks) blocks_total,
-        (SELECT COUNT(*) FROM cvs) cvs_total,
         (SELECT COUNT(*) FROM config WHERE key='contact_profile') contact_set`,
     ).first<Record<string, number>>();
     const cards: Array<[string, string, string, string]> = [
+      ['Operate', '/jobs?view=survivors', `${pendingTotal}`, 'new survivors to triage'],
       ['Operate', '/tracker', `${panel?.tracker_active ?? 0}`, 'active applications'],
-      ['Operate', '/jobs', `${panel?.jobs_total ?? 0}`, 'jobs seen'],
+      ['Operate', '/jobs', `${panel?.jobs_total ?? 0}`, 'jobs seen (all)'],
       ['Profile & setup', '/companies', `${panel?.companies_active ?? 0}/${panel?.companies_total ?? 0}`, 'companies active'],
       ['Profile & setup', '/blocks', `${panel?.blocks_approved ?? 0}/${panel?.blocks_total ?? 0}`, 'blocks approved'],
       ['Profile & setup', '/contact', panel?.contact_set ? 'set ✓' : 'not set', 'contact profile'],
-      ['Output', '/cvs', `${panel?.cvs_total ?? 0}`, 'CVs generated'],
-      ['System', '/week', `${strip?.applied_week ?? 0}`, 'applied this week'],
       ['System', '/health', strip?.run_status ?? '—', 'last run'],
     ];
 
-    return page(c, 'Today', (
+    return page(c, 'Overview', (
       <>
         <div class="statgrid">
           <div class="stat"><div class="n">{pendingTotal}</div><div class="l">pending triage</div></div>
           <div class="stat"><div class="n">{strip?.applied_week ?? 0}</div><div class="l">applied this week</div></div>
           <div class="stat"><div class="n">{health}</div><div class="l">system health</div></div>
+          <div class="stat"><div class="n">{funnel?.survivors ?? 0}</div><div class="l">survivors this week</div></div>
+        </div>
+        <div class="card">
+          <h2>This week's funnel</h2>
+          <p>seen <strong>{funnel?.seen ?? 0}</strong> → new-survivors <strong>{funnel?.survivors ?? 0}</strong> → notified <strong>{funnel?.notified ?? 0}</strong> → applied <strong>{funnel?.applied ?? 0}</strong></p>
+          <p class="muted">The Monday digest to Telegram summarizes these same numbers.</p>
         </div>
         <div class="cardgrid">
           {cards.map(([group, href, n, label]) => (
@@ -192,46 +189,6 @@ export function consoleApp(): App {
             </a>
           ))}
         </div>
-        <h2>Triage</h2>
-        {pendingTotal === 0 ? <div class="card">Triage up to date ✓</div> : null}
-        <div class="twoup">
-        {rows.map((j) => (
-          <div class="card">
-            <div>
-              <a href={`/jobs/${j.url_hash}`}><strong>{j.title}</strong></a> — {j.company}
-              {' '}<span class="muted">📍 {j.location || 'no location'}</span>
-            </div>
-            <div style="margin:4px 0">
-              <span class={`v-${j.verdict}`}>{j.verdict}</span> · {j.score}/100 ·{' '}
-              <span class="chip">{j.track}</span>
-              {' '}<a href={String(j.url)} target="_blank" rel="noreferrer">view job ↗</a>
-            </div>
-            <div class="muted">{j.why_it_fits} · {j.positioning_lead}</div>
-            <div class="actions" style="margin-top:8px">
-              {(['prepared|Prepare', 'applied|I applied ✓', 'dismissed|Dismiss'] as const).map((x) => {
-                const [stage, label] = x.split('|');
-                return (
-                  <form class="inline" method="post" action="/triage">
-                    <input type="hidden" name="hash" value={String(j.url_hash)} />
-                    <input type="hidden" name="stage" value={stage} />
-                    <button type="submit" class={stage === 'applied' ? 'primary' : ''}>{label}</button>
-                  </form>
-                );
-              })}
-              <form class="inline" method="post" action="/triage">
-                <input type="hidden" name="hash" value={String(j.url_hash)} />
-                <input type="hidden" name="stage" value="snooze3" />
-                <button type="submit">Snooze 3d</button>
-              </form>
-              <form class="inline" method="post" action={`/jobs/${j.url_hash}/cv`}>
-                <input type="hidden" name="back" value="today" />
-                <button type="submit">CV</button>
-              </form>
-            </div>
-          </div>
-        ))}
-        </div>
-        {pager('/', pg, hasNext, {})}
       </>
     ));
   });
@@ -263,8 +220,18 @@ export function consoleApp(): App {
   // ---------- Jobs ----------
   app.get('/jobs', async (c) => {
     const q = c.req.query();
+    const view = q.view ?? 'survivors';
     const where: string[] = ['1=1'];
     const binds: unknown[] = [];
+    if (view === 'survivors') {
+      where.push("j.status IN ('new','notified') AND j.verdict != 'Skip'");
+      where.push("(a.url_hash IS NULL OR (a.stage='prepared' AND a.snoozed_until IS NOT NULL AND a.snoozed_until <= ?))");
+      binds.push(now());
+    } else if (view === 'skipped') {
+      where.push("(j.verdict = 'Skip' OR j.status = 'skipped')");
+    } else if (view === 'closed') {
+      where.push("j.status = 'closed'");
+    }
     if (q.track) { where.push('j.track = ?'); binds.push(q.track); }
     if (q.verdict) { where.push('j.verdict = ?'); binds.push(q.verdict); }
     if (q.status) { where.push('j.status = ?'); binds.push(q.status); }
@@ -292,14 +259,18 @@ export function consoleApp(): App {
 
     return page(c, 'Jobs', (
       <>
+        <div class="actions mb-1">
+          {([['survivors', 'New survivors'], ['all', 'All'], ['skipped', 'Skipped'], ['closed', 'Closed']] as const).map(
+            ([v, label]) => <a href={`/jobs?view=${v}`} class={view === v ? 'btnlike sec' : 'btnlike'}>{label}</a>,
+          )}
+        </div>
         <form method="get" action="/jobs" class="card actions filterbar">
+          <input type="hidden" name="view" value={view} />
           {sel('track', ['canada_coop', 'colombia_perm', 'contractor_usd'], q.track)}
           {sel('verdict', ['Apply', 'Stretch-worth-it', 'Skip'], q.verdict)}
           {sel('status', ['new', 'notified', 'closed', 'skipped'], q.status)}
           <input type="text" name="q" placeholder="search in title" value={q.q ?? ''} />
           <button type="submit" class="primary">Filter</button>
-          <a href="/jobs?verdict=Apply&status=new">Apply pending</a>
-          <a href="/jobs?status=notified">Notified</a>
         </form>
         <div class="table-wrap"><table>
           <tr><th>title</th><th class="hide-sm">track</th><th>verdict</th><th class="hide-sm">status</th><th>score</th><th class="hide-sm">stage</th><th class="hide-sm">seen</th></tr>
@@ -315,7 +286,7 @@ export function consoleApp(): App {
             </tr>
           ))}
         </table></div>
-        {pager('/jobs', pg, hasNext, { track: q.track, verdict: q.verdict, status: q.status, q: q.q })}
+        {pager('/jobs', pg, hasNext, { view, track: q.track, verdict: q.verdict, status: q.status, q: q.q })}
       </>
     ));
   });
@@ -1017,63 +988,6 @@ export function consoleApp(): App {
   });
 
   // ---------- Week ----------
-  app.get('/week', async (c) => {
-    const win = async (from: string, to: string) =>
-      (await c.env.DB.prepare(
-        `SELECT
-          (SELECT COUNT(*) FROM jobs WHERE first_seen >= ? AND first_seen < ?) new_jobs,
-          (SELECT COUNT(*) FROM jobs WHERE first_seen >= ? AND first_seen < ? AND verdict != 'Skip') survivors,
-          (SELECT COUNT(*) FROM jobs WHERE notified_at >= ? AND notified_at < ?) notified,
-          (SELECT COUNT(*) FROM applications WHERE applied_at >= ? AND applied_at < ?) applied,
-          (SELECT COUNT(*) FROM applications WHERE interview_at >= ? AND interview_at < ?) interviews`,
-      ).bind(from, to, from, to, from, to, from, to, from, to).first<Record<string, number>>())!;
-    const nowMs = Date.now();
-    const iso = (ms: number) => new Date(ms).toISOString();
-    const cur = await win(iso(nowMs - 7 * 86400000), iso(nowMs + 1));
-    const prev = await win(iso(nowMs - 14 * 86400000), iso(nowMs - 7 * 86400000));
-    const tta = (
-      await c.env.DB.prepare(
-        `SELECT j.notified_at, a.applied_at FROM applications a JOIN jobs j ON j.url_hash = a.url_hash
-         WHERE a.applied_at >= ? AND j.notified_at IS NOT NULL`,
-      ).bind(iso(nowMs - 30 * 86400000)).all<{ notified_at: string; applied_at: string }>()
-    ).results.map((r) => (new Date(r.applied_at).getTime() - new Date(r.notified_at).getTime()) / 3600000).sort((a, b) => a - b);
-    const median = tta.length ? tta[Math.floor(tta.length / 2)]!.toFixed(1) : null;
-    const aging = await c.env.DB.prepare(
-      `SELECT COUNT(*) n FROM applications WHERE stage IN ('prepared','applied') AND updated_at < ?`,
-    ).bind(iso(nowMs - 7 * 86400000)).first<{ n: number }>();
-
-    const stagesRow = (label: string, w: Record<string, number>, max: number) => (
-      <tr>
-        <th>{label}</th>
-        {(['new_jobs', 'survivors', 'notified', 'applied', 'interviews'] as const).map((k) => (
-          <td>
-            <div>{w[k]}</div>
-            <div style={`height:6px;border-radius:3px;background:var(--accent);width:${max > 0 ? Math.max(2, (Number(w[k]) / max) * 100) : 2}%`} />
-          </td>
-        ))}
-      </tr>
-    );
-    const maxVal = Math.max(1, ...Object.values(cur).map(Number), ...Object.values(prev).map(Number));
-
-    return page(c, 'Week', (
-      <>
-        <div class="statgrid">
-          <div class="stat"><div class="n">{cur.applied}</div><div class="l">applied</div></div>
-          <div class="stat"><div class="n">{median ?? '—'}{median ? 'h' : ''}</div><div class="l">median time-to-apply (30d)</div></div>
-          <div class="stat"><div class="n">{aging?.n ?? 0}</div><div class="l">stalled &gt;7d</div></div>
-        </div>
-        <div class="card">
-          <div class="table-wrap"><table>
-            <tr><th>week</th><th>new</th><th>survivors</th><th>notified</th><th>applied</th><th>interviews</th></tr>
-            {stagesRow('this', cur, maxVal)}
-            {stagesRow('previous', prev, maxVal)}
-          </table></div>
-        </div>
-        <p class="muted">The Monday digest to Telegram summarizes these same numbers.</p>
-      </>
-    ));
-  });
-
   // ---------- Replay ----------
   app.post('/config/replay', async (c) => {
     const b = await c.req.parseBody();

@@ -5,6 +5,9 @@ const CSS = `
 :root { --bg:#f7f7f5; --fg:#1b1b1f; --muted:#6b6b76; --card:#ffffff; --line:#e4e4e8;
   --accent:#0f6bff; --ok:#1a7f37; --warn:#b45309; --bad:#b91c1c; --chip:#eef2ff;
   --ok-soft:#e2f2e6; --warn-soft:#f8ecd9; --bad-soft:#f9e4e2; }
+:root { --sp-1:4px; --sp-2:6px; --sp-3:8px; --sp-4:10px; --sp-5:14px; --sp-6:16px; --sp-7:22px;
+  --r-1:6px; --r-2:8px; --r-3:10px; --r-4:12px; --r-pill:999px;
+  --fs-xs:11px; --fs-sm:13px; --fs-md:15px; --fs-lg:16px; --fs-xl:20px; --fs-2xl:22px; --z-nav:20 }
 [data-theme="dark"] { --bg:#101014; --fg:#ececf1; --muted:#9a9aa6; --card:#1a1a21;
   --line:#2a2a33; --accent:#5c9bff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --chip:#1e2438;
   --ok-soft:#152a1c; --warn-soft:#2d2413; --bad-soft:#321714; }
@@ -219,6 +222,15 @@ textarea { width:100%; font-family:ui-monospace, monospace; font-size:13px; min-
 details > summary { cursor:pointer; color:var(--accent); min-height:44px; display:flex; align-items:center }
 footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px solid var(--line); margin-top:26px }
 
+/* ---- utilities (design tokens; retire inline style= progressively) ---- */
+.card h2:first-child, .card h1:first-child { margin-top:0 }
+.mt-0 { margin-top:0 } .mt-1 { margin-top:var(--sp-3) } .mt-2 { margin-top:var(--sp-2) } .mt-3 { margin-top:var(--sp-1) }
+.my-1 { margin:var(--sp-1) 0 } .my-2 { margin:var(--sp-2) 0 } .mb-1 { margin-bottom:var(--sp-4) }
+.w-full { width:100% } .w-xs { width:60px } .w-sm { width:70px } .w-md { width:80px }
+.right { margin-left:auto; display:flex; gap:var(--sp-3); align-items:center }
+.hidden { display:none } .cap { text-transform:capitalize } .bd-warn { border-color:var(--warn) }
+.fs-sm { font-size:var(--fs-sm) }
+
 @media (min-width:720px) {
   main { padding:22px 26px }
   .hamburger { display:none }
@@ -261,10 +273,9 @@ export interface FooterStatus {
 }
 
 const NAV_GROUPS: Array<[string, Array<[string, string]>]> = [
-  ['Operate', [['/', 'Today'], ['/applications', 'Applications'], ['/tracker', 'Tracker'], ['/jobs', 'Jobs']]],
+  ['Operate', [['/jobs', 'Jobs'], ['/tracker', 'Tracker']]],
   ['Profile & setup', [['/contact', 'Contact'], ['/companies', 'Companies'], ['/config', 'Calibration'], ['/blocks', 'Bank']]],
-  ['Output', [['/cvs', 'CVs']]],
-  ['System', [['/week', 'Week'], ['/health', 'Health']]],
+  ['System', [['/', 'Overview'], ['/health', 'Health']]],
 ];
 
 export const Layout: FC<{
@@ -307,7 +318,7 @@ export const Layout: FC<{
             {links.map(([href, label]) => (
               <a href={href} class={path === href ? 'active' : ''}>
                 {label}
-                {href === '/' && pendingTriage > 0 ? <span class="badge">{pendingTriage}</span> : null}
+                {href === '/jobs' && pendingTriage > 0 ? <span class="badge">{pendingTriage}</span> : null}
               </a>
             ))}
           </div>
