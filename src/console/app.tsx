@@ -598,26 +598,10 @@ export function consoleApp(): App {
           <button type="submit" class="primary">Save</button>
         </form>
 
-        <form method="post" action="/config/rescore" class="card actions"
-          onsubmit="return confirm('Re-score ALL open jobs with the ACTIVE config? This rewrites score/track/verdict on changed rows (history kept in job events).')">
-          <button type="submit">♻️ Re-score open jobs with the active config</button>
-          <span class="muted">run this after activating changes so stored jobs pick them up</span>
-        </form>
-
-        <h2>What I want to see (the matrix)</h2>
-        <p class="muted" style="margin:0 0 6px">
-          Weight: <strong>+3</strong> strong · <strong>+2</strong> medium · <strong>+1</strong> light ·
-          <strong> −2</strong> against · <strong>−3</strong> strongly against — ✕ removes a word in BOTH
-          languages; adding happens in ONE place, after the table.
-        </p>
-        <p class="muted" style="margin:0 0 8px">
-          <strong>Path</strong> — the track a word unlocks (or, on an against word, blocks):
-          {cfg.tracks.map((t) => <span class={pathClass(t.id)}>{trackLabel(t.id)}</span>)}
-          <span> · no badge = scores every track · path words are gates: absolute, not points (−N = penalty)</span>
-        </p>
+        <h2>Keyword matrix (ATS)</h2>
         <div class="actions" style="margin-bottom:10px">
           <div class="calsearch">
-            <input type="search" id="calsearch-input" placeholder="Find a word across every list…" aria-label="Find a word" />
+            <input type="search" id="calsearch-input" placeholder="Filter words across every list…" aria-label="Filter words" />
           </div>
         </div>
 
@@ -642,8 +626,19 @@ export function consoleApp(): App {
           </div>
         </div>
 
+        <p class="muted" style="margin:0 0 6px">
+          Weight: <strong>+3</strong> strong · <strong>+2</strong> medium · <strong>+1</strong> light ·
+          <strong> −2</strong> against · <strong>−3</strong> strongly against — ✕ removes a word in BOTH
+          languages; adding happens in ONE place, below.
+        </p>
+        <p class="muted" style="margin:0 0 8px">
+          <strong>Path</strong> — the track a word unlocks (or, on an against word, blocks):
+          {cfg.tracks.map((t) => <span class={pathClass(t.id)}>{trackLabel(t.id)}</span>)}
+          <span> · no badge = scores every track · path words are gates: absolute, not points (−N = penalty)</span>
+        </p>
+
         <div class="card">
-          <strong>＋ Add word — the only add form on the page</strong>
+          <strong>＋ Add word</strong>
           <form method="post" action="/config/word-add" style="margin-top:8px">
             <div class="formgrid">
               <div class="field f-en"><label>Word — English (required)</label>
@@ -656,19 +651,17 @@ export function consoleApp(): App {
                 <select name="category">
                   {MATRIX_CATEGORIES.map((cat) => <option value={cat}>{MATRIX_LABELS[cat][0]}</option>)}
                 </select></label>
-              <label><input type="radio" name="dir" value="favor" checked
-                onchange="document.getElementById('wf').disabled=false;document.getElementById('wa').disabled=true" /> In favor</label>
-              <label><input type="radio" name="dir" value="against"
-                onchange="document.getElementById('wf').disabled=true;document.getElementById('wa').disabled=false" /> Against</label>
-              <select name="weight" id="wf">
-                <option value="3">+3 strong</option>
-                <option value="2" selected>+2 medium</option>
-                <option value="1">+1 light</option>
-              </select>
-              <select name="weight" id="wa" disabled>
-                <option value="2" selected>−2 against</option>
-                <option value="3">−3 strongly against</option>
-              </select>
+              <label class="muted">Direction{' '}
+                <select name="dir" id="dir-sel">
+                  <option value="favor" selected>In favor</option>
+                  <option value="against">Against</option>
+                </select></label>
+              <label class="muted">Strength{' '}
+                <select name="weight" id="str-sel">
+                  <option value="3">+3 strong</option>
+                  <option value="2" selected>+2 medium</option>
+                  <option value="1">+1 light</option>
+                </select></label>
               <label class="muted">Path{' '}
                 <select name="path">
                   <option value="">— every track —</option>
@@ -679,6 +672,12 @@ export function consoleApp(): App {
             <p class="muted" style="margin:6px 0 0">Location words REQUIRE a path (they are the track gates; weight does not apply there).</p>
           </form>
         </div>
+
+        <form method="post" action="/config/rescore" class="card actions"
+          onsubmit="return confirm('Re-score ALL open jobs with the ACTIVE config? This rewrites score/track/verdict on changed rows (history kept in job events).')">
+          <button type="submit">♻️ Re-score open jobs with the active config</button>
+          <span class="muted">run this after activating changes so stored jobs pick them up</span>
+        </form>
 
         <details class="card">
           <summary>Advanced: raw JSON</summary>
@@ -728,6 +727,13 @@ export function consoleApp(): App {
     cell.classList.toggle('open');
     b.textContent = cell.classList.contains('open') ? 'show fewer' : b.textContent.replace('fewer', 'more');
   }));
+  const dirSel = document.getElementById('dir-sel');
+  const strSel = document.getElementById('str-sel');
+  if (dirSel && strSel) dirSel.addEventListener('change', () => {
+    strSel.innerHTML = dirSel.value === 'against'
+      ? '<option value="2" selected>−2 against</option><option value="3">−3 strongly against</option>'
+      : '<option value="3">+3 strong</option><option value="2" selected>+2 medium</option><option value="1">+1 light</option>';
+  });
 })();` }} />
       </>
     ));
