@@ -301,14 +301,14 @@ export function consoleApp(): App {
           <a href="/jobs?status=notified">Notified</a>
         </form>
         <div class="table-wrap"><table>
-          <tr><th>title</th><th class="hide-sm">track</th><th>score</th><th>verdict</th><th class="hide-sm">status</th><th class="hide-sm">stage</th><th class="hide-sm">seen</th></tr>
+          <tr><th>title</th><th class="hide-sm">track</th><th>verdict</th><th class="hide-sm">status</th><th>score</th><th class="hide-sm">stage</th><th class="hide-sm">seen</th></tr>
           {rows.map((j) => (
             <tr>
               <td><a href={`/jobs/${j.url_hash}`}>{j.title}</a><div class="muted">{j.company} · {j.location}</div></td>
               <td class="hide-sm">{j.track ?? '—'}</td>
-              <td>{j.score}</td>
               <td class={`v-${j.verdict}`}>{j.verdict}</td>
               <td class={`hide-sm s-${j.status}`}>{j.status}</td>
+              <td>{j.score}</td>
               <td class="hide-sm">{j.stage ?? '—'}</td>
               <td class="hide-sm muted">{fmt(String(j.first_seen))}</td>
             </tr>
@@ -1808,19 +1808,21 @@ export function consoleApp(): App {
                 <span class="muted">{r.company}</span>
                 <span class="chip">{r.track}</span>
                 <span class={r.stage === 'applied' ? 'ok' : 'muted'}>{r.stage ?? 'pending'}</span>
-                {!hasKit ? (
-                  <form class="inline" method="post" action="/applications/build">
-                    <input type="hidden" name="hash" value={String(r.url_hash)} />
-                    <button type="submit" class="primary">Build kit</button>
-                  </form>
-                ) : null}
-                {r.stage !== 'applied' ? (
-                  <form class="inline" method="post" action="/tracker/update">
-                    <input type="hidden" name="hash" value={String(r.url_hash)} />
-                    <input type="hidden" name="stage" value="applied" />
-                    <button type="submit">I applied ✓</button>
-                  </form>
-                ) : null}
+                <div style="margin-left:auto; display:flex; gap:8px; align-items:center">
+                  {!hasKit ? (
+                    <form class="inline" method="post" action="/applications/build">
+                      <input type="hidden" name="hash" value={String(r.url_hash)} />
+                      <button type="submit" class="primary">Build kit</button>
+                    </form>
+                  ) : null}
+                  {r.stage !== 'applied' ? (
+                    <form class="inline" method="post" action="/tracker/update">
+                      <input type="hidden" name="hash" value={String(r.url_hash)} />
+                      <input type="hidden" name="stage" value="applied" />
+                      <button type="submit">I applied ✓</button>
+                    </form>
+                  ) : null}
+                </div>
               </div>
               {hasKit ? (
                 <details style="margin-top:6px">
