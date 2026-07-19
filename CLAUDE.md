@@ -58,6 +58,12 @@ repo.
   failure never brings down the run.
 - Secrets ONLY in Worker secrets (`wrangler secret put`), read from the `env`
   binding. Never in code, logs, commits, or `wrangler.jsonc`.
+- **The agent (Claude/others) never handles the owner's secret VALUES.** No
+  `wrangler secret put`, no generating tokens/keys, no writing secret values to
+  disk, no reading values into the chat. Secret creation and rotation are the
+  owner's alone; for setup that needs a secret (e.g. Telegram `setWebhook`),
+  hand the owner a command to run themselves. Reading secret NAMES
+  (`wrangler secret list`) is fine; values are not. See `docs/CLAUDE-ERRORS.md`.
 - Deploy ONLY via GitHub Actions (typecheck + tests + migrations +
   `wrangler deploy`). Do not create Workers, D1 databases, or duplicate
   resources; the infra that is not code (Access, domains, initial resource
