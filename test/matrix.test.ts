@@ -101,11 +101,14 @@ describe('buildMatrix', () => {
     expect(tools.favor_es.find((c) => c.term === 'sql')!.mirrored).toBe(true);
   });
 
-  it('respects meta.gate_langs for gate terms', () => {
+  it('respects meta.gate_langs and mirrors a solo gate term into both columns', () => {
     const meta: MatrixMeta = { gate_langs: { colombia: 'es' }, gate_pairs: {} };
     const loc = row(buildMatrix(makeCfg(), meta), 'location');
+    // gate_langs sets the PRIMARY column (ES); a same-word solo term (no distinct
+    // twin) mirrors into the EN column too — full EN/ES parity in the grid.
     expect(terms(loc.favor_es)).toContain('colombia');
-    expect(terms(loc.favor_en)).not.toContain('colombia');
+    expect(terms(loc.favor_en)).toContain('colombia');
+    expect(loc.favor_en.find((c) => c.term === 'colombia')!.mirrored).toBe(true);
   });
 });
 

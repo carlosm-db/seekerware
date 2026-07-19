@@ -125,16 +125,29 @@ export function buildMatrix(cfg: ScoringConfig, meta: MatrixMeta): MatrixRow[] {
   }
 
   // Gate-only chips (terms in no keyword list): title-scope gates project into
-  // Role titles; everything else (location/text) is the Location row.
+  // Role titles; everything else (location/text) is the Location row. A concept
+  // stored as ONE term (same word in both languages, e.g. "colombia") MIRRORS
+  // into both language columns — full EN/ES parity in the grid; a distinct twin
+  // pair (latin america / latinoamérica) already fills both columns on its own.
+  const gatePairCount = new Map<string, number>();
+  for (const [term] of gateIdx) {
+    if (keywordTerms.has(term)) continue;
+    const pid = meta.gate_pairs[term] ?? term;
+    gatePairCount.set(pid, (gatePairCount.get(pid) ?? 0) + 1);
+  }
   for (const [term, hit] of gateIdx) {
     if (keywordTerms.has(term)) continue;
     const row = rows.get(hit.titleScope ? 'role_type' : 'location')!;
-    place(row, {
+    const base: Chip = {
       term, lang: meta.gate_langs[term] === 'es' ? 'es' : 'en',
       favor: hit.list === 'require', category: row.category,
       path: hit.track, penalty: hit.penalty,
       source: { kind: 'gate', track: hit.track, gate: hit.gate, list: hit.list },
-    });
+    };
+    place(row, base);
+    if ((gatePairCount.get(meta.gate_pairs[term] ?? term) ?? 0) === 1) {
+      place(row, { ...base, lang: base.lang === 'es' ? 'en' : 'es', mirrored: true });
+    }
   }
 
   return MATRIX_CATEGORIES.map((cat) => {
