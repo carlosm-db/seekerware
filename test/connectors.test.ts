@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as lever from '../src/connectors/lever';
 import * as ashby from '../src/connectors/ashby';
+import { parseAtsUrl } from '../src/connectors/common';
 import type { Company, Job } from '../src/types';
 
 const leverCo: Company = { id: 1, name: 'Yuno', ats: 'lever', token: 'yuno', active: true };
@@ -101,5 +102,25 @@ describe('connector ashby', () => {
     expect(await ashby.isLive(ashbyCo, { id: 'uuid-2' } as Job)).toBe(false);
     mockFetch(BOARD);
     expect(await ashby.isLive(ashbyCo, { id: 'no-existe' } as Job)).toBe(false);
+  });
+});
+
+describe('parseAtsUrl', () => {
+  it('detects greenhouse (boards / job-boards / subdomain)', () => {
+    expect(parseAtsUrl('https://boards.greenhouse.io/stripe')).toEqual({ ats: 'greenhouse', token: 'stripe' });
+    expect(parseAtsUrl('https://job-boards.greenhouse.io/gitlab/jobs/123')).toEqual({ ats: 'greenhouse', token: 'gitlab' });
+    expect(parseAtsUrl('https://acme.greenhouse.io/')).toEqual({ ats: 'greenhouse', token: 'acme' });
+  });
+
+  it('detects lever and ashby', () => {
+    expect(parseAtsUrl('https://jobs.lever.co/dlocal')).toEqual({ ats: 'lever', token: 'dlocal' });
+    expect(parseAtsUrl('https://jobs.ashbyhq.com/ramp/uuid?utm=x')).toEqual({ ats: 'ashby', token: 'ramp' });
+  });
+
+  it('returns null for unsupported hosts and junk', () => {
+    expect(parseAtsUrl('https://jobs.scotiabank.com/search/?q=')).toBeNull(); // SuccessFactors
+    expect(parseAtsUrl('https://acme.myworkdayjobs.com/en-US/careers')).toBeNull(); // Workday
+    expect(parseAtsUrl('not a url')).toBeNull();
+    expect(parseAtsUrl('https://boards.greenhouse.io/')).toBeNull(); // no token
   });
 });

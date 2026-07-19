@@ -12,8 +12,9 @@ import {
   applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES, parseMeta,
   type Chip, type MatrixCategory, type MatrixMeta, type RemoveTarget,
 } from './matrix';
-import * as greenhouse from '../connectors/greenhouse';
-import type { Company } from '../types';
+import { connectors } from '../connectors';
+import { parseAtsUrl } from '../connectors/common';
+import type { Ats, Company } from '../types';
 import { CATEGORIES, type Category, type ScoreResult } from '../scoring';
 
 type App = Hono<{ Bindings: ConsoleEnv }>;
@@ -431,6 +432,12 @@ export function consoleApp(): App {
           <input type="text" name="notes" placeholder="notes" />
           <button type="submit" class="primary">Add company</button>
         </form>
+        <form method="post" action="/companies/add-urls" class="card">
+          <strong>Add by URL (bulk)</strong>
+          <p class="muted" style="margin:6px 0">Paste career/board URLs — one per line. Greenhouse / Lever / Ashby are detected automatically; each is validated on the next poll (see the health column).</p>
+          <textarea name="urls" rows={4} style="width:100%" placeholder={'https://jobs.lever.co/acme\nhttps://boards.greenhouse.io/acme\nhttps://jobs.ashbyhq.com/acme'} />
+          <div class="actions" style="margin-top:8px"><button type="submit" class="primary">Add all</button></div>
+        </form>
         <div class="table-wrap"><table>
           <tr><th>company</th><th>ats</th><th>token</th><th>active</th><th>health</th><th>jobs 90d</th><th>survivors</th><th>yield</th></tr>
           {rows.map((r) => (
@@ -459,25 +466,48 @@ export function consoleApp(): App {
   app.post('/companies', async (c) => {
     const b = await c.req.parseBody();
     const name = String(b.name ?? '').trim();
-    const ats = String(b.ats ?? 'greenhouse');
+    const ats = String(b.ats ?? 'greenhouse') as Ats;
     const token = String(b.token ?? '').trim();
     const notes = String(b.notes ?? '');
     if (!name || !token) return c.redirect('/companies?m=missing fields');
-    let probe = 'connector pending (step 5): saved inactive';
+    if (!connectors[ats]) return c.redirect('/companies?m=unknown ATS');
+    // Probe the token via the matching connector for ALL supported ATS (not just
+    // Greenhouse); activate only when the board answers.
+    let probe: string;
     let active = 0;
-    if (ats === 'greenhouse') {
-      try {
-        const jobs = await greenhouse.fetchJobs({ id: 0, name, ats: 'greenhouse', token, active: true } as Company);
-        probe = `token OK: ${jobs.length} jobs on the board`;
-        active = 1;
-      } catch (err) {
-        probe = `token FAILED: ${err instanceof Error ? err.message : 'error'} — saved inactive`;
-      }
+    try {
+      const jobs = await connectors[ats].fetchJobs({ id: 0, name, ats, token, active: true });
+      probe = `token OK: ${jobs.length} jobs on the board`;
+      active = 1;
+    } catch (err) {
+      probe = `token FAILED: ${err instanceof Error ? err.message : 'error'} — saved inactive`;
     }
     await c.env.DB.prepare(
       'INSERT OR IGNORE INTO companies (name, ats, token, active, notes) VALUES (?,?,?,?,?)',
     ).bind(name, ats, token, active, notes).run();
     return c.redirect(`/companies?m=${encodeURIComponent(probe)}`);
+  });
+
+  // Bulk "add by URL": paste career/board URLs; detect ATS+token from the host.
+  // Zero probes here (subrequest budget) — companies are validated on the next
+  // poll (health column), so pasting many is cheap.
+  app.post('/companies/add-urls', async (c) => {
+    const b = await c.req.parseBody();
+    const lines = String(b.urls ?? '').split(/[\r\n,]+/).map((s) => s.trim()).filter(Boolean);
+    const stmts = [];
+    const skipped: string[] = [];
+    for (const line of lines.slice(0, 200)) {
+      const parsed = parseAtsUrl(line);
+      if (!parsed) { skipped.push(line); continue; }
+      stmts.push(
+        c.env.DB.prepare('INSERT OR IGNORE INTO companies (name, ats, token, active, notes) VALUES (?,?,?,1,?)')
+          .bind(parsed.token, parsed.ats, parsed.token, 'added by URL'),
+      );
+    }
+    if (stmts.length) await c.env.DB.batch(stmts);
+    const msg = `added ${stmts.length} (validated on next poll)`
+      + (skipped.length ? ` · skipped ${skipped.length} non-ATS URL(s)` : '');
+    return c.redirect(`/companies?m=${encodeURIComponent(msg)}`);
   });
 
   app.post('/companies/toggle', async (c) => {

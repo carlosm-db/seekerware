@@ -226,6 +226,20 @@ are SUMs of the day's `runs` against `config['quota_limits']`. Console actions
 (dry-run, regenerate CV) are their own invocations with THEIR own budget of 50
 — they never compete with the cron.
 
+**Coverage math (batch rotation).** The poller takes a round-robin page of
+`config['poll_page_size']` active companies per run (cursor in
+`config['poll_cursor']`, `src/store.ts`), so daily coverage = `poll_page_size` ×
+runs/day, and the same 25 are only re-polled every run when the active count ≤
+page size. Two per-run ceilings bound a page: **subrequests** (~1 feed each, 50
+on the free tier) and **CPU** (bounded by `config['max_new_jobs_per_run']` —
+overflow scores next run). To grow the set: raise `poll_page_size` toward the
+subrequest budget and/or widen the /health schedule window so
+`poll_page_size` × runs/day ≥ the active count (≈ once-daily coverage). Free tier
+sustains a few hundred companies at ~daily freshness; **Cloudflare Workers Paid**
+(1000 subrequests + 30s CPU per invocation) removes the ceiling. Companies are
+added one-by-one (probed on save) or in bulk via **add-by-URL** (host → ATS+token
+by `parseAtsUrl`, validated on the next poll).
+
 ## 8. Console and API
 
 Served by the same worker's `fetch()` handler. Full functional architecture

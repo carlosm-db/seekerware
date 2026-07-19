@@ -1,5 +1,7 @@
 // Rules common to all connectors (docs/TRD.md §2).
 
+import type { Ats } from '../types';
+
 /**
  * Canonical URL = no tracking query params or fragment, PRESERVING the ATS
  * identity params (`identityParams`). Boards with their own careers page carry
@@ -51,4 +53,40 @@ export function stripHtml(html: string): string {
   }
   text = text.replace(/<[^>]*>/g, ' ');
   return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Map a public career/board URL to its ATS + board token, or null if the host
+ * is not a supported ATS board. Powers the console "add by URL" bulk flow.
+ * Recognized: Greenhouse (boards/job-boards.greenhouse.io/{token} or
+ * {token}.greenhouse.io), Lever (jobs.lever.co/{token}), Ashby
+ * (jobs.ashbyhq.com/{token}).
+ */
+export function parseAtsUrl(input: string): { ats: Ats; token: string } | null {
+  let u: URL;
+  try {
+    u = new URL(input.trim());
+  } catch {
+    return null;
+  }
+  const host = u.hostname.toLowerCase();
+  const seg = u.pathname.split('/').filter(Boolean);
+  const first = seg[0] ? decodeURIComponent(seg[0]) : '';
+
+  if (host === 'boards.greenhouse.io' || host === 'job-boards.greenhouse.io') {
+    return first ? { ats: 'greenhouse', token: first } : null;
+  }
+  if (host.endsWith('.greenhouse.io')) {
+    const sub = host.slice(0, -'.greenhouse.io'.length);
+    if (sub && !['boards', 'job-boards', 'boards-api'].includes(sub)) {
+      return { ats: 'greenhouse', token: sub };
+    }
+  }
+  if (host === 'jobs.lever.co' || host === 'lever.co') {
+    return first ? { ats: 'lever', token: first } : null;
+  }
+  if (host === 'jobs.ashbyhq.com' || host === 'ashbyhq.com') {
+    return first ? { ats: 'ashby', token: first } : null;
+  }
+  return null;
 }
