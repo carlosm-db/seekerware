@@ -4,6 +4,29 @@ Running record of times an agent (Claude or other) broke a rule or caused
 harm on this project, so the pattern is not repeated. Newest first. Process
 failures only — no owner private data here (CLAUDE.md §4).
 
+## 2026-07-19 — Broke the deploy for ~40 min: mis-numbered migration + wrong D1 foreign-key assumptions
+- **What:** after squashing the incremental migrations into a single `0001_initial.sql`,
+  prod's `d1_migrations` still had `0001..0010` recorded. The new "open the ats CHECK"
+  migration was numbered **`0002`** (behind prod's recorded 0003–0010) → `wrangler d1
+  migrations apply` failed every deploy. Renumbering to `0011` still failed: D1 **enforces
+  foreign keys**, so recreating `companies` (referenced by `jobs.company_id`) hit
+  `FOREIGN KEY constraint failed`. `PRAGMA foreign_keys=OFF` is a no-op inside D1's
+  migration transaction, and `defer_foreign_keys` has a DROP+RENAME counter bug.
+- **Impact:** deploys #53–#57 red (~3:30–4:10 COT); the C1/C1.3/C2 connector code never
+  deployed; SF/Workday company adds were silently dropped by the stale CHECK. The owner
+  caught it via the CI error notifications ("recibí errores de implementación").
+- **Fix:** ran the table recreate manually via `wrangler d1 execute --remote` (autocommit,
+  so `foreign_keys=OFF` takes effect — unlike `migrations apply`) + marked `0011` applied
+  in `d1_migrations` so CI skips it.
+- **Lessons:** (1) after squashing migrations, number a NEW migration past prod's highest
+  **recorded** migration (`SELECT name FROM d1_migrations`), not the repo's highest file.
+  (2) D1 ENFORCES foreign keys; recreate a referenced table via `wrangler d1 execute`
+  (autocommit + `foreign_keys=OFF`), NOT `migrations apply` (transaction) nor
+  `defer_foreign_keys`. (3) validate migrations against SQLite with `PRAGMA
+  foreign_keys=ON` — node:sqlite defaults OFF and hid the bug (passed local, failed prod).
+  (4) I can't read GitHub Actions (PAT lacks `Actions:read`); a green push is NOT proof of
+  deploy — verify prod state directly.
+
 ## 2026-07-19 — Overwrote a live secret on ambiguous approval
 - **What:** ran `wrangler secret put TELEGRAM_WEBHOOK_TOKEN`, overwriting the
   owner's live Cloudflare secret with a self-generated value. Cloudflare
