@@ -116,6 +116,24 @@ repo.
 - Git identity pinned per-repo; do not touch the global configuration.
 - Commits per `docs/CONVENTIONS.md` §4.
 
+### How to push (git write to `carlosm-db/seekerware`)
+
+Commits in THIS repo are authored as `carlosm-db` (local `user.email`; the global
+config is left untouched). The push credential is the `carlosm-db` PAT in the
+Windows **User** env var `SEEKERWARE_GITHUB_PAT`, and a local `credential.helper`
+already feeds it — so a plain `git push` works AS LONG AS Claude Code inherited a
+fresh token. The value inherited by the process tree (Bash/PowerShell tools AND
+the `github-seekerware` MCP) can be STALE — an old `cardavil` token that 403s/404s
+on the repo. Fix: RESTART Claude Code so it re-reads the registry. Fallback
+without restart — read the token fresh in the same command and never print it:
+
+    pat=$(powershell.exe -NoProfile -Command "[Environment]::GetEnvironmentVariable('SEEKERWARE_GITHUB_PAT','User')" | tr -d '\r')
+    git push "https://carlosm-db:$pat@github.com/carlosm-db/seekerware.git" main
+
+Verify identity first via `GET api.github.com/user` (must be `carlosm-db`; print
+only `.login`, never the token). The PAT has no `Actions:read`, so check CI status
+in the GitHub web UI, not via the API.
+
 ## 9. Build status
 
 | Step | Contents | Status |
