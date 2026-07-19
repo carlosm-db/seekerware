@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as lever from '../src/connectors/lever';
 import * as ashby from '../src/connectors/ashby';
+import * as successfactors from '../src/connectors/successfactors';
 import { parseAtsUrl } from '../src/connectors/common';
 import type { Company, Job } from '../src/types';
+
+function mockText(body: string, status = 200) {
+  const fn = vi.fn(async () => new Response(body, { status }));
+  vi.stubGlobal('fetch', fn);
+  return fn;
+}
 
 const leverCo: Company = { id: 1, name: 'Yuno', ats: 'lever', token: 'yuno', active: true };
 const ashbyCo: Company = { id: 2, name: 'Trulioo', ats: 'ashby', token: 'trulioo', active: true };
@@ -102,6 +109,41 @@ describe('connector ashby', () => {
     expect(await ashby.isLive(ashbyCo, { id: 'uuid-2' } as Job)).toBe(false);
     mockFetch(BOARD);
     expect(await ashby.isLive(ashbyCo, { id: 'no-existe' } as Job)).toBe(false);
+  });
+});
+
+describe('connector successfactors', () => {
+  const sfCo: Company = { id: 3, name: 'Scotiabank', ats: 'successfactors', token: 'jobs.scotiabank.com', active: true };
+  const FEED = `<?xml version="1.0" encoding="UTF-8" ?><rss version="2.0" xmlns:g="http://base.google.com/ns/1.0"><channel><title></title>
+<item><title>Data Analyst (Toronto, ON, CA)</title>
+<description><![CDATA[&lt;p&gt;Payments &amp;amp; reconciliation&lt;/p&gt;&lt;img src=&quot;data:image/png;base64,QUJDQUJD&quot;&gt;]]></description>
+<link>https://jobs.scotiabank.com/job/123?src=rss</link>
+<guid isPermaLink="false">https://jobs.scotiabank.com/job/123</guid>
+<g:id>123</g:id><g:location>Toronto, ON</g:location><g:employer>Scotiabank</g:employer><g:expiration_date>2026-12-31</g:expiration_date></item>
+</channel></rss>`;
+
+  it('parses the RSS feed: title, location, canonical url, description without base64', async () => {
+    mockText(FEED);
+    const jobs = await successfactors.fetchJobs(sfCo);
+    expect(jobs).toHaveLength(1);
+    const j = jobs[0]!;
+    expect(j).toMatchObject({
+      id: '123',
+      ats: 'successfactors',
+      title: 'Data Analyst (Toronto, ON, CA)',
+      location: 'Toronto, ON',
+      url: 'https://jobs.scotiabank.com/job/123',
+      posted_at: null,
+    });
+    expect(j.description).toContain('Payments & reconciliation');
+    expect(j.description).not.toContain('QUJDQUJD'); // base64 image stripped
+  });
+
+  it('isLive: id present in the re-fetched feed = alive, absent = dead', async () => {
+    mockText(FEED);
+    expect(await successfactors.isLive(sfCo, { id: '123' } as Job)).toBe(true);
+    mockText(FEED);
+    expect(await successfactors.isLive(sfCo, { id: '999' } as Job)).toBe(false);
   });
 });
 

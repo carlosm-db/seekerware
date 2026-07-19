@@ -4,6 +4,7 @@ import type { Ats, Company, Job } from '../types';
 import * as greenhouse from './greenhouse';
 import * as lever from './lever';
 import * as ashby from './ashby';
+import * as successfactors from './successfactors';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -12,4 +13,4 @@ export interface Connector {
   isLive(company: Company, job: Job, doFetch?: Fetcher): Promise<boolean>;
 }
 
-export const connectors: Record<Ats, Connector> = { greenhouse, lever, ashby };
+export const connectors: Record<Ats, Connector> = { greenhouse, lever, ashby, successfactors };

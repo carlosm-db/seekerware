@@ -427,8 +427,8 @@ export function consoleApp(): App {
       <>
         <form method="post" action="/companies" class="card actions">
           <input type="text" name="name" placeholder="name" required />
-          <select name="ats"><option>greenhouse</option><option>lever</option><option>ashby</option></select>
-          <input type="text" name="token" placeholder="board token" required />
+          <select name="ats"><option>greenhouse</option><option>lever</option><option>ashby</option><option>successfactors</option></select>
+          <input type="text" name="token" placeholder="board token / SF host" required />
           <input type="text" name="notes" placeholder="notes" />
           <button type="submit" class="primary">Add company</button>
         </form>
