@@ -782,15 +782,16 @@ export function consoleApp(): App {
         </div>
 
         <p class="muted mb-2">
-          Every concept has an <strong>English</strong> and a <strong>Español</strong> value — both required.
-          <strong> —</strong> in the Español column means it isn’t filled yet. Strength:
-          <strong> +3</strong>/<strong>+2</strong>/<strong>+1</strong> in favor · <strong>−2</strong>/<strong>−3</strong> against.
-          ✏️ edits a concept · ✕ removes it (both languages).
+          Each concept has an <strong>English</strong> and a <strong>Español</strong> value — both required.
+          <strong> Strength</strong> — how much it counts: <strong>+3</strong>/<strong>+2</strong>/<strong>+1</strong> in favor ·
+          <strong> −2</strong>/<strong>−3</strong> against. <strong>✏️</strong> edit · <strong>✕</strong> remove (both languages).
         </p>
         <p class="muted mb-3">
-          <strong>Path</strong> — the track a word unlocks (or, on an against word, blocks):
-          {cfg.tracks.map((t) => <span class={pathClass(t.id)}>{trackLabel(t.id)}</span>)}
-          <span> · no badge = scores every track · path words are gates: absolute, not points</span>
+          <strong>Path</strong> — the track a word belongs to:{' '}
+          {cfg.tracks.map((t, i) => (
+            <>{i ? ' · ' : ''}<span class={pathClass(t.id)}>{trackLabel(t.id)}</span></>
+          ))}
+          <span>. No badge = counts for every track. A word with a badge is that track’s <strong>gate</strong> — an absolute pass/fail rule, not weighted points.</span>
         </p>
 
         <div class="card">
