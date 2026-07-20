@@ -6,9 +6,14 @@
 --
 -- Numbered 0011 (not 0002): prod's d1_migrations already recorded 0001..0010 before
 -- the repo squashed the incremental migrations into a single 0001_initial.sql, so a
--- NEW migration must sort AFTER 0010 or `wrangler d1 migrations apply` fails
--- out-of-order. No PRAGMA statements — D1 rejects them over its HTTP API and does not
--- enforce foreign keys by default, so the drop/rename is safe as-is.
+-- new migration must sort AFTER 0010.
+--
+-- `companies` is referenced by jobs.company_id and D1 ENFORCES foreign keys, so a plain
+-- DROP fails ("FOREIGN KEY constraint failed"). `PRAGMA foreign_keys=OFF` is a no-op
+-- inside D1's migration transaction; the correct tool is `defer_foreign_keys`, which
+-- defers the FK check to COMMIT — and since ids are preserved, it holds.
+
+PRAGMA defer_foreign_keys = true;
 
 CREATE TABLE companies_new (
   id            INTEGER PRIMARY KEY,
