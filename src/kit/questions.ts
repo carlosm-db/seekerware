@@ -1,8 +1,10 @@
 // Application-form question detection + answer matching (step 8, ratified L1
 // design). Greenhouse exposes questions via public API; Lever via the public
-// apply page HTML (the one approved scraping exception); Ashby has no public
-// form API. EEOC/demographic questions are flagged and NEVER auto-answered
-// (domain rule 1). Pure parts (normalize/eeoc/match) are unit-tested.
+// apply page HTML; Ashby via its public job-board GraphQL (op ApiJobPosting,
+// unauthenticated — verified live 2026-07-20). SuccessFactors and Workday put
+// the application form behind a candidate login, so they are not detectable.
+// EEOC/demographic questions are flagged and NEVER auto-answered (domain rule
+// 1). Pure parts (normalize/eeoc/match/ashbyLabels) are unit-tested.
 
 import type { Ats } from '../types';
 
@@ -13,7 +15,7 @@ export interface DetectedQuestions {
   questions: string[];
   /** EEOC/demographic questions — listed, never matched or answered. */
   eeoc: string[];
-  /** false when the ATS form is not publicly readable (Ashby). */
+  /** false when the ATS form is behind a candidate login (SuccessFactors, Workday). */
   detectable: boolean;
 }
 
@@ -120,11 +122,77 @@ async function leverQuestions(token: string, extId: string, doFetch: Fetcher): P
   };
 }
 
-/** Detects the job's form questions per ATS; Ashby is not publicly readable. */
+// Ashby's public job-board SPA reads its form from this unauthenticated GraphQL op
+// (introspection is disabled, but the op resolves without a token — verified live
+// 2026-07-20). `field` is a JSON scalar carrying the field definition. It is
+// undocumented: the caller isolates this in try/catch, so a schema change degrades
+// to detectable:false and never breaks the kit.
+interface AshbyFormField {
+  path?: string;
+  title?: string;
+  humanReadablePath?: string;
+  type?: string;
+  isDeactivated?: boolean;
+}
+export interface AshbyFormSection {
+  fieldEntries?: Array<{ field?: AshbyFormField }>;
+}
+interface AshbyFormResponse {
+  data?: { jobPosting?: { applicationForm?: { sections?: AshbyFormSection[] } } };
+}
+
+const ASHBY_FORM_QUERY =
+  'query ApiJobPosting($organizationHostedJobsPageName: String!, $jobPostingId: String!)' +
+  ' { jobPosting(organizationHostedJobsPageName: $organizationHostedJobsPageName, jobPostingId: $jobPostingId)' +
+  ' { applicationForm { sections { fieldEntries { field } } } } }';
+
+/**
+ * Pure: extracts custom-question labels from Ashby form sections, in order.
+ * System autofill fields (`_systemfield_name/email/resume/…`) and deactivated
+ * fields are dropped — only real screening questions remain. Unit-tested.
+ */
+export function ashbyLabels(sections: AshbyFormSection[]): string[] {
+  const labels: string[] = [];
+  for (const s of sections) {
+    for (const fe of s.fieldEntries ?? []) {
+      const f = fe.field;
+      if (!f || f.isDeactivated) continue;
+      if (f.path?.startsWith('_systemfield_')) continue;
+      const label = (f.title || f.humanReadablePath || '').trim();
+      if (label && label.length < 300) labels.push(label);
+    }
+  }
+  return [...new Set(labels)];
+}
+
+async function ashbyQuestions(board: string, jobPostingId: string, doFetch: Fetcher): Promise<DetectedQuestions> {
+  const res = await doFetch('https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiJobPosting', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      operationName: 'ApiJobPosting',
+      variables: { organizationHostedJobsPageName: board, jobPostingId },
+      query: ASHBY_FORM_QUERY,
+    }),
+  });
+  if (!res.ok) throw new Error(`ashby form: HTTP ${res.status}`);
+  const body = (await res.json()) as AshbyFormResponse;
+  const sections = body.data?.jobPosting?.applicationForm?.sections;
+  if (!sections) throw new Error('ashby form: applicationForm missing (schema changed?)');
+  const labels = ashbyLabels(sections);
+  return {
+    questions: labels.filter((q) => !isEeocQuestion(q)),
+    eeoc: labels.filter(isEeocQuestion),
+    detectable: true,
+  };
+}
+
+/** Detects the job's form questions per ATS; SuccessFactors/Workday are login-gated. */
 export async function detectQuestions(
   ats: Ats, token: string, extId: string, doFetch: Fetcher = fetch,
 ): Promise<DetectedQuestions> {
   if (ats === 'greenhouse') return greenhouseQuestions(token, extId, doFetch);
   if (ats === 'lever') return leverQuestions(token, extId, doFetch);
+  if (ats === 'ashby') return ashbyQuestions(token, extId, doFetch);
   return { questions: [], eeoc: [], detectable: false };
 }

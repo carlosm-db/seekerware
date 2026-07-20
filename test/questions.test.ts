@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { isEeocQuestion, matchAnswers, normalizeQuestion, type AnswerRow } from '../src/kit/questions';
+import {
+  ashbyLabels, isEeocQuestion, matchAnswers, normalizeQuestion,
+  type AnswerRow, type AshbyFormSection,
+} from '../src/kit/questions';
 
 describe('normalizeQuestion', () => {
   it('lowercases, strips accents/punctuation, collapses spaces', () => {
@@ -18,6 +21,40 @@ describe('isEeocQuestion (never auto-answered)', () => {
   it('does not flag regular questions', () => {
     expect(isEeocQuestion('Years of SQL experience?')).toBe(false);
     expect(isEeocQuestion('Are you authorized to work in Canada?')).toBe(false);
+  });
+});
+
+describe('ashbyLabels (Ashby form → real screening questions)', () => {
+  // Mirrors the live KOHO payload verified 2026-07-20.
+  const sections: AshbyFormSection[] = [{
+    fieldEntries: [
+      { field: { path: '_systemfield_name', title: 'Name', type: 'String' } },
+      { field: { path: '_systemfield_email', title: 'Email', type: 'Email' } },
+      { field: { path: '_systemfield_resume', title: 'Resume', type: 'File' } },
+      { field: { path: 'e28996', title: 'Why do you want to work at KOHO?', type: 'LongText' } },
+      { field: { path: '8e56f9', title: 'Are you legally eligible to work in Canada?', type: 'Boolean' } },
+      { field: { path: 'old', title: 'Deprecated question', type: 'String', isDeactivated: true } },
+      { field: { path: 'dup', title: 'Why do you want to work at KOHO?', type: 'LongText' } },
+    ],
+  }];
+
+  it('keeps custom questions in order; drops system autofill, deactivated, and dups', () => {
+    expect(ashbyLabels(sections)).toEqual([
+      'Why do you want to work at KOHO?',
+      'Are you legally eligible to work in Canada?',
+    ]);
+  });
+
+  it('falls back to humanReadablePath when title is blank', () => {
+    const s: AshbyFormSection[] = [{ fieldEntries: [
+      { field: { path: 'p', title: '', humanReadablePath: 'What province are you in?', type: 'ValueSelect' } },
+    ] }];
+    expect(ashbyLabels(s)).toEqual(['What province are you in?']);
+  });
+
+  it('tolerates empty/missing sections', () => {
+    expect(ashbyLabels([])).toEqual([]);
+    expect(ashbyLabels([{}])).toEqual([]);
   });
 });
 

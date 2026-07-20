@@ -328,6 +328,10 @@ export function consoleApp(): App {
     const kitSuggestions = (() => { try { return JSON.parse(String(kit?.answer_suggestions ?? '[]')) as Array<{ question: string; suggestion: string }>; } catch { return []; } })();
     const suggBy = new Map(kitSuggestions.map((s) => [s.question, s.suggestion]));
     const hasKit = kit?.updated_at != null;
+    // Only these ATSs expose the application form publicly; SuccessFactors/Workday
+    // hide it behind a candidate login, so a kit there has 0 detected questions by
+    // design (not a failure) — the card says so instead of a bare "0 matched".
+    const formDetectable = ['greenhouse', 'lever', 'ashby'].includes(String(j.ats));
     const currentStage = kit?.stage ?? null;
 
     return page(c, String(j.title), (
@@ -376,7 +380,11 @@ export function consoleApp(): App {
           </div>
           {hasKit ? (
             <div class="mt-1">
-              <div class="muted">{kitAnswers.filter((a) => !a.red).length} matched · {kitRed.length} red · {kitEeoc.length} EEOC</div>
+              {formDetectable ? (
+                <div class="muted">{kitAnswers.filter((a) => !a.red).length} matched · {kitRed.length} red · {kitEeoc.length} EEOC</div>
+              ) : (
+                <div class="muted">{String(j.ats)} hides its form behind the apply flow — questions can't be auto-detected. Open the form and use your <a href="/qa">Q&amp;A</a> answers + the CV below.</div>
+              )}
               {kitAnswers.filter((a) => !a.red).map((a) => (
                 <div class="bullet">
                   <div class="muted">{a.question}</div>
