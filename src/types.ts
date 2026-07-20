@@ -37,7 +37,9 @@ export interface Env {
   TELEGRAM_CHAT_ID?: string;
   GEMINI_API_KEY?: string;
   /** Full JSON of the GCP service account (step 6). */
-  GOOGLE_SA_KEY?: string;
+  GOOGLE_OAUTH_CLIENT_ID?: string;
+  GOOGLE_OAUTH_CLIENT_SECRET?: string;
+  GOOGLE_OAUTH_REFRESH_TOKEN?: string;
   DRIVE_FOLDER_ID?: string;
   CV_TEMPLATE_DOC_ID?: string;
   /** Secret path segment of the Telegram webhook (step 8 two-way bot). */

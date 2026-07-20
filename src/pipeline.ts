@@ -41,7 +41,7 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
 
     // CV factory: builds ONE pending item per run (oldest first). status also
     // accepts 'new' so the console "Generate REAL CV" action can queue any job.
-    if (env.GOOGLE_SA_KEY) {
+    if (env.GOOGLE_OAUTH_REFRESH_TOKEN) {
       const pending = await env.DB.prepare(
         `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, c.name company
          FROM jobs j JOIN companies c ON c.id = j.company_id
