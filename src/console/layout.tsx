@@ -63,7 +63,8 @@ button.chipx:hover { color:var(--bad) }
 form.inline { display:inline }
 button, input[type=submit] { cursor:pointer; border:1px solid var(--line);
   background:var(--card); color:var(--fg); border-radius:8px; padding:10px 14px; font-size:15px;
-  min-height:44px }
+  min-height:44px; display:inline-flex; align-items:center; justify-content:center;
+  font-family:inherit; line-height:1; box-sizing:border-box; vertical-align:middle }
 button.primary { background:var(--accent); color:#fff; border-color:var(--accent) }
 button.secondary { background:var(--card); color:var(--accent); border-color:var(--accent) }
 button.danger { background:var(--bad); color:#fff; border-color:var(--bad) }
@@ -71,9 +72,9 @@ button.danger { background:var(--bad); color:#fff; border-color:var(--bad) }
 /* ---- control language (2026-07-18): actions LOOK like buttons; links navigate.
    a.btnlike / details.btnlike>summary render with the quiet-button skin so
    every action has the same affordance without JS. .sec = secondary skin. ---- */
-a.btnlike, details.btnlike > summary { display:inline-flex; align-items:center; gap:5px;
+a.btnlike, details.btnlike > summary { display:inline-flex; align-items:center; justify-content:center; gap:5px;
   border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:8px;
-  padding:10px 14px; font-size:15px; min-height:44px; cursor:pointer }
+  padding:10px 14px; font-size:15px; min-height:44px; cursor:pointer; box-sizing:border-box; vertical-align:middle }
 a.btnlike:hover { text-decoration:none; border-color:var(--accent) }
 details.btnlike { display:inline-block }
 details.btnlike[open] > summary { border-color:var(--accent) }
