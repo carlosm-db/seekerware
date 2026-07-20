@@ -2046,6 +2046,10 @@ export function consoleApp(): App {
     const batchesNeeded = Math.max(1, Math.ceil(activeCompanies / 25));
     const lastRun = runs[0]?.started_at ? fmt(String(runs[0].started_at)) : '—';
     const next = nextRunAfter(new Date(), sched, batchesNeeded);
+    // On-demand burst counter (batches still to run), set by "Iniciar ráfaga".
+    const forceBurst = Math.max(0, Number(
+      (await c.env.DB.prepare("SELECT value FROM config WHERE key='force_burst'").first<{ value: string }>())?.value ?? '0',
+    ) || 0);
 
     return page(c, 'Health', (
       <>
@@ -2073,6 +2077,20 @@ export function consoleApp(): App {
             last run {lastRun} · next {next ? fmt(next.toISOString()) : '—'} ·
             {' '}covers {activeCompanies} companies in {batchesNeeded} batch(es)/burst
           </span>
+        </form>
+        <form method="post" action="/health/run" class="card actions">
+          <strong>Ráfaga manual</strong>
+          {forceBurst > 0 ? (
+            <>
+              <span>⏳ Ráfaga en curso — {forceBurst} lote(s) restante(s) · siguiente en ≤{sched.batch_every_min} min</span>
+              <button type="submit" formAction="/health/run-cancel">Cancelar</button>
+            </>
+          ) : (
+            <>
+              <button type="submit" class="primary">▶ Iniciar ráfaga</button>
+              <span class="muted">corre TODAS las empresas ahora ({batchesNeeded} lote(s) · ~{batchesNeeded * sched.batch_every_min} min · se completa sola)</span>
+            </>
+          )}
         </form>
         <div class="table-wrap"><table>
           <tr><th>run</th><th>start</th><th>status</th><th class="hide-sm">ms</th><th>companies</th><th class="hide-sm">seen</th><th class="hide-sm">new</th><th>surv.</th><th>notif.</th><th class="hide-sm">closed</th><th class="hide-sm">subreq</th><th>errors</th></tr>
@@ -2113,6 +2131,29 @@ export function consoleApp(): App {
     return c.redirect(`/health?m=${encodeURIComponent(
       `schedule saved: bursts at ${sched.burst_hours.map((h) => h + ':00').join(', ')} every ${sched.batch_every_min}m (${sched.timezone})`,
     )}`);
+  });
+
+  // "Iniciar ráfaga": run batch 1 NOW (one page, foreground) + queue the rest via force_burst;
+  // the cron finishes the rotation over its ticks (one page each, respecting the subrequest cap).
+  app.post('/health/run', async (c) => {
+    const [countRow, pageRow] = await Promise.all([
+      c.env.DB.prepare('SELECT COUNT(*) n FROM companies WHERE active = 1').first<{ n: number }>(),
+      c.env.DB.prepare("SELECT value FROM config WHERE key='poll_page_size'").first<{ value: string }>(),
+    ]);
+    const pageSize = Math.max(1, Number(pageRow?.value ?? '25') || 25);
+    const batchesNeeded = Math.max(1, Math.ceil((countRow?.n ?? 0) / pageSize));
+    const { runPipeline } = await import('../pipeline');
+    const stats = await runPipeline(c.env, 'manual'); // batch 1 now (foreground, one page)
+    await c.env.DB.prepare("INSERT INTO config (key, value) VALUES ('force_burst', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind(String(Math.max(0, batchesNeeded - 1))).run();
+    return c.redirect(`/health?m=${encodeURIComponent(
+      `ráfaga iniciada: lote 1/${batchesNeeded} · ${stats.companiesOk} empresas · ${stats.jobsNew} nuevos · ${stats.notified} notificados`,
+    )}`);
+  });
+
+  app.post('/health/run-cancel', async (c) => {
+    await c.env.DB.prepare("DELETE FROM config WHERE key='force_burst'").run();
+    return c.redirect(`/health?m=${encodeURIComponent('ráfaga cancelada')}`);
   });
 
   return app;

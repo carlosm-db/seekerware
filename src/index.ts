@@ -141,22 +141,31 @@ export default {
     } catch { /* fall back to defaults */ }
     const sched = normalizeSchedule(raw);
 
-    const [countRow, pageRow] = await Promise.all([
+    const [countRow, pageRow, forceRow] = await Promise.all([
       env.DB.prepare('SELECT COUNT(*) n FROM companies WHERE active = 1').first<{ n: number }>(),
       env.DB.prepare("SELECT value FROM config WHERE key='poll_page_size'").first<{ value: string }>(),
+      env.DB.prepare("SELECT value FROM config WHERE key='force_burst'").first<{ value: string }>(),
     ]);
     const pageSize = Math.max(1, Number(pageRow?.value ?? '25') || 25);
     const batchesNeeded = Math.max(1, Math.ceil((countRow?.n ?? 0) / pageSize));
+    // On-demand burst requested from /health: a counter of batches still to run. Adds review
+    // ticks OUTSIDE the scheduled windows until it hits 0 (bounded); auto-bursts are unaffected.
+    const forceBurst = Math.max(0, Number(forceRow?.value ?? '0') || 0);
 
     // Every tick: drain the CV queue (reads jobs WHERE cv_pending=1; no-op if none). Decoupled
     // from the company review — never polls a company — so queued CVs (e.g. from Telegram
     // Prepare) build within ~15 min without waking a burst.
     ctx.waitUntil(buildPendingCvs(env).catch((e) => console.log(`cv queue: ${e instanceof Error ? e.message : 'err'}`)));
 
-    // Company review: burst windows only (owner-editable schedule; ~2×/day).
-    if (!shouldRunAt(new Date(), sched, batchesNeeded)) {
+    // Company review: scheduled burst windows, OR an on-demand burst requested from /health.
+    if (!shouldRunAt(new Date(), sched, batchesNeeded) && forceBurst === 0) {
       console.log(`cron tick: company review skipped (outside bursts [${sched.burst_hours.join(',')}] ${sched.timezone}); CV queue checked`);
       return;
+    }
+    // Consume one forced batch (bounded: decrements to 0 → stops on its own).
+    if (forceBurst > 0) {
+      await env.DB.prepare("INSERT INTO config (key, value) VALUES ('force_burst', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .bind(String(forceBurst - 1)).run();
     }
     ctx.waitUntil(
       runPipeline(env, 'cron').then((stats) => {
