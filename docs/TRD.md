@@ -72,9 +72,9 @@ code.
 2. Categories (initial weights, tunable): `domain` 40, `role_type` 25,
    `tool_overlap` 20, `level_fit` 15. Each category normalizes to 0-1 and is
    weighted; the sum is the score 0-100.
-3. Per-track gates, AFTER the score: type `hard` (fails -> Skip in that track)
-   or `penalty` (subtracts points). Work auth and location are gates; a track's
-   own signals (e.g. "co-op") can be a requirement.
+3. Per-track gates, AFTER the score: always `hard` (require/reject; a fail ->
+   Skip in that track — never subtracts points). Work auth and location are
+   gates; a track's own signals (e.g. "co-op") can be a requirement.
 4. Verdict by thresholds (initial): score >= 75 -> `Apply`; >= 55 ->
    `Stretch-worth-it`; otherwise -> `Skip`. Evaluated per track; the best track
    that passes wins.
@@ -85,10 +85,10 @@ code.
 The engine is a pure function `scoreJob(job, config)` -> testable with vitest
 without network or D1. It returns a complete `ScoreResult` (matches per
 category, gates per track, verdicts, near-miss) that the pipeline PERSISTS in
-`jobs.score_breakdown` — the console's transparency and calibration **replay**
-(a simulated re-score of the last N jobs against a draft config, in batches of
-50 per request to respect the CPU limit; it never writes to `jobs`) both depend
-on that JSON and on `jobs.description_text`.
+`jobs.score_breakdown` — the console's transparency and why-not explainers both
+depend on that JSON and on `jobs.description_text`. Calibration edits apply on
+save and stamp a config `version` into new scores; existing jobs are not
+re-scored (Option 1, 2026-07-19).
 
 ## 4. AI layer — Gemini (survivors only)
 
@@ -112,7 +112,7 @@ output_key}`, sequential runner, wrapper with:
 |-------|-------|------|------|
 | `enricher` | 3.1-flash-lite | 0.4 | Improves why_it_fits / gap_to_address / positioning_lead of the survivor |
 | `cv_selector` | 3.1-flash-lite | 0.3 | Selects block IDs per section + order (JSON, enum of IDs); enum built ONLY from `approved` blocks (drafts allowed in SAMPLE mode); selection guided by `tags` and the skill category `skcat` |
-| `cv_verifier` | 2.5-flash | 0 | Verifies the rendered Doc against job and bank; "Suggested tweaks" appendix (suggestions, never edits) |
+| `cv_verifier` | 2.5-flash | 0 | Verifies the rendered Doc against job and the Blocks Bank; "Suggested tweaks" appendix (suggestions, never edits) |
 
 ## 5. Store, freshness, and notification
 
@@ -152,7 +152,7 @@ survivor Apply
        Unrecognized/unfilled tokens resolve to '' so no raw {{...}} leaks.
        Role headers, projects, education and Languages are STATIC in the
        template. See the placeholder convention below.
-  -> cv_verifier (temp 0): consistency against bank and job;
+  -> cv_verifier (temp 0): consistency against the Blocks Bank and job;
      writes the "Suggested tweaks" appendix at the end of the Doc
   -> cv_doc_url to the store and to the Telegram message
 ```
@@ -188,7 +188,7 @@ archived in the `archive/` subfolder of the shared folder — immutable BY
 CONVENTION: the system only creates, never edits or deletes there. Two
 snapshots: `generated` (at render time) and `submitted` (when marked applied —
 the exact CV sent, after the owner's edits; the diff between the two feeds the
-blocks bank). Name:
+Blocks Bank). Name:
 `cv/{url_hash}/{yyyymmdd-hhmm}-{generated|submitted}.pdf`; the Drive file id
 is stored in `jobs.cv_pdf_key` / `applications.cv_pdf_key`. An archiving
 failure = `r2_fail` event (glossary term kept); it never blocks the
@@ -263,11 +263,9 @@ Served by the same worker's `fetch()` handler. Full functional architecture
   `/api/*` additionally accepts the Bearer `API_TOKEN` (scripts). CSRF:
   SameSite=Lax + `Origin` verification on mutating methods. Brute force:
   counter in D1 (10/hour) + fixed sleep. Rotation = rotate the two secrets.
-- **Replay** (Calibration, step 7): batches of 50 jobs per request chained by
-  an htmx cursor; D1 does not count as a subrequest; zero external calls.
 - **Telegram webhook** (step 8): `POST /telegram/<TELEGRAM_WEBHOOK_TOKEN>`
-  (secret route token, distinct from login) for buttons (View kit / Mark
-  applied) and conversational replies from the `answers` bank.
+  (secret route token, distinct from login) for buttons (View kit / I applied)
+  and conversational replies handled against Q&A (`profile_answers`).
 
 ## 9. Secrets and configuration
 

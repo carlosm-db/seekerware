@@ -11,7 +11,7 @@ Terminology in [`CONVENTIONS.md`](CONVENTIONS.md).
 - One single database. Core tables: `companies`, `jobs`, `anchors`, `blocks`,
   `config`. Observability (§9): `runs`, `events`, `notifications`.
   Applications (§10): `applications`, `job_events`. Console: `config_history`
-  (§11). Future: `cvs` (step 6), `answers` (step 8) — §12.
+  (§11). Kit & CV (§12): `cvs`, `application_kits`, `profile_answers`.
 - Every schema change is a versioned migration (`wrangler d1 migrations`);
   never manual DDL against production.
 - Access ONLY via `src/store.ts`: prepared statements with bindings;
@@ -79,8 +79,8 @@ columns are written by the system; the only user edit (via the dashboard):
 | cv_doc_url | TEXT | Generated Doc (Apply only); cache of the latest — history in `cvs` (step 6) |
 | cv_pending | INTEGER 0/1 | 1 = the CV was left pending (Gemini down); retried on the next run |
 | why_it_fits / positioning_lead | TEXT | Final version sent (rule-based or enriched) |
-| description_text | TEXT | Plain text of the description (post stripHtml) — enables replay, why-not, prep, radar. Written ONCE on ingest |
-| score_breakdown | TEXT JSON | Full ScoreResult from the engine (matches per category, gates per track, verdicts) — transparency and replay |
+| description_text | TEXT | Plain text of the description (post stripHtml) — enables why-not, prep, radar. Written ONCE on ingest |
+| score_breakdown | TEXT JSON | Full ScoreResult from the engine (matches per category, gates per track, verdicts) — transparency and why-not |
 | title_norm | TEXT | Normalized title (lowercase, without parentheses or seniority tokens) — similar-jobs radar |
 | cv_pdf_key | TEXT | Latest `generated` snapshot in R2 (step 6) |
 
@@ -141,12 +141,12 @@ ALTER TABLE jobs ADD COLUMN cv_pdf_key TEXT;
 - Verdicts are computed when the job is discovered; config changes apply to
   future jobs (manual re-score: future evolution).
 
-## 5. `anchors` and `blocks` tables — the blocks bank
+## 5. `anchors` and `blocks` tables — the Blocks Bank
 
-The bank is the core asset of the CV layer: the owner's CV content, managed in
-his own terms (roles with bullets, skills by category, summary lines — console
-/blocks). The select-only guarantee is only as good as the completeness and
-accuracy of this bank. Migration 0007 (2026-07-18) dropped the unused metadata
+The Blocks Bank is the core asset of the CV layer: the owner's CV content,
+managed in his own terms (roles with bullets, skills by category, summary lines
+— console /blocks_bank). The select-only guarantee is only as good as the
+completeness and accuracy of this Blocks Bank. Migration 0007 (2026-07-18) dropped the unused metadata
 columns (`fact_key`, `evidence`, `source`, `suggested`, `angle` on blocks;
 `titles`, `dates` on anchors): nothing at runtime read them and they made the
 editor a puzzle. The fact/evidence registry lives in the owner's private master
@@ -240,7 +240,7 @@ the keys and JSON sub-formats **is decided in build 2** with real jobs.
   (SAMPLE builds may use drafts — that is the owner's light-review loop).
 - Rendering in ES requires `es_status = 'approved'` on all selected blocks
   (parity report before rendering colombia_perm).
-- `retired` blocks/roles are kept (bank audit trail); the console also offers
+- `retired` blocks/roles are kept (Blocks Bank audit trail); the console also offers
   a confirm-guarded permanent delete for content the owner considers junk.
 - The run's writes in `db.batch()` (per-batch atomicity).
 
@@ -414,7 +414,7 @@ CREATE TABLE config_history (
   key            TEXT NOT NULL,
   old_value      TEXT,
   new_value      TEXT NOT NULL,
-  replay_summary TEXT   -- JSON of the replay summary at save time (if any)
+  replay_summary TEXT   -- vestigial: replay removed 2026-07-19; no longer written
 );
 ```
 
@@ -426,8 +426,8 @@ Written on every save from the console; enables "revert to this version".
   `pdf_key`, `blocks_used` JSON, `verifier_notes`, `rationale`, `created_at`,
   `superseded_by`, `pending`. Replaces `jobs.cv_doc_url` as history (which
   remains the cache of the latest).
-- **`answers`** (step 8): answer bank for forms — governance identical to
-  `blocks` (owner authorship, draft/approved, EN/ES with parity); the system
+- **`profile_answers`** (step 8): the Q&A bank for forms — governance identical
+  to `blocks` (owner authorship, draft/approved, EN/ES with parity); the system
   selects, NEVER writes.
 - **Retention** (executed by the day's first run, `prune` event):
   `runs` 400 days · `events` 90 days · `notifications` 180 days ·

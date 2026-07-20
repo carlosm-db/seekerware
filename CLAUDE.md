@@ -87,11 +87,11 @@ repo.
 ## 7. Domain rules (DO NOT violate)
 
 1. **The AI never writes CV content or form answers.** It only selects IDs of
-   approved blocks (and, in the kit, answers from the approved `answers` bank)
+   approved blocks (and, in the kit, answers from the approved Q&A bank)
    via `responseSchema` with an enum of IDs. The Doc render is deterministic
    code. New phrases or corrections = suggestions the owner approves by editing
-   the bank; never auto-applied. EEOC/demographic questions are NEVER
-   auto-answered.
+   the Blocks Bank / Q&A; never auto-applied. EEOC/demographic questions are
+   NEVER auto-answered.
 2. **Verdicts belong to the rules, not the AI.** The agents only enrich
    survivors. The gates (work auth, per-track location, freshness) are not
    overridable by the model.
@@ -146,10 +146,10 @@ in the GitHub web UI, not via the API.
 |------|----------|--------|
 | 0 | Documentation | Done 2026-07-07; rewritten 2026-07-09; enriched 2026-07-17 (console + kit) |
 | 1 | TS/wrangler scaffold + D1 + Greenhouse connector + dry-run + CI | Done 2026-07-17 |
-| 2 | Scoring + schema deltas (description_text, score_breakdown, title_norm) + ★ seeds + calibration | Done 2026-07-17 (initial v1.5 calibration with the owner; continuous tuning in operation and with Replay in step 7) |
+| 2 | Scoring + schema deltas (description_text, score_breakdown, title_norm) + ★ seeds + calibration | Done 2026-07-17 (initial v1.5 calibration with the owner; continuous tuning in operation; calibration edits apply live since 2026-07-19 — draft/Replay/Re-score removed, penalty gates removed) |
 | 3 | Pipeline + cron + Telegram + instrumentation (runs/events/notifications) | Done 2026-07-17 (cron */30 active, full seeding without notifying, Telegram channel tested; first organic notification pending a new job appearing) |
-| 4 | Console v1 (cookie login, Today, Jobs, Companies, Calibration, Health) | Done 2026-07-17 |
+| 4 | Console v1 (cookie login, Overview, Jobs, Companies, Calibration, Health) | Done 2026-07-17 |
 | 5 | Lever + Ashby connectors | Done 2026-07-17 (25 active companies; first organic notifications the same day) |
-| 6 | Blocks bank + CV factory + PDF + Drive archive | Code done and deployed 2026-07-17 (bank seeded 9 anchors/69 blocks; Gemini + Google auth tested live); BLOCKED at runtime: the service account cannot access the template (share the Doc with the SA) |
-| 7 | Console v2 (Tracker, Replay, Bank, CVs, Week) | Done 2026-07-17 (core: Tracker, Replay, Week, Monday digest, similar-jobs radar; /blocks and /cvs in empty state until step 6) |
-| 8 | Application kit + bidirectional bot + answers bank | Done 2026-07-19 (/applications, /tg webhook with buttons + red-question chat flow, EEOC never auto-answered; application_kit/profile_answers tables now in the consolidated 0001). Owner setup done 2026-07-19: TELEGRAM_WEBHOOK_TOKEN secret set + setWebhook registered + two-way bot tested live. |
+| 6 | Blocks Bank + CV factory + PDF + Drive archive | Code done and deployed 2026-07-17 (Blocks Bank seeded 9 anchors/69 blocks; Gemini + Google auth tested live); BLOCKED at runtime: the service account cannot access the template (share the Doc with the SA) |
+| 7 | Console v2 (Tracker, Blocks Bank, CVs, Week) | Done 2026-07-17 (core: Tracker, Monday digest, similar-jobs radar; /blocks_bank and /cvs in empty state until step 6; Replay later removed 2026-07-19, Week folded into Overview) |
+| 8 | Application kit + bidirectional bot + Q&A bank | Done 2026-07-19 (kit queue + Q&A under /qa, /tg webhook with buttons + red-question chat flow, EEOC never auto-answered; application_kits/profile_answers tables now in the consolidated 0001). Owner setup done 2026-07-19: TELEGRAM_WEBHOOK_TOKEN secret set + setWebhook registered + two-way bot tested live. |

@@ -1,4 +1,4 @@
-// Console v1 (UI.md §2): Today (triage), Jobs, Companies, Calibration, Health.
+// Console v1 (UI.md §2): Overview (triage), Jobs, Companies, Calibration, Health.
 // Pure server-rendered: every mutation is a real <form>. htmx arrives in v2.
 
 import { Hono, type Context } from 'hono';
@@ -1606,7 +1606,7 @@ export function consoleApp(): App {
           </div>
         ) : null}
         <div class="card actions">
-          <span class="muted">To generate a CV, open the job (Today or Jobs) and tap <strong>Generate CV</strong> there.</span>
+          <span class="muted">To generate a CV, open the job (Overview or Jobs) and tap <strong>Generate CV</strong> there.</span>
           <a href="/blocks_bank/template-check">Check template ↗</a>
         </div>
         {cvs.length === 0 ? <div class="card"><p>No CVs generated yet.</p></div> : (

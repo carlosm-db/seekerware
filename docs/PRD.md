@@ -16,8 +16,8 @@ opportunity; and tailoring the CV by hand for each job is slow and error-prone.
 
 | Actor | Sees | Does | Does NOT do |
 |-------|------|------|-------------|
-| **User** (owner) | Telegram messages (new fits, with buttons), the console (triage/tracker/calibration/bank/health), CV Docs in Drive | Configures companies and profile, approves blocks and answers, does triage, gives the go-ahead, **applies manually (the submit click is ALWAYS theirs)** | Nothing automatic toward companies |
-| **System** | Public ATS feeds, the store, the blocks bank, the answers bank | Polls, normalizes, scores, dedups, verifies freshness and liveness, notifies, assembles the suggested CV, **prepares the application kit**, self-monitors | Never submits applications, never contacts companies, never writes CV content or form answers |
+| **User** (owner) | Telegram messages (new fits, with buttons), the console (triage/tracker/calibration/Blocks Bank/Q&A/health), CV Docs in Drive | Configures companies and profile, approves blocks and answers, does triage, gives the go-ahead, **applies manually (the submit click is ALWAYS theirs)** | Nothing automatic toward companies |
+| **System** | Public ATS feeds, the store, the Blocks Bank, the Q&A bank | Polls, normalizes, scores, dedups, verifies freshness and liveness, notifies, assembles the suggested CV, **prepares the application kit**, self-monitors | Never submits applications, never contacts companies, never writes CV content or form answers |
 | **Companies / ATS** | Anonymous read traffic to their public APIs | Publish jobs | Receive no user data |
 
 Functional flow: the system discovers -> scores -> filters -> notifies with
@@ -62,7 +62,7 @@ freshness_ok       true | unknown (false is never notified)
 - **RF4 — Dedup**: a job is notified at most once (key: hash of the canonical
   URL).
 - **RF5 — Rule-based score**: 0-100 weighting domain > role type > tool overlap
-  > level; `hard` or `penalty` gates per track; configurable verdict
+  > level; `hard` gates (require/reject) per track; configurable verdict
   thresholds.
 - **RF6 — AI enrichment (survivors)**: improves `why_it_fits` /
   `positioning_lead` and selects blocks. Never changes verdicts or gates.
@@ -78,11 +78,11 @@ freshness_ok       true | unknown (false is never notified)
   authentication; nothing of the system is exposed publicly.
 - **RF11 — Application kit** (step 8): for each Apply with the owner's go-ahead
   (button in Telegram or console), the system prepares EVERYTHING — CV as PDF
-  (clean copy), standard answers from the `answers` bank (blocks-style
+  (clean copy), standard answers from Q&A (`profile_answers`; blocks-style
   governance: owner authorship, selection-only), detection of form questions
   (Greenhouse `?questions=true`; Lever public HTML), and any questions without
   an approved answer are asked to THE OWNER over the Telegram chat (their
-  answers can be saved to the bank). The final submit is human, always.
+  answers can be saved to Q&A). The final submit is human, always.
 - **RF12 — Self-monitoring**: every run is recorded (funnel, quotas, errors);
   the console shows health, free-tier meters and ROI per company; MAINTENANCE
   alerts over Telegram and a weekly funnel digest (Mondays).
@@ -125,5 +125,5 @@ freshness_ok       true | unknown (false is never notified)
   official API — never logs into portals — and normalizes those emails as
   pipeline jobs.
 - Bot commands (`/pending`, `/cv <id>` on-demand).
-- Manual re-score of existing jobs after config changes (replay already gives
-  the preview; this would materialize it).
+- Manual re-score of existing jobs after config changes (future evolution;
+  today edits apply only to new scores).

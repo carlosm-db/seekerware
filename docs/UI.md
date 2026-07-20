@@ -39,10 +39,10 @@ Rules:
   with a `⚠️ MAINTENANCE` prefix; on Mondays the weekly funnel **digest**
   arrives.
 - **Kit conversational flow** (step 8, via webhook): on tapping "View kit", if
-  the form has questions without an approved answer in the `answers` bank, the
-  bot asks them ONE at a time in the chat; the owner's answers are included in
-  the kit and (with their OK) saved to the bank. The bot transports; it NEVER
-  writes.
+  the form has questions without an approved answer in **Q&A**
+  (`profile_answers`), the bot asks them ONE at a time in the chat; the owner's
+  answers are included in the kit and (with their OK) saved as draft Q&A
+  answers. The bot transports; it NEVER writes.
 
 ## 2. The console — 10 pages
 
@@ -54,16 +54,17 @@ triage; every mutation works without JS (real forms, enhanced with htmx).
 | Route | Page | Purpose | v |
 |-------|------|---------|---|
 | `/login` | Login | the only route without auth | 1 |
-| `/` | **Today** | morning page: status strip (pending triage, applied-this-week count, health) + triage of survivors (Prepare / I applied ✓ / Dismiss / Snooze 3d / CV) two-up on desktop, paginated | 1 |
-| `/jobs` · `/jobs/:hash` | **Jobs** | everything seen: filters (track/verdict/status/title text) + quick views; detail: score breakdown by category, gates table per track, description, history, similar-jobs radar, **Generate CV** button (SAMPLE while the bank is unapproved, REAL queue once approved) | 1 |
+| `/overview` (`/` redirects here) | **Overview** | morning page: status strip (pending triage, applied-this-week count, health) + this week's funnel + triage of survivors (Prepare / I applied ✓ / Dismiss / Snooze 3d / CV) two-up on desktop, paginated | 1 |
+| `/jobs` · `/jobs/:hash` | **Jobs** | everything seen: filters (track/verdict/status/title text) + quick views; detail: score breakdown by category, gates table per track, description, history, similar-jobs radar, **Generate CV** button (SAMPLE while the Blocks Bank is unapproved, REAL queue once approved) | 1 |
 | `/tracker` | **Tracker** | applications kanban: Prepared → Applied → Interview → Offer/Rejected, notes, dates, overdue follow-ups (bounded at the 300 most recent) | 1 |
+| `/contact` | **Contact** | per-track contact profile — `{{phone}}`/`{{location}}` for the CV header, owner-entered (`config['contact_profile']`), never from the repo | 1 |
 | `/companies` | **Companies** | CRUD + health (failure streak, last error) + 90d yield, token probe on create, paginated | 1 |
-| `/config` | **Calibration** | matrix redesign (2026-07-18 v3.3): ONE grid — 5 categories (Location included) × In favor/Against × EN/ES — with the track as a **path** badge on the word (gates stay gates; the matrix is a projection, `src/console/matrix.ts`); live chip search + per-cell "show N more"; ONE add form after the table (EN+ES both required, weight vocabulary +3 strong/+2 medium/+1 light/−2 against/−3 strongly against, optional path); ✕ removes the full pair everywhere; edits accumulate in a DRAFT → **Preview impact** → **Activate** (its own button on the preview screen); history with human `diff_summary` and previewed revert; **Re-score** materializes the active config; raw JSON demoted to an Advanced fold | 1 |
-| `/blocks` · `/blocks/template-check` | **Bank** | v6, the owner's sketch (2026-07-18): roles/projects/skill-groups/summary are **collapsed cards, newest first** — tap = read mode (full-width EN+ES text, nothing else); the single ✏️ per card opens **the WHOLE card as ONE form** — role fields (Title, Company+Code, current-role checkbox + From/To months) plus ALL its bullets as token-labeled boxes (`BNS1R1`…) with per-box Delete and a ＋add-a-bullet that appends pairs client-side; **one Save = one transaction** (`/roles/save`, `/roles/create` with bullets, `/blocks/group-save`); **saving IS the approval** (migration 0010); EN+ES always required; role delete is hard and takes its bullets (confirm); no Type dropdown — ＋Add role / ＋Add project imply the kind; **Check template** diffs the bank against the Doc's `{{…}}` tokens both ways | 2 |
+| `/calibration` | **Calibration** | the matrix (`src/console/matrix.ts`): 5 categories (Location included) × In favor/Against × EN/ES as collapsible groups — Word EN (required) / Word ES (required) / Strength / Path; one add form per group (weight vocabulary +3 strong / +2 medium / +1 light / −2 against / −3 strongly against, optional path); inline ✏️ edit and ✕ remove per row; **edits apply on save** — no draft/Preview/Activate and no Re-score (removed 2026-07-19); each save bumps the config **version** stamped into new scores; gates stay gates, the matrix is a projection | 1 |
+| `/blocks_bank` · `/blocks_bank/template-check` | **Blocks Bank** | v6, the owner's sketch (2026-07-18): roles/projects/skill-groups/summary are **collapsed cards, newest first** — tap = read mode (full-width EN+ES text, nothing else); the single ✏️ per card opens **the WHOLE card as ONE form** — role fields (Title, Company+Code, current-role checkbox + From/To months) plus ALL its bullets as token-labeled boxes (`BNS1R1`…) with per-box Delete and a ＋add-a-bullet that appends pairs client-side; **one Save = one transaction** (`/roles/save`, `/roles/create` with bullets, `/blocks_bank/group-save`); **saving IS the approval** (migration 0010); EN+ES always required; role delete is hard and takes its bullets (confirm); no Type dropdown — ＋Add role / ＋Add project imply the kind; **Check template** diffs the Blocks Bank against the Doc's `{{…}}` tokens both ways | 2 |
+| `/qa` | **Q&A** | approved standard answers (`profile_answers`) for application forms + the kit queue (pending Apply → kit ready: PDF, matched answers, red questions, deep link → applied); blocks-style governance; the bot's draft answers are approved here | 2 |
 | `/cvs` | **CVs** | pure library of generated CVs (Doc links, SAMPLE/real, selection rationale, verifier notes, fill report), paginated; generation happens on the job pages | 2 |
-| `/applications` | **Applications** | kit queue: pending Apply → kit ready (PDF, matched answers, red questions, deep link) → applied; question census | 2 (step 8) |
+| `/intelligence` | **Intelligence** | AI surface: pipeline view (enricher → cv_selector → cv_verifier) + ML tooling | 2 |
 | `/health` | **Health** | **Schedule panel** (run every N hours, window, timezone — no deploy needed) + runs history (paginated), event log, quota meters | 1 |
-| `/week` | **Week** | weekly funnel (seen→survivors→notified→applied — plain counts, no goals/quotas by owner decision), median time-to-apply, stalled WIP | 2 |
 
 Cross-cutting: top nav with badges (triage pending, suggested, health), an
 omnipresent footer "last run X min ago · N companies OK · errors", global
@@ -77,7 +78,7 @@ pace metrics for a high-conscientiousness profile); Monday **digest**.
 
 Writers per page (extends the one-writer-per-column rule): `jobs` system only
 (sole exception: `status -> skipped`); `applications`/`job_events` (actor user)
-/ notes: user; `companies`/`config`/`blocks`/`answers`: user;
+/ notes: user; `companies`/`config`/`blocks`/`profile_answers`: user;
 `runs`/`events`/`notifications`: system.
 
 ## 3. Suggested CV Doc (Drive) + PDF
@@ -112,5 +113,4 @@ without the appendix (TRD §6).
 
 Hono + `hono/jsx` SSR + vendored htmx + vanilla islands + a single CSS file
 with custom properties. Zero extra build. Login via signed cookie (no domain →
-no Access). Assets behind `run_worker_first`. Pagination at 50 on every table;
-replay in batches of 50 (free-tier CPU limit).
+no Access). Assets behind `run_worker_first`. Pagination at 50 on every table.

@@ -16,14 +16,14 @@ in the same commit that introduces the new term.
 | job | normalized job posting `{id, company, title, location, url, description, posted_at, ats, raw}` | posting, opening, listing, vacancy |
 | connector | module that reads an ATS feed and returns normalized jobs | poller, fetcher, scraper |
 | track | search path: `canada_coop`, `colombia_perm`, `contractor_usd` | variant, channel, lane |
-| gate | per-track condition, type `hard` (eliminates) or `penalty` (subtracts points) | hard filter, rule, restriction |
+| gate | per-track hard condition (require / reject); a fail eliminates the track — never subtracts points | hard filter, rule, restriction, penalty |
 | score | 0-100 score from the rules engine | rating, points, grade |
 | verdict | `Apply`, `Stretch-worth-it` or `Skip`; decided by the rules, never the AI | result, decision, classification |
 | survivor | job with an Apply or Stretch-worth-it verdict that passed gates and freshness | finalist, candidate, selected |
 | freshness | publication age <= `FRESHNESS_MAX_DAYS` (3 days) | validity, age |
 | verify-on-notify | re-query of the job against the ATS API immediately before notifying | liveness check, liveness verification |
 | store | the system's persistence in D1 (`jobs` table), accessed only via `src/store.ts` | database, DB, registry, history |
-| block | owner-authored phrasing of a fact in the bank (`blocks` table), anchored to an anchor, in EN+ES always; saving is the approval (2026-07-18) | phrase, snippet, bullet, sentence |
+| block | owner-authored phrasing of a fact in the Blocks Bank (`blocks` table), anchored to an anchor, in EN+ES always; saving is the approval (2026-07-18) | phrase, snippet, bullet, sentence |
 | fact | verifiable professional fact from the canonical record, with a single exact metric; blocks are its phrasings | achievement, claim, assertion, datum |
 | anchor | real role or project a block is anchored to (`anchors` table); neutral — the displayed titles are per-market projections | role_anchor, position, title |
 | angle | projection of a fact for a role type: `data`, `compliance`, `operations`, `leadership` | focus, variant, version |
@@ -31,7 +31,7 @@ in the same commit that introduces the new term.
 | dry-run | a run with no writes to the store and no notifications; via `GET /api/dry-run` or local `wrangler dev` | simulation, test run |
 | pipeline | orchestration poll -> score -> gates -> dedup -> notify | flow, process |
 | worker | the Cloudflare service that runs the pipeline (`scheduled` handler) and the dashboard (`fetch` handler) | function, lambda, script |
-| dashboard | web console served by the worker (config, tracking, blocks bank), behind login | panel, admin, webapp, console |
+| dashboard | web console served by the worker (calibration, tracking, Blocks Bank), behind login | panel, admin, webapp, console |
 | migration | versioned change to the D1 schema, file in `migrations/` | SQL script, schema patch |
 | enricher | AI agent that improves a survivor's texts | analyst, improver |
 | cv_selector | AI agent that selects block IDs per section (JSON with an enum of IDs) | phrase selector |
@@ -41,19 +41,18 @@ in the same commit that introduces the new term.
 | application | the application lifecycle of a job, owned by the user (`applications` table) | submission, candidacy, process |
 | stage | stage of an application: `prepared\|applied\|interview\|offer\|rejected\|dismissed` | phase, state (reserved for jobs.status) |
 | snooze | postpone a triage item until a date (`snoozed_until`) | reminder, defer |
-| replay | simulated re-score of stored jobs against a draft config; NEVER writes to `jobs` | simulation, preview, what-if |
 | event | typed occurrence in the observability log (`events` table) | error log, occurrence, incident |
 | notification | record of a push delivery attempt (`notifications` table) | alert, notice, message |
 | meter | gauge of quota consumed vs the free-tier limit (derived from `runs`) | quota gauge, indicator |
 | digest | weekly funnel summary (Week page + Monday Telegram message) | report, weekly summary |
 | cluster | soft grouping of jobs by `title_norm` + tags (similar-jobs radar) | group, role family |
-| answer | approved standard answer for application forms (`answers` table, blocks-style governance) | canned answer, template, profile_answer |
+| answer | approved standard answer for application forms (`profile_answers` table, blocks-style governance); the console page is Q&A | canned answer, template |
 | kit | per-job view with the CV as PDF, answers and links to apply in minutes; the human ALWAYS submits | package, bundle, auto-apply |
-| matrix | the Calibration grid (2026-07-18): 5 categories × in favor/against × EN/ES; a projection over keywords + gates, never a softening of them | word lists, chip walls |
-| pair | the EN+ES twins of one calibration concept, linked by `Keyword.pair`; ✕ removes both | twins, duo, translation |
-| path | the track a matrix word unlocks (require) or blocks (reject) via its gate membership; badge on the chip | track tag, route, lane badge |
+| matrix | the Calibration page (2026-07-18): 5 categories × in favor/against × EN/ES as collapsible rows; a projection over keywords + gates, never a softening of them; edits apply on save | word lists, chip walls |
+| pair | the EN+ES twins of one calibration concept: a single `{en, es}` object (`Keyword`/`GateTerm`), both languages required; ✕ removes the concept | twins, duo, translation |
+| path | the track a matrix word unlocks (require) or blocks (reject) via its gate membership; badge on the row | track tag, route, lane badge |
 
-Shared-vocabulary rule: the blocks bank's `tags` and the `config` table's
+Shared-vocabulary rule: the Blocks Bank's `tags` and the `config` table's
 keywords use the SAME canonical terms (domain / tool / signal families). A new
 term is added on both sides in the same change — they are the job <-> content
 matching surface.
