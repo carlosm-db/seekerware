@@ -3,8 +3,8 @@ import { normalizeTitle, scoreJob, type ScoringConfig } from '../src/scoring';
 import { normalizeScoringConfig } from '../src/config-store';
 import type { Job } from '../src/types';
 
-// Authored in the legacy shape and up-converted through the real normalizer, so
-// this suite exercises BOTH the engine and the legacy→{en,es} migration path.
+// Authored in the {en, es} shape and run through the real normalizer, so this
+// suite exercises the engine on the same config shape a live deploy loads.
 const config: ScoringConfig = normalizeScoringConfig({
   weights: {
     domain: { weight: 40, saturation: 6 },
@@ -16,53 +16,52 @@ const config: ScoringConfig = normalizeScoringConfig({
   thresholds: { apply: 75, stretch: 55 },
   keywords: {
     domain: [
-      { term: 'payments', weight: 3 },
-      { term: 'reconciliation', weight: 3 },
-      { term: 'conciliacion', weight: 3 },
-      { term: 'collections', weight: 3 },
-      { term: 'banking', weight: 3 },
-      { term: 'compliance', weight: 2 },
+      { en: 'payments', es: 'pagos', weight: 3 },
+      { en: 'reconciliation', es: 'conciliacion', weight: 3 },
+      { en: 'collections', es: 'cobranza', weight: 3 },
+      { en: 'banking', es: 'banca', weight: 3 },
+      { en: 'compliance', es: 'cumplimiento', weight: 2 },
     ],
     role_type: [
-      { term: 'business analyst', weight: 3 },
-      { term: 'data analyst', weight: 3 },
-      { term: 'data engineer', weight: 2 },
-      { term: 'recruiter', weight: -3 },
+      { en: 'business analyst', es: 'analista de negocio', weight: 3 },
+      { en: 'data analyst', es: 'analista de datos', weight: 3 },
+      { en: 'data engineer', es: 'ingeniero de datos', weight: 2 },
+      { en: 'recruiter', es: 'reclutador', weight: -3 },
     ],
     tool_overlap: [
-      { term: 'sql', weight: 3 },
-      { term: 'power bi', weight: 3 },
-      { term: 'excel', weight: 2 },
-      { term: 'python', weight: 2 },
+      { en: 'sql', es: 'sql', weight: 3 },
+      { en: 'power bi', es: 'power bi', weight: 3 },
+      { en: 'excel', es: 'excel', weight: 2 },
+      { en: 'python', es: 'python', weight: 2 },
     ],
     level_fit: [
-      { term: 'co-op', weight: 3 },
-      { term: 'junior', weight: 2 },
-      { term: 'intermediate', weight: 2 },
-      { term: 'principal', weight: -3 },
+      { en: 'co-op', es: 'co-op', weight: 3 },
+      { en: 'junior', es: 'junior', weight: 2 },
+      { en: 'intermediate', es: 'intermedio', weight: 2 },
+      { en: 'principal', es: 'principal', weight: -3 },
     ],
   },
   level_negatives_only_if_role: ['data engineer'],
-  conditional_level_negatives: [{ term: 'senior', weight: -2 }],
+  conditional_level_negatives: [{ en: 'senior', es: 'senior', weight: -2 }],
   tracks: [
     {
       id: 'canada_coop',
       gates: [
-        { id: 'ubicacion_canada', type: 'hard', require: ['canada', 'vancouver', 'toronto'], scope: 'location' },
-        { id: 'senal_coop', type: 'hard', require: ['co-op', 'coop', 'intern', 'work term'], scope: 'title' },
+        { id: 'ubicacion_canada', require: [{ en: 'canada', es: 'canada' }, { en: 'vancouver', es: 'vancouver' }, { en: 'toronto', es: 'toronto' }], scope: 'location' },
+        { id: 'senal_coop', require: [{ en: 'co-op', es: 'co-op' }, { en: 'coop', es: 'coop' }, { en: 'intern', es: 'intern' }, { en: 'work term', es: 'work term' }], scope: 'title' },
       ],
     },
     {
       id: 'colombia_perm',
       gates: [
-        { id: 'ubicacion_latam', type: 'hard', require: ['colombia', 'latam', 'remote', 'americas'], scope: 'text' },
-        { id: 'rechazo_us_only', type: 'hard', reject: ['us only', 'no sponsorship'], scope: 'text' },
+        { id: 'ubicacion_latam', require: [{ en: 'colombia', es: 'colombia' }, { en: 'latam', es: 'latam' }, { en: 'remote', es: 'remoto' }, { en: 'americas', es: 'americas' }], scope: 'text' },
+        { id: 'rechazo_us_only', reject: [{ en: 'us only', es: 'solo estados unidos' }, { en: 'no sponsorship', es: 'sin patrocinio' }], scope: 'text' },
       ],
     },
     {
       id: 'contractor_usd',
       gates: [
-        { id: 'remoto', type: 'hard', require: ['remote', 'worldwide', 'anywhere'], scope: 'text' },
+        { id: 'remoto', require: [{ en: 'remote', es: 'remoto' }, { en: 'worldwide', es: 'mundial' }, { en: 'anywhere', es: 'en cualquier lugar' }], scope: 'text' },
       ],
     },
   ],
@@ -146,14 +145,15 @@ describe('scoreJob — conditional seniority nuance', () => {
 });
 
 describe('scoreJob — EN/ES matching and title', () => {
-  it("keyword 'conciliacion' matches accented text ('conciliación')", () => {
+  it("a pair matches on its ES side ('conciliación') and records the EN term", () => {
     const r = scoreJob(job({
       title: 'Analista',
       location: 'Bogotá, Colombia',
       description: 'Responsable de la conciliación bancaria y pagos.',
     }), config);
+    // es='conciliacion' matched the accented text; the concept is logged under its en.
     const m = r.breakdown.domain.matches.map((x) => x.term);
-    expect(m).toContain('conciliacion');
+    expect(m).toContain('reconciliation');
   });
 
   it('a title match counts double (title_multiplier=2)', () => {

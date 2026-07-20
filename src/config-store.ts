@@ -1,8 +1,7 @@
 // Loads, normalizes and validates the scoring configuration from the `config`
 // table. Config is one concept = one object with BOTH languages ({en, es}).
-// A normalizer up-converts the legacy shape ({term, lang, pair} + string[] gates)
-// on read, so a deploy never breaks on an old live config; the owner then
-// activates the cleaned config through the console (Preview → Activate).
+// The normalizer coerces every entry to that shape and validates; the console
+// writes the config directly (edits apply on save — no draft/activate step).
 
 import type { Env } from './types';
 import { CATEGORIES, type Category, type GateTerm, type Keyword, type ScoringConfig } from './scoring';
@@ -23,43 +22,24 @@ export async function loadScoringConfig(env: Env): Promise<ScoringConfig> {
   return normalizeScoringConfig(parsed);
 }
 
-/** Normalize + validate. Accepts both the new {en,es} shape and the legacy shape. */
+/** Normalize to the {en, es} shape and validate. */
 export function validateScoringConfig(raw: unknown): ScoringConfig {
   return normalizeScoringConfig(raw);
 }
 
-// ---------- normalization (legacy → {en, es}) ----------
+// ---------- normalization ({en, es}) ----------
 
-interface LegacyKeyword { term?: string; en?: string; es?: string; weight: number; lang?: 'es'; pair?: string }
+interface RawKeyword { en?: string; es?: string; weight?: number }
 
-/** One concept = one {en, es, weight}. Legacy twins (two entries sharing a pair)
- * merge; a legacy single keeps es='' (contamination — filled later by the owner). */
+/** One concept = one {en, es, weight}. */
 function normalizeKeywordList(raw: unknown): Keyword[] {
-  const list = Array.isArray(raw) ? (raw as LegacyKeyword[]) : [];
-  if (list.every((k) => k && typeof k === 'object' && 'en' in k)) {
-    return list.map((k) => ({ en: String(k.en ?? ''), es: String(k.es ?? ''), weight: Number(k.weight) }));
-  }
-  const byPair = new Map<string, LegacyKeyword[]>();
-  for (const k of list) {
-    const pid = k.pair ?? k.term ?? '';
-    const arr = byPair.get(pid) ?? [];
-    arr.push(k);
-    byPair.set(pid, arr);
-  }
-  const out: Keyword[] = [];
-  for (const entries of byPair.values()) {
-    const enE = entries.find((e) => e.lang !== 'es') ?? entries[0]!;
-    const esE = entries.find((e) => e.lang === 'es' && e.term !== enE.term);
-    out.push({ en: String(enE.term ?? ''), es: esE ? String(esE.term ?? '') : '', weight: Number(enE.weight) });
-  }
-  return out;
+  const list = Array.isArray(raw) ? (raw as RawKeyword[]) : [];
+  return list.map((k) => ({ en: String(k.en ?? ''), es: String(k.es ?? ''), weight: Number(k.weight) }));
 }
 
 function normalizeGateTerms(raw: unknown): GateTerm[] {
-  const list = Array.isArray(raw) ? raw : [];
-  return list.map((t) =>
-    typeof t === 'string' ? { en: t, es: '' } : { en: String(t?.en ?? ''), es: String(t?.es ?? '') },
-  );
+  const list = Array.isArray(raw) ? (raw as Array<{ en?: unknown; es?: unknown }>) : [];
+  return list.map((t) => ({ en: String(t?.en ?? ''), es: String(t?.es ?? '') }));
 }
 
 export function normalizeScoringConfig(raw: unknown): ScoringConfig {
@@ -73,7 +53,7 @@ export function normalizeScoringConfig(raw: unknown): ScoringConfig {
   const rawTracks = Array.isArray(c.tracks) ? (c.tracks as Record<string, unknown>[]) : [];
   const tracks = rawTracks.map((t) => ({
     ...t,
-    // Gates are always hard (pass/fail). Legacy `type`/`points` are dropped here.
+    // Gates are always hard (pass/fail); only {id, scope, require, reject} are kept.
     gates: (Array.isArray(t.gates) ? (t.gates as Record<string, unknown>[]) : []).map((g) => ({
       id: g.id,
       ...(g.scope === undefined ? {} : { scope: g.scope }),
@@ -103,7 +83,7 @@ function validate(c: ScoringConfig): ScoringConfig {
       throw new Error(`config 'scoring': missing keywords.${cat}[]`);
     }
     for (const k of c.keywords[cat]) {
-      // en is required; es may be '' during the contamination cleanup (filled by the owner).
+      // en is required; es may be '' defensively — the console enforces both languages.
       if (!k.en || typeof k.en !== 'string' || typeof k.weight !== 'number') {
         throw new Error(`config 'scoring': keywords.${cat} needs {en, es, weight} (en required)`);
       }
