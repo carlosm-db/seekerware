@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ScoringConfig } from '../src/scoring';
 import {
-  applyPairRemove, applyWordAdd, buildMatrix, pathOptions, type MatrixGroup,
+  applyPairRemove, applyWordAdd, applyWordEdit, buildMatrix, type MatrixGroup,
 } from '../src/console/matrix';
 
 /** Miniature config in the {en, es} shape (mirrors the seed structure). */
@@ -95,15 +95,46 @@ describe('buildMatrix', () => {
   });
 });
 
-describe('pathOptions', () => {
-  const cfg = makeCfg();
-  it('location: favor = every track with a require list; against = tracks with reject lists', () => {
-    expect(pathOptions(cfg, 'location', true)).toEqual(['canada_coop', 'colombia_perm', 'contractor_usd']);
-    expect(pathOptions(cfg, 'location', false)).toEqual(['colombia_perm', 'contractor_usd']);
+describe('applyWordEdit', () => {
+  it('edits a keyword concept (Spanish + strength) in place', () => {
+    const cfg = makeCfg();
+    const err = applyWordEdit(cfg, { kind: 'keyword', category: 'role_type', oldEn: 'business analyst', en: 'business analyst', es: 'analista funcional', weight: 2 });
+    expect(err).toBeNull();
+    const k = cfg.keywords.role_type.find((x) => x.en === 'business analyst')!;
+    expect(k.es).toBe('analista funcional');
+    expect(k.weight).toBe(2);
   });
-  it('scoring categories: only tracks with a title-scope gate', () => {
-    expect(pathOptions(cfg, 'role_type', true)).toEqual(['canada_coop']);
-    expect(pathOptions(cfg, 'role_type', false)).toEqual([]);
+
+  it('renaming a keyword en also syncs its path-linked gate copy', () => {
+    const cfg = makeCfg();
+    const err = applyWordEdit(cfg, { kind: 'keyword', category: 'role_type', oldEn: 'co-op', en: 'coop program', es: 'programa co-op', weight: 3 });
+    expect(err).toBeNull();
+    expect(cfg.keywords.role_type.some((k) => k.en === 'coop program')).toBe(true);
+    const gate = cfg.tracks.find((t) => t.id === 'canada_coop')!.gates.find((g) => g.id === 'coop_signal')!;
+    expect(gate.require!.some((t) => t.en === 'coop program' && t.es === 'programa co-op')).toBe(true);
+    expect(gate.require!.some((t) => t.en === 'co-op')).toBe(false);
+  });
+
+  it('edits a gate concept (both languages)', () => {
+    const cfg = makeCfg();
+    const err = applyWordEdit(cfg, { kind: 'gate', track: 'contractor_usd', gate: 'remote_required', oldEn: 'remote', en: 'remote', es: 'remoto total' });
+    expect(err).toBeNull();
+    const gate = cfg.tracks.find((t) => t.id === 'contractor_usd')!.gates.find((g) => g.id === 'remote_required')!;
+    expect(gate.require!.find((t) => t.en === 'remote')!.es).toBe('remoto total');
+  });
+
+  it('requires both languages and a valid strength', () => {
+    const cfg = makeCfg();
+    expect(applyWordEdit(cfg, { kind: 'keyword', category: 'role_type', oldEn: 'business analyst', en: 'x', es: '', weight: 3 }))
+      .toMatchObject({ error: expect.stringContaining('both languages') });
+    expect(applyWordEdit(cfg, { kind: 'keyword', category: 'role_type', oldEn: 'business analyst', en: 'business analyst', es: 'x', weight: 0 }))
+      .toMatchObject({ error: expect.stringContaining('strength') });
+  });
+
+  it('errors when the concept is not found', () => {
+    const cfg = makeCfg();
+    expect(applyWordEdit(cfg, { kind: 'keyword', category: 'role_type', oldEn: 'nope', en: 'nope', es: 'nope', weight: 3 }))
+      .toMatchObject({ error: expect.stringContaining('not found') });
   });
 });
 

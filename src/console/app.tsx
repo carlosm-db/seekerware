@@ -9,8 +9,8 @@ import { normalizeScoringConfig, validateScoringConfig } from '../config-store';
 import { SKCATS, newBlockId, parseBulletEdits } from './blocks-form';
 import { fmtDates, normalizeMonth, tokensOfRole, validateRoleCode } from './roles';
 import {
-  applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES,
-  type ConceptRow, type MatrixCategory, type MatrixGroup, type RemoveTarget,
+  applyPairRemove, applyWordAdd, applyWordEdit, buildMatrix, MATRIX_CATEGORIES,
+  type ConceptRow, type EditTarget, type MatrixCategory, type MatrixGroup, type RemoveTarget,
 } from './matrix';
 import { connectors } from '../connectors';
 import { parseAtsUrl } from '../connectors/common';
@@ -651,65 +651,85 @@ export function consoleApp(): App {
     colombia_perm: 'Colombia permanent',
     contractor_usd: 'Contractor international',
   };
-  /** Draft-or-live scoring config (normalized to the {en,es} shape); edits accumulate in a draft until activated. */
-  async function loadDraftOrLive(env: ConsoleEnv): Promise<{ cfg: import('../scoring').ScoringConfig; isDraft: boolean }> {
-    const d = await env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
-    if (d) return { cfg: normalizeScoringConfig(JSON.parse(d.value)), isDraft: true };
+  /** Live scoring config, normalized to the {en,es} shape. */
+  async function loadLive(env: ConsoleEnv): Promise<import('../scoring').ScoringConfig> {
     const l = await env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
     if (!l) throw new Error('scoring config missing');
-    return { cfg: normalizeScoringConfig(JSON.parse(l.value)), isDraft: false };
+    return normalizeScoringConfig(JSON.parse(l.value));
   }
-  async function saveDraft(env: ConsoleEnv, cfg: unknown): Promise<void> {
-    await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring_draft', ?)")
+  /** Every edit applies immediately: bump the version and write the config live. */
+  async function saveLive(env: ConsoleEnv, cfg: import('../scoring').ScoringConfig): Promise<void> {
+    cfg.version = (cfg.version ?? 0) + 1;
+    await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring', ?)")
       .bind(JSON.stringify(cfg)).run();
   }
 
-  app.get('/config', async (c) => {
+  app.get('/calibration', async (c) => {
     const rows = (
       await c.env.DB.prepare("SELECT key, value FROM config WHERE key IN ('FRESHNESS_MAX_DAYS')").all<{ key: string; value: string }>()
     ).results;
     const freshness = rows.find((r) => r.key === 'FRESHNESS_MAX_DAYS')?.value ?? '3';
-    const { cfg, isDraft } = await loadDraftOrLive(c.env);
+    const cfg = await loadLive(c.env);
     const matrix = buildMatrix(cfg);
     const trackLabel = (t: string) => TRACK_LABELS[t] ?? t;
     const pathClass = (t: string) => `path p-${Math.max(0, cfg.tracks.findIndex((x) => x.id === t))}`;
     const isLocation = (cat: MatrixCategory) => cat === 'location';
-
-    /** ✕ removes the whole concept (both languages). */
-    const removeForm = (r: ConceptRow) => (
-      <form class="inline" method="post" action="/config/word-remove">
-        <input type="hidden" name="kind" value={r.source.kind} />
-        {r.source.kind === 'keyword' ? (
-          <input type="hidden" name="category" value={r.category} />
-        ) : (
-          <>
-            <input type="hidden" name="track" value={r.source.track} />
-            <input type="hidden" name="gate" value={r.source.gate} />
-          </>
-        )}
-        <input type="hidden" name="en" value={r.en} />
-        <button type="submit" class="chipx" title="remove concept (both languages)">✕</button>
-      </form>
+    const pathBadge = (t?: string) => (t ? <span class={pathClass(t)}>{trackLabel(t)}</span> : <span class="muted">—</span>);
+    const strengthText = (r: ConceptRow) => (r.weight !== undefined ? (r.weight > 0 ? `+${r.weight}` : String(r.weight)) : '');
+    const hiddenTarget = (r: ConceptRow) => (
+      r.source.kind === 'keyword' ? (
+        <input type="hidden" name="category" value={r.category} />
+      ) : (
+        <>
+          <input type="hidden" name="track" value={r.source.track} />
+          <input type="hidden" name="gate" value={r.source.gate} />
+        </>
+      )
     );
 
-    /** One concept row: English | Español | Strength | Path | ✕. Location has no Strength. */
+    /** One concept: a read row (English | Español | Strength | Path | ✏️ ✕) plus an
+        inline edit form. ✏️ toggles to edit; Save writes live; Cancel reverts. */
     const conceptRow = (r: ConceptRow, loc: boolean) => (
-      <div class={`mconcept${loc ? ' loc' : ''}`}>
-        <div class="mc-en">{r.en}</div>
-        <div class="mc-es">{r.es ? r.es : <span class="mc-empty" title="Spanish not filled yet">—</span>}</div>
-        {loc ? null : (
-          <div class="mc-str">{r.weight !== undefined ? (r.weight > 0 ? `+${r.weight}` : r.weight)
-            : r.penalty !== undefined ? `−${r.penalty}` : ''}</div>
-        )}
-        <div class="mc-path">{r.path ? <span class={pathClass(r.path)}>{trackLabel(r.path)}</span> : <span class="muted">—</span>}</div>
-        <div class="mc-x">{removeForm(r)}</div>
+      <div class="mconcept-wrap">
+        <div class={`mgrid mc-read${loc ? ' loc' : ''}`}>
+          <div class="mc-en">{r.en}</div>
+          <div class="mc-es">{r.es ? r.es : <span class="mc-empty" title="Spanish not filled yet">—</span>}</div>
+          {loc ? null : <div class="mc-str">{strengthText(r)}</div>}
+          <div class="mc-path">{pathBadge(r.path)}</div>
+          <div class="mc-actions">
+            <button type="button" class="chipx mc-editbtn" title="Edit">✏️</button>
+            <form class="inline" method="post" action="/calibration/word-remove">
+              <input type="hidden" name="kind" value={r.source.kind} />
+              {hiddenTarget(r)}
+              <input type="hidden" name="en" value={r.en} />
+              <button type="submit" class="chipx" title="Remove (both languages)">✕</button>
+            </form>
+          </div>
+        </div>
+        <form class={`mgrid mc-edit${loc ? ' loc' : ''}`} method="post" action="/calibration/word-edit">
+          <input type="hidden" name="kind" value={r.source.kind} />
+          {hiddenTarget(r)}
+          <input type="hidden" name="old_en" value={r.en} />
+          <input type="text" name="en" value={r.en} required class="mc-in" aria-label="English" />
+          <input type="text" name="es" value={r.es} placeholder="español…" required class="mc-in" aria-label="Español" />
+          {loc ? null : (
+            <select name="weight" class="mc-in" aria-label="Strength">
+              {[3, 2, 1, -2, -3].map((w) => <option value={String(w)} selected={r.weight === w}>{w > 0 ? `+${w}` : String(w)}</option>)}
+            </select>
+          )}
+          <div class="mc-path">{pathBadge(r.path)}</div>
+          <div class="mc-actions">
+            <button type="submit" class="chipx mc-btn" title="Save">✓</button>
+            <button type="button" class="chipx mc-btn mc-cancel" title="Cancel">✗</button>
+          </div>
+        </form>
       </div>
     );
 
     const sideBlock = (label: string, rows: ConceptRow[], loc: boolean) => (rows.length ? (
       <div class="mside">
         <div class="msidehead">{label}</div>
-        <div class={`mconcept mhead${loc ? ' loc' : ''}`}>
+        <div class={`mgrid mchead${loc ? ' loc' : ''}`}>
           <div>Word — English (required)</div>
           <div>Word — Español (required)</div>
           {loc ? null : <div>Strength</div>}
@@ -741,30 +761,16 @@ export function consoleApp(): App {
 
     return page(c, 'Calibration', (
       <>
-        {isDraft ? (
-          <div class="card bd-warn">
-            <div class="actions">
-              <strong>⚠ You have unsaved calibration changes.</strong>
-              <form class="inline" method="post" action="/config/replay">
-                <input type="hidden" name="n" value="200" />
-                <button type="submit" class="primary">Preview impact</button>
-              </form>
-              <form class="inline" method="post" action="/config/replay/discard">
-                <button type="submit">Discard changes</button>
-              </form>
-            </div>
-            <p class="muted">Nothing applies to real scoring until you preview the impact and then activate — Activate is its own button on the preview screen.</p>
-          </div>
-        ) : null}
-
-        <form method="post" action="/config/quick" class="card actions">
+        <form method="post" action="/calibration/quick" class="card actions">
           <label>Notify me at score ≥ <input type="number" name="apply" value={String(cfg.thresholds.apply)} class="w-sm" /></label>
           <label>Show borderline from ≥ <input type="number" name="stretch" value={String(cfg.thresholds.stretch)} class="w-sm" /></label>
           <label>Ignore postings older than <input type="number" name="freshness" value={freshness} class="w-xs" /> days</label>
           <button type="submit" class="primary">Save</button>
+          <span class="muted">Config v{cfg.version ?? 0}</span>
         </form>
 
         <h2>Keyword matrix (ATS)</h2>
+        <p class="muted mb-2">Changes save immediately. New jobs use them on the next run; jobs already stored keep their score.</p>
         <div class="calsearch">
           <span class="cs-ic" aria-hidden="true">🔍</span>
           <input type="search" id="calsearch-input" placeholder="Filter words across every list…" aria-label="Filter words" />
@@ -779,17 +785,17 @@ export function consoleApp(): App {
           Every concept has an <strong>English</strong> and a <strong>Español</strong> value — both required.
           <strong> —</strong> in the Español column means it isn’t filled yet. Strength:
           <strong> +3</strong>/<strong>+2</strong>/<strong>+1</strong> in favor · <strong>−2</strong>/<strong>−3</strong> against.
-          ✕ removes the concept in both languages.
+          ✏️ edits a concept · ✕ removes it (both languages).
         </p>
         <p class="muted mb-3">
           <strong>Path</strong> — the track a word unlocks (or, on an against word, blocks):
           {cfg.tracks.map((t) => <span class={pathClass(t.id)}>{trackLabel(t.id)}</span>)}
-          <span> · no badge = scores every track · path words are gates: absolute, not points (−N = penalty)</span>
+          <span> · no badge = scores every track · path words are gates: absolute, not points</span>
         </p>
 
         <div class="card">
           <strong>＋ Add word</strong>
-          <form method="post" action="/config/word-add" class="mt-1">
+          <form method="post" action="/calibration/word-add" class="mt-1">
             <div class="formgrid">
               <div class="field f-en"><label>Word — English (required)</label>
                 <input type="text" name="term_en" required placeholder="e.g. remote latam" /></div>
@@ -817,42 +823,30 @@ export function consoleApp(): App {
                   <option value="">— every track —</option>
                   {cfg.tracks.map((t) => <option value={t.id}>{trackLabel(t.id)}</option>)}
                 </select></label>
-              <button type="submit" class="primary">Add to draft</button>
+              <button type="submit" class="primary">Add</button>
             </div>
             <p class="muted mt-2">Location words REQUIRE a path (they are the track gates; weight does not apply there).</p>
           </form>
         </div>
-
-        <form method="post" action="/config/rescore" class="card actions"
-          onsubmit="return confirm('Re-score ALL open jobs with the ACTIVE config? This rewrites score/track/verdict on changed rows (history kept in job events).')">
-          <button type="submit">♻️ Re-score open jobs with the active config</button>
-          <span class="muted">run this after activating changes so stored jobs pick them up</span>
-        </form>
-
-        <details class="card">
-          <summary>Advanced: raw JSON</summary>
-          <form method="post" action="/config/scoring" class="mt-1">
-            <textarea name="scoring" rows={18}>{JSON.stringify(cfg, null, 2)}</textarea>
-            <div class="actions mt-1">
-              <button type="submit" class="primary">Save as active config</button>
-              <button type="submit" formaction="/config/replay">Preview impact (Replay)</button>
-              <label>against last <input type="number" name="n" value="200" min="50" max="1000" class="w-md" /> jobs</label>
-            </div>
-          </form>
-        </details>
 
         <script dangerouslySetInnerHTML={{ __html: `
 (() => {
   const q = document.getElementById('calsearch-input');
   if (q) q.addEventListener('input', () => {
     const s = q.value.trim().toLowerCase();
-    document.querySelectorAll('.matrix-groups .mconcept:not(.mhead)').forEach((row) => {
+    document.querySelectorAll('.matrix-groups .mconcept-wrap').forEach((row) => {
       row.style.display = (!s || row.textContent.toLowerCase().includes(s)) ? '' : 'none';
     });
     if (s) document.querySelectorAll('.matrix-groups details.rc').forEach((d) => { d.open = true; });
   });
   const clr = document.getElementById('calsearch-clear');
   if (clr && q) clr.addEventListener('click', () => { q.value = ''; q.dispatchEvent(new Event('input')); q.focus(); });
+  document.querySelectorAll('.mc-editbtn').forEach((b) => b.addEventListener('click', () => {
+    b.closest('.mconcept-wrap').classList.add('editing');
+  }));
+  document.querySelectorAll('.mc-cancel').forEach((b) => b.addEventListener('click', () => {
+    b.closest('.mconcept-wrap').classList.remove('editing');
+  }));
   const dirSel = document.getElementById('dir-sel');
   const strSel = document.getElementById('str-sel');
   if (dirSel && strSel) dirSel.addEventListener('change', () => {
@@ -865,14 +859,13 @@ export function consoleApp(): App {
     ));
   });
 
-  // Word edits accumulate in the draft; nothing goes live without the
-  // Preview impact → Activate steps. ONE add/remove pair of routes: the matrix
-  // maps each concept to keywords and/or gate lists (src/console/matrix.ts).
-  app.post('/config/word-add', async (c) => {
+  // Every calibration edit applies IMMEDIATELY: apply → validate → save live.
+  // The matrix maps each concept to keywords and/or gate lists (src/console/matrix.ts).
+  app.post('/calibration/word-add', async (c) => {
     const b = await c.req.parseBody();
     const category = String(b.category ?? '') as MatrixCategory;
-    if (!MATRIX_CATEGORIES.includes(category)) return c.redirect('/config?m=invalid category');
-    const { cfg } = await loadDraftOrLive(c.env);
+    if (!MATRIX_CATEGORIES.includes(category)) return c.redirect('/calibration?m=invalid category');
+    const cfg = await loadLive(c.env);
     const err = applyWordAdd(cfg, {
       en: String(b.term_en ?? ''),
       es: String(b.term_es ?? ''),
@@ -881,28 +874,49 @@ export function consoleApp(): App {
       weight: Number(b.weight ?? 2),
       path: String(b.path ?? '') || undefined,
     });
-    if (err) return c.redirect(`/config?m=${encodeURIComponent(`rejected: ${err.error}`)}`);
+    if (err) return c.redirect(`/calibration?m=${encodeURIComponent(`rejected: ${err.error}`)}`);
     try { validateScoringConfig(cfg); } catch (e) {
-      return c.redirect(`/config?m=${encodeURIComponent(`rejected: ${e instanceof Error ? e.message : 'invalid'}`)}`);
+      return c.redirect(`/calibration?m=${encodeURIComponent(`rejected: ${e instanceof Error ? e.message : 'invalid'}`)}`);
     }
-    await saveDraft(c.env, cfg);
-    return c.redirect(`/config?m=${encodeURIComponent(`added "${String(b.term_en).trim().toLowerCase()}" (EN+ES) — Preview impact to apply`)}`);
+    await saveLive(c.env, cfg);
+    return c.redirect(`/calibration?m=${encodeURIComponent(`✓ Added "${String(b.term_en).trim().toLowerCase()}"`)}`);
   });
 
-  app.post('/config/word-remove', async (c) => {
+  app.post('/calibration/word-remove', async (c) => {
     const b = await c.req.parseBody();
     const en = String(b.en ?? '');
     const target: RemoveTarget = String(b.kind ?? '') === 'gate'
       ? { kind: 'gate', track: String(b.track ?? ''), gate: String(b.gate ?? ''), en }
       : { kind: 'keyword', category: String(b.category ?? '') as Category, en };
     if (target.kind === 'keyword' && !CATEGORIES.includes(target.category)) {
-      return c.redirect('/config?m=invalid category');
+      return c.redirect('/calibration?m=invalid category');
     }
-    const { cfg } = await loadDraftOrLive(c.env);
+    const cfg = await loadLive(c.env);
     const r = applyPairRemove(cfg, target);
-    if ('error' in r) return c.redirect(`/config?m=${encodeURIComponent(`remove failed: ${r.error}`)}`);
-    await saveDraft(c.env, cfg);
-    return c.redirect(`/config?m=${encodeURIComponent(`removed ${r.removed.map((t) => `"${t}"`).join(' + ')} — Preview impact to apply`)}`);
+    if ('error' in r) return c.redirect(`/calibration?m=${encodeURIComponent(`remove failed: ${r.error}`)}`);
+    await saveLive(c.env, cfg);
+    return c.redirect(`/calibration?m=${encodeURIComponent(`✓ Removed "${r.removed.join(', ')}"`)}`);
+  });
+
+  app.post('/calibration/word-edit', async (c) => {
+    const b = await c.req.parseBody();
+    const oldEn = String(b.old_en ?? '');
+    const en = String(b.en ?? '');
+    const es = String(b.es ?? '');
+    const target: EditTarget = String(b.kind ?? '') === 'gate'
+      ? { kind: 'gate', track: String(b.track ?? ''), gate: String(b.gate ?? ''), oldEn, en, es }
+      : { kind: 'keyword', category: String(b.category ?? '') as Category, oldEn, en, es, weight: Number(b.weight ?? 0) };
+    if (target.kind === 'keyword' && !CATEGORIES.includes(target.category)) {
+      return c.redirect('/calibration?m=invalid category');
+    }
+    const cfg = await loadLive(c.env);
+    const err = applyWordEdit(cfg, target);
+    if (err) return c.redirect(`/calibration?m=${encodeURIComponent(`rejected: ${err.error}`)}`);
+    try { validateScoringConfig(cfg); } catch (e) {
+      return c.redirect(`/calibration?m=${encodeURIComponent(`rejected: ${e instanceof Error ? e.message : 'invalid'}`)}`);
+    }
+    await saveLive(c.env, cfg);
+    return c.redirect(`/calibration?m=${encodeURIComponent(`✓ Saved "${en.trim().toLowerCase()}"`)}`);
   });
 
   async function saveConfig(env: ConsoleEnv, key: string, value: string): Promise<void> {
@@ -981,36 +995,16 @@ export function consoleApp(): App {
     return c.redirect('/contact?m=contact profile saved');
   });
 
-  app.post('/config/quick', async (c) => {
+  app.post('/calibration/quick', async (c) => {
     const b = await c.req.parseBody();
-    const raw = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
-    if (raw) {
-      const cfg = JSON.parse(raw.value) as import('../scoring').ScoringConfig;
-      cfg.thresholds = { apply: Number(b.apply), stretch: Number(b.stretch) };
-      validateScoringConfig(cfg);
-      await saveConfig(c.env, 'scoring', JSON.stringify(cfg));
-      // Keep an open draft coherent with the new thresholds.
-      const draft = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
-      if (draft) {
-        const d = JSON.parse(draft.value) as import('../scoring').ScoringConfig;
-        d.thresholds = cfg.thresholds;
-        await saveDraft(c.env, d);
-      }
+    const cfg = await loadLive(c.env);
+    cfg.thresholds = { apply: Number(b.apply), stretch: Number(b.stretch) };
+    try { validateScoringConfig(cfg); } catch (e) {
+      return c.redirect(`/calibration?m=${encodeURIComponent(`rejected: ${e instanceof Error ? e.message : 'invalid'}`)}`);
     }
+    await saveLive(c.env, cfg);
     await saveConfig(c.env, 'FRESHNESS_MAX_DAYS', String(Number(b.freshness ?? 3)));
-    return c.redirect('/config?m=saved');
-  });
-
-  app.post('/config/scoring', async (c) => {
-    const b = await c.req.parseBody();
-    try {
-      const parsed = JSON.parse(String(b.scoring ?? ''));
-      validateScoringConfig(parsed);
-      await saveConfig(c.env, 'scoring', JSON.stringify(parsed));
-      return c.redirect('/config?m=scoring valid and saved');
-    } catch (err) {
-      return c.redirect(`/config?m=${encodeURIComponent(`ERROR: ${err instanceof Error ? err.message : 'invalid'}`)}`);
-    }
+    return c.redirect(`/calibration?m=${encodeURIComponent('✓ Saved')}`);
   });
 
   // ---------- Tracker ----------
@@ -1099,160 +1093,8 @@ export function consoleApp(): App {
     return c.redirect('/tracker?m=updated');
   });
 
-  // ---------- Replay ----------
-  app.post('/config/replay', async (c) => {
-    const b = await c.req.parseBody();
-    try {
-      if (b.scoring) {
-        // Advanced JSON path: the textarea content becomes the draft.
-        const parsed = JSON.parse(String(b.scoring));
-        validateScoringConfig(parsed);
-        await saveDraft(c.env, parsed);
-      } else {
-        // Chip-edit path: the accumulated draft is previewed as-is.
-        const draft = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
-        if (!draft) return c.redirect('/config?m=no changes to preview');
-        validateScoringConfig(JSON.parse(draft.value));
-      }
-      const n = Math.min(1000, Math.max(50, Number(b.n ?? 200)));
-      return c.redirect(`/config/replay?n=${n}`);
-    } catch (err) {
-      return c.redirect(`/config?m=${encodeURIComponent(`invalid draft: ${err instanceof Error ? err.message : ''}`)}`);
-    }
-  });
-
-  app.get('/config/replay', async (c) => {
-    const n = Math.min(1000, Math.max(50, Number(c.req.query('n') ?? 200)));
-    const runner = `
-(async () => {
-  const tbody = document.getElementById('diffs');
-  const bar = document.getElementById('bar');
-  const sum = { total: 0, changed: 0, up: 0, down: 0, byVerdict: {} };
-  let cursor = 0;
-  for (;;) {
-    const r = await fetch('/api/replay-batch?cursor=' + cursor + '&n=${n}');
-    if (!r.ok) { bar.textContent = 'error: ' + r.status; return; }
-    const d = await r.json();
-    sum.total = d.total_target;
-    for (const row of d.diffs) {
-      sum.changed++;
-      const key = row.old_verdict + '→' + row.new_verdict;
-      sum.byVerdict[key] = (sum.byVerdict[key] || 0) + 1;
-      if (row.new_score > row.old_score) sum.up++; else sum.down++;
-      // titles/companies are third-party text: ONLY textContent, never innerHTML
-      const tr = document.createElement('tr');
-      const td = (parent) => parent.appendChild(document.createElement('td'));
-      const t1 = td(tr); t1.textContent = row.title;
-      const sub = document.createElement('div'); sub.className = 'muted';
-      sub.textContent = row.company; t1.appendChild(sub);
-      td(tr).textContent = row.old_score + ' -> ' + row.new_score;
-      const t3 = td(tr); t3.textContent = row.old_verdict; t3.className = 'v-' + row.old_verdict;
-      const t4 = td(tr); t4.textContent = row.new_verdict; t4.className = 'v-' + row.new_verdict;
-      tbody.appendChild(tr);
-    }
-    cursor = d.next_cursor;
-    bar.textContent = 'processed ' + d.processed_total + ' / ' + d.total_target +
-      ' · changed ' + sum.changed;
-    if (d.done) break;
-  }
-  const parts = Object.entries(sum.byVerdict).map(([k, v]) => v + ' ' + k).join(' · ');
-  bar.textContent = 'done: ' + sum.changed + ' of ' + sum.total + ' change verdict' +
-    (parts ? ' (' + parts + ')' : '');
-  document.getElementById('summary-input').value = JSON.stringify(sum);
-  document.getElementById('apply-form').style.display = 'block';
-})();`;
-    return page(c, 'Replay (simulation)', (
-      <>
-        <div class="card">
-          <p>Simulating the draft against the last {n} stored jobs. <strong id="bar">starting…</strong></p>
-          <div id="apply-form" class="hidden">
-            <form method="post" action="/config/replay/apply" class="inline">
-              <input type="hidden" name="summary" id="summary-input" />
-              <button type="submit" class="primary">Activate</button>
-            </form>{' '}
-            <form method="post" action="/config/replay/discard" class="inline">
-              <button type="submit">Discard draft</button>
-            </form>
-          </div>
-        </div>
-        <div class="table-wrap"><table>
-          <tr><th>job</th><th>score</th><th>before</th><th>after</th></tr>
-          <tbody id="diffs" />
-        </table></div>
-        <script dangerouslySetInnerHTML={{ __html: runner }} />
-      </>
-    ));
-  });
-
-  app.post('/config/replay/apply', async (c) => {
-    const draft = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
-    if (!draft) return c.redirect('/config?m=no draft');
-    const old = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
-    const { diffScoring } = await import('./config-diff');
-    // Normalize both sides so the diff is computed on the {en,es} shape (either may be legacy).
-    const diff = old
-      ? diffScoring(normalizeScoringConfig(JSON.parse(old.value)), normalizeScoringConfig(JSON.parse(draft.value)))
-      : 'initial config';
-    await c.env.DB.batch([
-      c.env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring', ?)").bind(draft.value),
-      c.env.DB.prepare("DELETE FROM config WHERE key='scoring_draft'"),
-    ]);
-    return c.redirect(`/config?m=${encodeURIComponent(`activated: ${diff.slice(0, 120)} — now run Re-score so stored jobs pick it up`)}`);
-  });
-
-  app.post('/config/replay/discard', async (c) => {
-    await c.env.DB.prepare("DELETE FROM config WHERE key='scoring_draft'").run();
-    return c.redirect('/config?m=draft discarded');
-  });
-
-  // ---------- Re-score (materialized; unlike Replay it WRITES) ----------
-  app.post('/config/rescore', async (c) => c.redirect('/config/rescore'));
-
-  app.get('/config/rescore', async (c) => {
-    const runner = `
-(async () => {
-  const tbody = document.getElementById('changes');
-  const bar = document.getElementById('bar');
-  let cursor = 0, changed = 0, updated = 0;
-  for (;;) {
-    const r = await fetch('/api/rescore-batch?cursor=' + cursor, { method: 'POST' });
-    if (!r.ok) { bar.textContent = 'error: ' + r.status; return; }
-    const d = await r.json();
-    updated += d.updated;
-    for (const row of d.changes) {
-      changed++;
-      // titles/companies are third-party text: ONLY textContent, never innerHTML
-      const tr = document.createElement('tr');
-      const td = (parent) => parent.appendChild(document.createElement('td'));
-      const t1 = td(tr); t1.textContent = row.title;
-      const sub = document.createElement('div'); sub.className = 'muted';
-      sub.textContent = row.company; t1.appendChild(sub);
-      td(tr).textContent = row.old_score + ' -> ' + row.new_score;
-      td(tr).textContent = row.old;
-      td(tr).textContent = row.new;
-      tbody.appendChild(tr);
-    }
-    cursor = d.next_cursor;
-    bar.textContent = 'processed ' + d.processed_total + ' / ' + d.total_open +
-      ' open jobs · ' + changed + ' track/verdict changes';
-    if (d.done) break;
-  }
-  bar.textContent = 'done: ' + changed + ' track/verdict changes (see the table); rows rewritten in place.';
-})();`;
-    return page(c, 'Re-score (active config)', (
-      <>
-        <div class="card">
-          <p>Re-scoring every open job (new/notified) with the ACTIVE config. <strong id="bar">starting…</strong></p>
-          <p class="muted">Changed rows get their score/track/verdict rewritten and a job event; unchanged rows are untouched. <a href="/config">back to Calibration</a> · <a href="/jobs">see Jobs</a></p>
-        </div>
-        <div class="table-wrap"><table>
-          <tr><th>job</th><th>score</th><th>before</th><th>after</th></tr>
-          <tbody id="changes" />
-        </table></div>
-        <script dangerouslySetInnerHTML={{ __html: runner }} />
-      </>
-    ));
-  });
+  // Replay/Preview and Re-score removed 2026-07-19: calibration edits now apply
+  // live immediately; stored jobs keep their score, new jobs use the active config.
 
   // ---------- Bank (v6 2026-07-18, the owner's sketch): a role/group is ONE
   // form — its fields plus ALL its bullets — edited together via the single ✏️
@@ -1989,7 +1831,7 @@ export function consoleApp(): App {
         </div>
         <div class="card">
           <h2>Keyword impact <span class="muted">(last {rows.length} jobs)</span></h2>
-          <p class="muted my-1">How often each favor-keyword matches, and in how many survivors — the signal behind the scores. Tune these in <a href="/config">Calibration</a>.</p>
+          <p class="muted my-1">How often each favor-keyword matches, and in how many survivors — the signal behind the scores. Tune these in <a href="/calibration">Calibration</a>.</p>
           <div class="table-wrap"><table>
             <tr><th>keyword</th><th>category</th><th>matches</th><th>in survivors</th></tr>
             {topImpact.map(([term, e]) => (

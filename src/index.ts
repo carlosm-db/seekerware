@@ -4,10 +4,10 @@ import type { Ats, Company, Job } from './types';
 import { connectors } from './connectors/index';
 import { urlHash } from './connectors/common';
 import { counts } from './store';
-import { loadScoringConfig, normalizeScoringConfig } from './config-store';
+import { loadScoringConfig } from './config-store';
 import { scoreJob, type ScoreResult, type ScoringConfig } from './scoring';
 import { runPipeline } from './pipeline';
-import { ruleBasedTexts, sendTelegram } from './notify';
+import { sendTelegram } from './notify';
 import { consoleApp } from './console/app';
 import type { ConsoleEnv } from './console/auth';
 
@@ -33,139 +33,8 @@ app.post('/api/notify-test', async (c) => {
   return c.json(sent, sent.ok ? 200 : 502);
 });
 
-/** Replay (glossary): simulated re-score in batches of 50; NEVER writes to jobs. */
-app.get('/api/replay-batch', async (c) => {
-  const cursor = Math.max(0, Math.floor(Number(c.req.query('cursor')) || 0));
-  const target = Math.min(1000, Math.max(50, Math.floor(Number(c.req.query('n')) || 200)));
-  const BATCH = 50;
-  // LIMIT never negative (in SQLite, negative LIMIT = NO limit -> would blow up CPU/reads)
-  const limit = Math.max(0, Math.min(BATCH, target - cursor));
-  if (limit === 0) {
-    return c.json({ diffs: [], next_cursor: cursor, processed_total: cursor, total_target: target, done: true });
-  }
-  const draftRow = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'")
-    .first<{ value: string }>();
-  if (!draftRow) return c.json({ error: 'no scoring draft' }, 400);
-  const draft = normalizeScoringConfig(JSON.parse(draftRow.value));
-
-  const rows = (
-    await c.env.DB.prepare(
-      `SELECT j.url_hash, j.title, j.location, j.description_text, j.score, j.verdict, co.name company
-       FROM jobs j JOIN companies co ON co.id = j.company_id
-       WHERE j.description_text IS NOT NULL
-       ORDER BY j.first_seen DESC, j.url_hash LIMIT ? OFFSET ?`,
-    ).bind(limit, cursor).all<Record<string, string | number | null>>()
-  ).results;
-
-  const diffs = [];
-  for (const r of rows) {
-    const job: Job = {
-      id: '', company: String(r.company), title: String(r.title), location: String(r.location ?? ''),
-      url: '', description: String(r.description_text ?? ''), posted_at: null,
-      ats: 'greenhouse', raw: null,
-    };
-    const res = scoreJob(job, draft);
-    const oldVerdict = String(r.verdict);
-    const oldScore = Number(r.score);
-    if (res.best.verdict !== oldVerdict || Math.abs(res.best.adjusted_score - oldScore) >= 8) {
-      diffs.push({
-        url_hash: r.url_hash,
-        title: String(r.title).slice(0, 60),
-        company: r.company,
-        old_score: oldScore,
-        new_score: res.best.adjusted_score,
-        old_verdict: oldVerdict,
-        new_verdict: res.best.verdict,
-      });
-    }
-  }
-  const processed = cursor + rows.length;
-  return c.json({
-    diffs,
-    next_cursor: processed,
-    processed_total: processed,
-    total_target: target,
-    done: rows.length === 0 || processed >= target,
-  });
-});
-
-/**
- * Re-score (glossary): applies the ACTIVE config to open jobs (new/notified),
- * WRITING score/track/verdict/score_breakdown for changed rows. Batches of 50
- * (CPU limit), driven by the /config/rescore runner page. Unlike Replay, this
- * materializes — verdicts are otherwise frozen at ingestion (2026-07-18 audit).
- */
-app.post('/api/rescore-batch', async (c) => {
-  const cursor = Math.max(0, Math.floor(Number(c.req.query('cursor')) || 0));
-  const BATCH = 50;
-  const config = await loadScoringConfig(c.env);
-  const total = await c.env.DB.prepare(
-    "SELECT COUNT(*) n FROM jobs WHERE status IN ('new','notified') AND description_text IS NOT NULL",
-  ).first<{ n: number }>();
-
-  const rows = (
-    await c.env.DB.prepare(
-      `SELECT j.url_hash, j.title, j.location, j.description_text, j.score, j.verdict, j.track,
-              j.why_it_fits, j.positioning_lead, j.enriched_by, co.name company
-       FROM jobs j JOIN companies co ON co.id = j.company_id
-       WHERE j.status IN ('new','notified') AND j.description_text IS NOT NULL
-       ORDER BY j.first_seen DESC, j.url_hash LIMIT ? OFFSET ?`,
-    ).bind(BATCH, cursor).all<Record<string, string | number | null>>()
-  ).results;
-
-  const ts = new Date().toISOString();
-  const writes = [];
-  const changes = [];
-  for (const r of rows) {
-    const job: Job = {
-      id: '', company: String(r.company), title: String(r.title), location: String(r.location ?? ''),
-      url: '', description: String(r.description_text ?? ''), posted_at: null,
-      ats: 'greenhouse', raw: null,
-    };
-    const res = scoreJob(job, config);
-    const scoreChanged =
-      res.best.verdict !== String(r.verdict) ||
-      (res.best.track ?? null) !== (r.track ?? null) ||
-      res.best.adjusted_score !== Number(r.score);
-    // Refresh rule-based texts too — fixes stale pre-English rows. NEVER clobber
-    // Gemini-enriched prose (enriched_by = a model name).
-    const isRule = r.enriched_by == null || r.enriched_by === 'rule';
-    const texts = ruleBasedTexts(res);
-    const textChanged = isRule &&
-      (String(r.why_it_fits ?? '') !== texts.whyItFits || String(r.positioning_lead ?? '') !== texts.positioningLead);
-    if (!scoreChanged && !textChanged) continue;
-    writes.push(
-      isRule
-        ? c.env.DB.prepare('UPDATE jobs SET score = ?, track = ?, verdict = ?, score_breakdown = ?, why_it_fits = ?, positioning_lead = ? WHERE url_hash = ?')
-            .bind(res.best.adjusted_score, res.best.track, res.best.verdict, JSON.stringify(res), texts.whyItFits, texts.positioningLead, r.url_hash)
-        : c.env.DB.prepare('UPDATE jobs SET score = ?, track = ?, verdict = ?, score_breakdown = ? WHERE url_hash = ?')
-            .bind(res.best.adjusted_score, res.best.track, res.best.verdict, JSON.stringify(res), r.url_hash),
-    );
-    if (res.best.verdict !== String(r.verdict) || (res.best.track ?? null) !== (r.track ?? null)) {
-      writes.push(
-        c.env.DB.prepare('INSERT INTO job_events (url_hash, ts, actor, event, detail) VALUES (?,?,?,?,?)')
-          .bind(r.url_hash, ts, 'system', 'rescored',
-            `${r.track ?? '—'}/${r.verdict} ${r.score} → ${res.best.track ?? '—'}/${res.best.verdict} ${res.best.adjusted_score}`),
-      );
-      changes.push({
-        title: String(r.title).slice(0, 60), company: r.company,
-        old: `${r.track ?? '—'}/${r.verdict}`, new: `${res.best.track ?? '—'}/${res.best.verdict}`,
-        old_score: Number(r.score), new_score: res.best.adjusted_score,
-      });
-    }
-  }
-  if (writes.length) await c.env.DB.batch(writes);
-
-  const processed = cursor + rows.length;
-  return c.json({
-    changes,
-    updated: writes.length,
-    next_cursor: processed,
-    processed_total: processed,
-    total_open: total?.n ?? 0,
-    done: rows.length === 0,
-  });
-});
+// Replay/Preview and Re-score removed 2026-07-19: calibration edits apply live
+// immediately; new jobs use the active config, stored jobs keep their score.
 
 // Telegram webhook (step 8): authenticated by the secret path token — the
 // auth middleware lets /tg/* through and THIS check is the gate.

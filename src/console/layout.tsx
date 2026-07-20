@@ -149,30 +149,34 @@ details.sect > summary::-webkit-details-marker { display:none }
 .rowactions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px }
 .rowactions .spacer { flex:1 }
 
-/* Calibration matrix (2026-07-19 rebuild): BANK-style collapsible groups (reuse
-   details.rc); each concept is ONE row — English | Español | Strength | Path —
-   reflecting the DB 1:1. Location rows are gates (no Strength). */
+/* Calibration matrix (2026-07-19): BANK-style collapsible groups (reuse details.rc);
+   each concept is ONE row — English | Español | Strength | Path — with ✏️ inline edit.
+   Location rows are gates (no Strength). */
 .matrix-groups { margin-bottom:14px }
 .mside + .mside { margin-top:16px }
 .msidehead { font-size:11px; text-transform:uppercase; letter-spacing:.05em;
   color:var(--muted); font-weight:700; margin:6px 0 4px }
-.mconcept { display:grid; grid-template-columns:1fr 1fr 74px 132px 30px; gap:10px;
+.mgrid { display:grid; grid-template-columns:1fr 1fr 74px 132px 64px; gap:10px;
   align-items:center; padding:7px 0; border-top:1px solid var(--line) }
-.mconcept.loc { grid-template-columns:1fr 1fr 132px 30px }
-.mside .mconcept:first-of-type { border-top:none }
-.mconcept.mhead { border-top:none; font-size:11px; text-transform:uppercase;
+.mgrid.loc { grid-template-columns:1fr 1fr 132px 64px }
+.mside .mconcept-wrap:first-of-type .mgrid { border-top:none }
+.mgrid.mchead { border-top:none; font-size:11px; text-transform:uppercase;
   letter-spacing:.04em; color:var(--muted); font-weight:700 }
 .mc-en, .mc-es { min-width:0; overflow-wrap:anywhere; font-size:14px }
 .mc-str { font-variant-numeric:tabular-nums; font-size:14px }
 .mc-empty { color:var(--warn); font-weight:700 }
-.mc-x { text-align:right }
+.mc-actions { display:flex; gap:6px; justify-content:flex-end; align-items:center }
+.mc-edit { display:none }
+.mconcept-wrap.editing .mc-read { display:none }
+.mconcept-wrap.editing .mc-edit { display:grid }
+.mc-in { min-height:34px; padding:5px 8px; font-size:13px; width:100%;
+  border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg) }
+.mc-btn { min-height:30px; padding:3px 9px; font-size:13px }
 .path { display:inline-block; font-size:10px; font-weight:700; border-radius:4px;
   padding:0 5px; margin-left:4px; white-space:nowrap }
 .p-0 { background:var(--bad-soft); color:var(--bad) }
 .p-1 { background:var(--warn-soft); color:var(--warn) }
 .p-2 { background:var(--ok-soft); color:var(--ok) }
-.morebtn { background:none; border:none; min-height:0; padding:2px 0; color:var(--accent);
-  font-size:12px; cursor:pointer; text-decoration:underline; text-underline-offset:3px }
 .calsearch { display:flex; align-items:center; gap:10px; width:100%; margin-bottom:10px;
   background:var(--card); border:1px solid var(--line); border-radius:8px; padding:0 12px; min-height:44px }
 .calsearch .cs-ic { flex:none; color:var(--accent); font-size:15px; line-height:1 }
@@ -228,7 +232,6 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
 .w-full { width:100% } .w-xs { width:60px } .w-sm { width:70px } .w-md { width:80px }
 .right { margin-left:auto; display:flex; gap:var(--sp-3); align-items:center }
 .hidden { display:none } .cap { text-transform:capitalize } .bd-warn { border-color:var(--warn) }
-.fs-sm { font-size:var(--fs-sm) }
 .kv { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:var(--sp-2) var(--sp-6); margin:var(--sp-4) 0 }
 .kv .k { color:var(--muted); font-size:var(--fs-sm); margin-right:var(--sp-2) }
 
@@ -275,7 +278,7 @@ export interface FooterStatus {
 
 const NAV_GROUPS: Array<[string, Array<[string, string]>]> = [
   ['Operate', [['/jobs', 'Jobs'], ['/tracker', 'Tracker']]],
-  ['Profile & setup', [['/contact', 'Contact'], ['/companies', 'Companies'], ['/config', 'Calibration'], ['/blocks', 'Bank'], ['/answers', 'Answers']]],
+  ['Profile & setup', [['/contact', 'Contact'], ['/companies', 'Companies'], ['/calibration', 'Calibration'], ['/blocks', 'Bank'], ['/answers', 'Answers']]],
   ['AI', [['/ai', 'AI']]],
   ['System', [['/', 'Overview'], ['/health', 'Health']]],
 ];

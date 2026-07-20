@@ -54,6 +54,8 @@ export interface ScoringConfig {
   /** level_fit negative terms subject to the condition above (e.g. 'senior'). */
   conditional_level_negatives?: Keyword[];
   tracks: TrackConfig[];
+  /** Bumped on every save; stamped into each job's score_breakdown for traceability. */
+  version?: number;
 }
 
 export interface KeywordMatch {
@@ -96,6 +98,8 @@ export interface ScoreResult {
   best: { track: string | null; verdict: Verdict; adjusted_score: number };
   /** Only when best.verdict === 'Skip': the closest reason, in plain language. */
   near_miss_reason?: string;
+  /** The config `version` that produced this score (traceability; no recalc). */
+  config_version?: number;
 }
 
 /** Normalizes for matching: lowercase + no diacritics (matches EN/ES regardless of accents). */
@@ -273,6 +277,7 @@ export function scoreJob(job: Job, config: ScoringConfig): ScoreResult {
 
   const result: ScoreResult = { score, breakdown, tracks, best };
   if (best.verdict === 'Skip') result.near_miss_reason = nearMissReason(result, config);
+  if (config.version !== undefined) result.config_version = config.version;
   return result;
 }
 

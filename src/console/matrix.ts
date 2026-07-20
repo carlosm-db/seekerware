@@ -137,17 +137,6 @@ export interface ApplyError { error: string }
 
 const norm = (s: string) => s.trim().toLowerCase();
 
-/** Tracks that can take a path word for a category+direction (existing gates only — never creates gates). */
-export function pathOptions(cfg: ScoringConfig, category: MatrixCategory, favor: boolean): string[] {
-  return cfg.tracks
-    .filter((t) => t.gates.some((g) => {
-      const titleScope = g.scope === 'title' || g.scope === 'title_location';
-      const scopeOk = category === 'location' ? !titleScope : titleScope;
-      return scopeOk && (favor ? (g.require?.length ?? 0) > 0 : (g.reject?.length ?? 0) > 0);
-    }))
-    .map((t) => t.id);
-}
-
 function findGate(cfg: ScoringConfig, track: string, category: MatrixCategory, favor: boolean) {
   const t = cfg.tracks.find((x) => x.id === track);
   if (!t) return null;
@@ -223,4 +212,53 @@ export function applyPairRemove(cfg: ScoringConfig, target: RemoveTarget): { rem
     if (gate[lname]) gate[lname] = gate[lname]!.filter((x) => x.en !== target.en);
   }
   return { removed: [target.en] };
+}
+
+export type EditTarget =
+  | { kind: 'keyword'; category: Category; oldEn: string; en: string; es: string; weight: number }
+  | { kind: 'gate'; track: string; gate: string; oldEn: string; en: string; es: string };
+
+const VALID_WEIGHTS = new Set([1, 2, 3, -2, -3]);
+
+/** ✏️ edits a concept in place (both languages required). Keeps path-linked gate copies in sync. */
+export function applyWordEdit(cfg: ScoringConfig, t: EditTarget): ApplyError | null {
+  const oldEn = norm(t.oldEn);
+  const en = norm(t.en);
+  const es = norm(t.es);
+  if (!en || !es) return { error: 'both languages are required — English AND Español' };
+
+  if (t.kind === 'keyword') {
+    const list = cfg.keywords[t.category];
+    const k = list?.find((x) => x.en === oldEn);
+    if (!list || !k) return { error: `"${t.oldEn}" not found in ${t.category}` };
+    if (en !== oldEn && list.some((x) => x !== k && x.en === en)) return { error: `"${en}" already exists` };
+    const weight = Math.round(t.weight);
+    if (!VALID_WEIGHTS.has(weight)) return { error: 'strength must be +1..+3 or −2/−3' };
+    k.en = en; k.es = es; k.weight = weight;
+    if (en !== oldEn) {
+      // keep path-linked gate copies in sync with the renamed concept
+      for (const tr of cfg.tracks) {
+        for (const g of tr.gates) {
+          for (const lname of ['require', 'reject'] as const) {
+            const item = g[lname]?.find((x) => x.en === oldEn);
+            if (item) { item.en = en; item.es = es; }
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  const track = cfg.tracks.find((x) => x.id === t.track);
+  const gate = track?.gates.find((g) => g.id === t.gate);
+  if (!gate) return { error: `gate ${t.gate} not found in ${t.track}` };
+  for (const lname of ['require', 'reject'] as const) {
+    const item = gate[lname]?.find((x) => x.en === oldEn);
+    if (item) {
+      if (en !== oldEn && gate[lname]!.some((x) => x !== item && x.en === en)) return { error: `"${en}" already exists` };
+      item.en = en; item.es = es;
+      return null;
+    }
+  }
+  return { error: `"${t.oldEn}" not found in gate ${t.gate}` };
 }
