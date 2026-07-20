@@ -373,7 +373,7 @@ async function processCompany(
       }
     }
 
-    batch.insertJob({
+    const row = {
       url_hash: hash, url: job.url, company_id: company.id, ats: job.ats, ext_id: job.id,
       title: job.title, location: job.location, posted_at: job.posted_at,
       freshness_ok: freshness.freshness_ok, track: result.best.track,
@@ -383,7 +383,12 @@ async function processCompany(
       why_it_fits: texts.whyItFits, positioning_lead: texts.positioningLead,
       description_text: job.description, score_breakdown: JSON.stringify(result),
       title_norm: normalizeTitle(job.title), enriched_by: enrichedBy, role_analysis: roleAnalysis,
-    });
+    };
+    // A NOTIFIED job is persisted IMMEDIATELY: if this run is cut before the final batch flush,
+    // it must not be lost or re-notified next run (dedup skips already-saved hashes). Everything
+    // else stays in the end-of-run batch (losing those on a crash is harmless: no notification).
+    if (status === 'notified') await batch.insertJobNow(row);
+    else batch.insertJob(row);
   }
 
   // Auto-expire ONLY on a successful fetch (being here = success): absent from the feed -> closed

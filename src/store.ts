@@ -112,21 +112,32 @@ export class RunBatch {
 
   constructor(private env: Env) {}
 
-  insertJob(j: JobInsert): void {
-    this.statements.push(
-      this.env.DB.prepare(
-        `INSERT INTO jobs (url_hash, url, company_id, ats, ext_id, title, location, posted_at,
-           freshness_ok, track, score, verdict, status, first_seen, last_seen, notified_at,
-           cv_pending, why_it_fits, positioning_lead, description_text, score_breakdown, title_norm,
-           enriched_by, role_analysis)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      ).bind(
-        j.url_hash, j.url, j.company_id, j.ats, j.ext_id, j.title, j.location, j.posted_at,
-        j.freshness_ok, j.track, j.score, j.verdict, j.status, j.first_seen, j.last_seen,
-        j.notified_at, j.cv_pending, j.why_it_fits, j.positioning_lead, j.description_text,
-        j.score_breakdown, j.title_norm, j.enriched_by, j.role_analysis,
-      ),
+  private jobStmt(j: JobInsert): D1PreparedStatement {
+    return this.env.DB.prepare(
+      `INSERT INTO jobs (url_hash, url, company_id, ats, ext_id, title, location, posted_at,
+         freshness_ok, track, score, verdict, status, first_seen, last_seen, notified_at,
+         cv_pending, why_it_fits, positioning_lead, description_text, score_breakdown, title_norm,
+         enriched_by, role_analysis)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(
+      j.url_hash, j.url, j.company_id, j.ats, j.ext_id, j.title, j.location, j.posted_at,
+      j.freshness_ok, j.track, j.score, j.verdict, j.status, j.first_seen, j.last_seen,
+      j.notified_at, j.cv_pending, j.why_it_fits, j.positioning_lead, j.description_text,
+      j.score_breakdown, j.title_norm, j.enriched_by, j.role_analysis,
     );
+  }
+
+  insertJob(j: JobInsert): void {
+    this.statements.push(this.jobStmt(j));
+  }
+
+  /**
+   * Immediate durable write of ONE job (same INSERT as insertJob, run now instead of queued).
+   * Used for a NOTIFIED job so a run cut before the final flush can't lose it or cause a
+   * re-notification (dedup skips already-saved hashes on the next run).
+   */
+  async insertJobNow(j: JobInsert): Promise<void> {
+    await this.jobStmt(j).run();
   }
 
   /**
