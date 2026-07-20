@@ -138,13 +138,25 @@ export async function handleTelegramUpdate(
     }
 
     if (kind === 'p') {
-      // Prepare = build the kit (Q&A) + CV ON THE SPOT. Ack immediately, do the
-      // heavy build in the background (waitUntil), then push the kit + start the
-      // red-question chat. The submit click stays the owner's (§7.8).
-      await answerCallback(env, cb.id, 'Preparing kit + CV… ⏳', doFetch);
+      // Prepare via Telegram = build the kit (Q&A) NOW and QUEUE the CV. A Telegram webhook
+      // can't block ~30s, so we do NOT build the CV here (waitUntil gets killed mid-PDF — the
+      // regression reverted in the console). Instead mark cv_pending=1 ("the order") and the
+      // 15-min tick builds it reliably. The kit build is fast + safe in waitUntil. Submit stays
+      // the owner's (§7.8).
+      await answerCallback(env, cb.id, 'Armando Q&A… el CV queda en cola ⏳', doFetch);
       const finish = (async () => {
-        const { prepareJob } = await import('./kit/kit');
-        await prepareJob(env, hash, doFetch);
+        const { buildKit } = await import('./kit/kit');
+        const preparedIso = new Date().toISOString();
+        await env.DB.batch([
+          env.DB.prepare(
+            `INSERT INTO applications (url_hash, stage, updated_at) VALUES (?, 'prepared', ?)
+             ON CONFLICT(url_hash) DO UPDATE SET stage='prepared', updated_at=excluded.updated_at`,
+          ).bind(hash, preparedIso),
+          env.DB.prepare('UPDATE jobs SET cv_pending = 1 WHERE url_hash = ?').bind(hash),
+          env.DB.prepare('INSERT INTO job_events (url_hash, ts, actor, event, detail) VALUES (?,?,?,?,?)')
+            .bind(hash, preparedIso, 'user', 'stage:prepared', 'prepare via Telegram (kit; CV queued)'),
+        ]);
+        await buildKit(env, hash, doFetch);
         const kit = await env.DB.prepare(
           'SELECT answers, red_questions, eeoc_questions, positioning, cv_doc_url, deep_link FROM application_kits WHERE url_hash = ?',
         ).bind(hash).first<KitRow>();

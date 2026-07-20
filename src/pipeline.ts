@@ -13,6 +13,55 @@ import { generateCv } from './ia/cv_factory';
 import { RunStats, trackedFetch } from './runstats';
 import { RunBatch, getCompaniesPage, getCompanyJobs, getConfigValue, openRun, type StoredCompany } from './store';
 
+/**
+ * Drains the CV queue: builds ONE queued CV (oldest cv_pending job) per call. Standalone so the
+ * 15-min cron tick can run it WITHOUT the company review — it only reads jobs already flagged
+ * `cv_pending=1`; it NEVER polls a company. generateCv clears the flag on success; on failure a
+ * `gdocs_fail` event is logged so the existing retry cap (cv_pending_max) still applies.
+ */
+export async function buildPendingCvs(env: Env, doFetch: typeof fetch = fetch): Promise<void> {
+  if (!env.GOOGLE_OAUTH_REFRESH_TOKEN) return;
+  const pending = await env.DB.prepare(
+    `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, c.name company
+     FROM jobs j JOIN companies c ON c.id = j.company_id
+     WHERE j.cv_pending = 1 AND j.status IN ('new','notified')
+     ORDER BY j.notified_at, j.first_seen LIMIT 1`,
+  ).first<Record<string, string | null>>();
+  if (!pending) return; // empty queue → no-op
+
+  const hash = String(pending.url_hash);
+  const nowIso = new Date().toISOString();
+  const cvPendingMax = (JSON.parse((await getConfigValue(env, 'observability')) ?? '{}') as
+    { cv_pending_max?: number }).cv_pending_max ?? 5;
+
+  // Retry budget: a broken build must not burn Gemini calls forever (2026-07-18 audit).
+  const fails = await env.DB.prepare(
+    "SELECT COUNT(*) n FROM events WHERE type = 'gdocs_fail' AND url_hash = ?",
+  ).bind(hash).first<{ n: number }>();
+  if ((fails?.n ?? 0) >= cvPendingMax) {
+    await env.DB.batch([
+      env.DB.prepare('UPDATE jobs SET cv_pending = 0 WHERE url_hash = ?').bind(hash),
+      env.DB.prepare('INSERT INTO job_events (url_hash, ts, actor, event, detail) VALUES (?,?,?,?,?)')
+        .bind(hash, nowIso, 'system', 'cv_retries_exhausted',
+          `gave up after ${fails?.n} failed builds (cv_pending_max=${cvPendingMax}); re-queue from /cvs once fixed`),
+    ]);
+    return;
+  }
+
+  const fx = await generateCv(env, {
+    id: String(pending.ext_id ?? ''), company: String(pending.company), title: String(pending.title),
+    location: String(pending.location ?? ''), url: String(pending.url),
+    description: String(pending.description_text ?? ''), posted_at: null,
+    ats: (pending.ats ?? 'greenhouse') as Job['ats'], raw: null,
+    url_hash: hash, track: pending.track ?? null,
+  }, 'en', false, doFetch); // on success generateCv sets cv_pending = 0
+  if (!fx.ok) {
+    await env.DB.prepare(
+      'INSERT INTO events (run_id, ts, type, severity, url_hash, detail) VALUES (NULL, ?, ?, ?, ?, ?)',
+    ).bind(nowIso, 'gdocs_fail', 'warn', hash, fx.error ?? 'cv build failed').run();
+  }
+}
+
 export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise<RunStats> {
   const startedMs = Date.now();
   const nowIso = new Date().toISOString();
@@ -37,44 +86,10 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
       cv_pending_max?: number;
     };
     const failStreak = observability.maintenance_fail_streak ?? 3;
-    const cvPendingMax = observability.cv_pending_max ?? 5;
 
-    // CV factory: builds ONE pending item per run (oldest first). status also
-    // accepts 'new' so the console "Generate REAL CV" action can queue any job.
-    if (env.GOOGLE_OAUTH_REFRESH_TOKEN) {
-      const pending = await env.DB.prepare(
-        `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, c.name company
-         FROM jobs j JOIN companies c ON c.id = j.company_id
-         WHERE j.cv_pending = 1 AND j.status IN ('new','notified')
-         ORDER BY j.notified_at, j.first_seen LIMIT 1`,
-      ).first<Record<string, string | null>>();
-      if (pending) {
-        // Retry budget: a broken build (e.g. template not shared with the SA)
-        // must not burn 2 Gemini calls every run forever (2026-07-18 audit).
-        const fails = await env.DB.prepare(
-          "SELECT COUNT(*) n FROM events WHERE type = 'gdocs_fail' AND url_hash = ?",
-        ).bind(pending.url_hash).first<{ n: number }>();
-        if ((fails?.n ?? 0) >= cvPendingMax) {
-          await env.DB.prepare('UPDATE jobs SET cv_pending = 0 WHERE url_hash = ?').bind(pending.url_hash).run();
-          stats.event({
-            type: 'cv_retries_exhausted', severity: 'warn', url_hash: String(pending.url_hash),
-            detail: `gave up after ${fails?.n} failed builds (cv_pending_max=${cvPendingMax}); re-queue from /cvs once fixed`,
-          });
-        } else {
-          const fx = await generateCv(env, {
-            id: String(pending.ext_id ?? ''), company: String(pending.company), title: String(pending.title),
-            location: String(pending.location ?? ''), url: String(pending.url),
-            description: String(pending.description_text ?? ''), posted_at: null,
-            ats: (pending.ats ?? 'greenhouse') as Job['ats'], raw: null,
-            url_hash: String(pending.url_hash), track: pending.track ?? null,
-          }, 'en', false, doFetch);
-          stats.geminiCalls += fx.gemini_calls;
-          if (!fx.ok) {
-            stats.event({ type: 'gdocs_fail', severity: 'warn', url_hash: String(pending.url_hash), detail: fx.error });
-          }
-        }
-      }
-    }
+    // The CV queue is drained by buildPendingCvs() on every cron tick (decoupled from the
+    // company review, so queued CVs build within ~15 min without waking a burst). A burst run
+    // no longer builds CVs here — it only reviews companies.
 
     const { companies, nextCursor } = await getCompaniesPage(env, stats);
     stats.companiesTotal = companies.length;

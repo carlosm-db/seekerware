@@ -6,7 +6,7 @@ import { urlHash } from './connectors/common';
 import { counts } from './store';
 import { loadScoringConfig } from './config-store';
 import { scoreJob, type ScoreResult, type ScoringConfig } from './scoring';
-import { runPipeline } from './pipeline';
+import { buildPendingCvs, runPipeline } from './pipeline';
 import { sendTelegram } from './notify';
 import { consoleApp } from './console/app';
 import type { ConsoleEnv } from './console/auth';
@@ -148,8 +148,14 @@ export default {
     const pageSize = Math.max(1, Number(pageRow?.value ?? '25') || 25);
     const batchesNeeded = Math.max(1, Math.ceil((countRow?.n ?? 0) / pageSize));
 
+    // Every tick: drain the CV queue (reads jobs WHERE cv_pending=1; no-op if none). Decoupled
+    // from the company review — never polls a company — so queued CVs (e.g. from Telegram
+    // Prepare) build within ~15 min without waking a burst.
+    ctx.waitUntil(buildPendingCvs(env).catch((e) => console.log(`cv queue: ${e instanceof Error ? e.message : 'err'}`)));
+
+    // Company review: burst windows only (owner-editable schedule; ~2×/day).
     if (!shouldRunAt(new Date(), sched, batchesNeeded)) {
-      console.log(`cron tick skipped: outside bursts [${sched.burst_hours.join(',')}] ${sched.timezone}`);
+      console.log(`cron tick: company review skipped (outside bursts [${sched.burst_hours.join(',')}] ${sched.timezone}); CV queue checked`);
       return;
     }
     ctx.waitUntil(
