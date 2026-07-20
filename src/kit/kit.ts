@@ -2,8 +2,9 @@
 // positioning inputs + matched answers from the APPROVED Q&A + red questions
 // + deep link. The kit prepares; the human submits. Zero AI in this module.
 
-import type { Ats, Env } from '../types';
+import type { Ats, Env, Job } from '../types';
 import { detectQuestions, matchAnswers, type AnswerRow, type MatchedAnswer } from './questions';
+import { answerPolisher, type RoleAnalysis } from '../ia/agents';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -81,4 +82,40 @@ export async function buildKit(env: Env, urlHash: string, doFetch: Fetcher = fet
     detectable,
     error: detectError,
   };
+}
+
+/**
+ * On-demand (NOT part of buildKit, which stays zero-AI): suggest job-tailored
+ * versions of the matched Q&A answers and store them on the kit
+ * (application_kits.answer_suggestions). SUGGESTIONS only — never auto-applied,
+ * never written to the generic Q&A bank (that would pollute reuse); the owner
+ * reviews them and uses them when filling THIS form (§7.1/§7.8).
+ */
+export async function polishAnswers(
+  env: Env, urlHash: string, doFetch: Fetcher = fetch,
+): Promise<{ ok: boolean; count: number; error?: string }> {
+  const kit = await env.DB.prepare('SELECT answers FROM application_kits WHERE url_hash = ?')
+    .bind(urlHash).first<{ answers: string | null }>();
+  if (!kit) return { ok: false, count: 0, error: 'kit not built yet' };
+  const matched = (JSON.parse(kit.answers ?? '[]') as MatchedAnswer[])
+    .filter((a) => !a.red && a.answer)
+    .map((a) => ({ question: a.question, answer: String(a.answer) }));
+  if (!matched.length) return { ok: true, count: 0 };
+
+  const j = await env.DB.prepare('SELECT title, description_text, role_analysis FROM jobs WHERE url_hash = ?')
+    .bind(urlHash).first<{ title: string; description_text: string | null; role_analysis: string | null }>();
+  if (!j) return { ok: false, count: 0, error: 'job not found' };
+  let analysis: RoleAnalysis | null = null;
+  try { analysis = j.role_analysis ? (JSON.parse(j.role_analysis) as RoleAnalysis) : null; } catch { analysis = null; }
+
+  const job: Job = {
+    id: '', company: '', title: j.title, location: '', url: '',
+    description: j.description_text ?? '', posted_at: null, ats: 'greenhouse', raw: null,
+  };
+  const res = await answerPolisher(env, job, analysis, matched, doFetch);
+  if (!res.ok || !res.data) return { ok: false, count: 0, error: res.error };
+
+  await env.DB.prepare('UPDATE application_kits SET answer_suggestions = ?, updated_at = ? WHERE url_hash = ?')
+    .bind(JSON.stringify(res.data.suggestions), new Date().toISOString(), urlHash).run();
+  return { ok: true, count: res.data.suggestions.length };
 }

@@ -277,3 +277,59 @@ export async function cvVerifier(
 ): Promise<GeminiResult<VerifierNotes>> {
   return runAgent<VerifierNotes, VerifyState>(env, cvVerifierAgent, { job, renderedBody, analysis }, doFetch);
 }
+
+// ---------- answer_polisher ----------
+
+export interface PolishedAnswer {
+  question: string;
+  suggestion: string;
+}
+
+export interface PolishResult {
+  suggestions: PolishedAnswer[];
+}
+
+interface PolishState {
+  job: Job;
+  analysis?: RoleAnalysis | null;
+  answers: Array<{ question: string; answer: string }>;
+}
+
+const answerPolisherAgent: Agent<PolishState> = {
+  name: 'answer_polisher',
+  models: ['gemini-3.5-flash', 'gemini-3.1-flash-lite'],
+  temperature: 0.3,
+  instruction: () =>
+    'You are the answer_polisher. Given the owner\'s ALREADY-APPROVED standard answers matched to a ' +
+    "job's form questions, plus the role analysis, SUGGEST a tailored, polished version of each answer " +
+    'for THIS specific job. Keep the owner\'s facts and voice — do NOT invent experience, figures, or ' +
+    'new claims; only rephrase and shift emphasis toward what the role values. These are SUGGESTIONS ' +
+    'the owner reviews before use; you are NOT writing a final submission. Return one suggestion per input question.',
+  buildPrompt: (s) =>
+    analysisContext(s.analysis) +
+    'APPROVED ANSWERS TO TAILOR (keep the facts and voice; only rephrase/emphasize for this job):\n' +
+    s.answers.map((a, i) => `${i + 1}. Q: ${a.question}\n   A: ${a.answer}`).join('\n') +
+    `\n\nJOB (title: ${s.job.title})\n` + wrapUntrusted(s.job.description.slice(0, 4000)),
+  schema: () => ({
+    type: 'OBJECT',
+    required: ['suggestions'],
+    properties: {
+      suggestions: {
+        type: 'ARRAY',
+        maxItems: 20,
+        items: {
+          type: 'OBJECT',
+          required: ['question', 'suggestion'],
+          properties: { question: { type: 'STRING' }, suggestion: { type: 'STRING' } },
+        },
+      },
+    },
+  }),
+};
+
+export async function answerPolisher(
+  env: Env, job: Job, analysis: RoleAnalysis | null,
+  answers: Array<{ question: string; answer: string }>, doFetch: Fetcher = fetch,
+): Promise<GeminiResult<PolishResult>> {
+  return runAgent<PolishResult, PolishState>(env, answerPolisherAgent, { job, analysis, answers }, doFetch);
+}

@@ -319,13 +319,15 @@ export function consoleApp(): App {
         ).results
       : [];
     const kit = await c.env.DB.prepare(
-      `SELECT k.answers, k.red_questions, k.eeoc_questions, k.deep_link, k.updated_at, a.stage
+      `SELECT k.answers, k.red_questions, k.eeoc_questions, k.answer_suggestions, k.deep_link, k.updated_at, a.stage
        FROM jobs j LEFT JOIN application_kits k ON k.url_hash = j.url_hash
        LEFT JOIN applications a ON a.url_hash = j.url_hash WHERE j.url_hash = ?`,
     ).bind(hash).first<Record<string, string | null>>();
     const kitAnswers = (() => { try { return JSON.parse(String(kit?.answers ?? '[]')) as Array<{ question: string; answer: string | null; red: boolean }>; } catch { return []; } })();
     const kitRed = (() => { try { return JSON.parse(String(kit?.red_questions ?? '[]')) as string[]; } catch { return []; } })();
     const kitEeoc = (() => { try { return JSON.parse(String(kit?.eeoc_questions ?? '[]')) as string[]; } catch { return []; } })();
+    const kitSuggestions = (() => { try { return JSON.parse(String(kit?.answer_suggestions ?? '[]')) as Array<{ question: string; suggestion: string }>; } catch { return []; } })();
+    const suggBy = new Map(kitSuggestions.map((s) => [s.question, s.suggestion]));
     const hasKit = kit?.updated_at != null;
 
     return page(c, String(j.title), (
@@ -376,7 +378,11 @@ export function consoleApp(): App {
               <form class="inline" method="post" action={`/jobs/${hash}/kit`}>
                 <button type="submit" class="primary">Build kit</button>
               </form>
-            ) : null}
+            ) : (
+              <form class="inline" method="post" action={`/jobs/${hash}/polish`}>
+                <button type="submit">✨ Polish answers</button>
+              </form>
+            )}
             {j.cv_doc_url ? <a class="btnlike" href={String(j.cv_doc_url)} target="_blank" rel="noreferrer">CV Doc ↗</a>
               : j.cv_pending ? <span class="muted">CV queued — the next run builds it</span> : null}
             {kit?.deep_link ? <a class="btnlike" href={String(kit.deep_link)} target="_blank" rel="noreferrer">Application form ↗</a> : null}
@@ -385,7 +391,11 @@ export function consoleApp(): App {
             <div class="mt-1">
               <div class="muted">{kitAnswers.filter((a) => !a.red).length} matched · {kitRed.length} red · {kitEeoc.length} EEOC</div>
               {kitAnswers.filter((a) => !a.red).map((a) => (
-                <div class="bullet"><div class="muted">{a.question}</div><div>{a.answer}</div></div>
+                <div class="bullet">
+                  <div class="muted">{a.question}</div>
+                  <div>{a.answer}</div>
+                  {suggBy.get(a.question) ? <div class="muted">✨ tailored for this job (review before use): {suggBy.get(a.question)}</div> : null}
+                </div>
               ))}
               {kitRed.length ? (
                 <div class="mt-2"><strong class="warn">Unanswered:</strong>
@@ -1726,6 +1736,18 @@ export function consoleApp(): App {
         ? `kit built: ${r.matched} matched · ${r.red} red · ${r.eeoc} EEOC-flagged`
         : `kit built (this ATS does not expose its form publicly — open the form to see the questions)${r.error ? ` · ${r.error}` : ''}`)
       : `kit failed: ${r.error}`;
+    return c.redirect(`/jobs/${hash}?m=${encodeURIComponent(msg)}`);
+  });
+
+  // answer_polisher: suggest job-tailored versions of the matched answers (on-demand,
+  // stored on the kit; SUGGESTIONS the owner uses when filling THIS form — never the bank).
+  app.post('/jobs/:hash/polish', async (c) => {
+    const hash = c.req.param('hash');
+    const { polishAnswers } = await import('../kit/kit');
+    const r = await polishAnswers(c.env, hash);
+    const msg = r.ok
+      ? (r.count ? `${r.count} tailored suggestion(s) ready — review them below` : 'no matched answers to polish yet')
+      : `polish failed: ${r.error}`;
     return c.redirect(`/jobs/${hash}?m=${encodeURIComponent(msg)}`);
   });
 
