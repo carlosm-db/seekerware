@@ -75,8 +75,8 @@ export function consoleApp(): App {
       `SELECT COUNT(*) n FROM jobs j
        LEFT JOIN applications a ON a.url_hash = j.url_hash
        WHERE j.status IN ('new','notified') AND j.verdict != 'Skip'
-         AND (a.url_hash IS NULL OR (a.stage = 'prepared' AND a.snoozed_until IS NOT NULL AND a.snoozed_until <= ?))`,
-    ).bind(now()).first<{ n: number }>();
+         AND a.url_hash IS NULL`,
+    ).first<{ n: number }>();
     return r?.n ?? 0;
   }
 
@@ -201,22 +201,22 @@ export function consoleApp(): App {
     const action = String(b.stage ?? '');
     const ts = now();
     if (!hash || !action) return c.redirect('/?m=invalid action');
-    if (action === 'snooze3') {
-      const until = new Date(Date.now() + 3 * 86400000).toISOString();
-      await c.env.DB.prepare(
-        `INSERT INTO applications (url_hash, stage, snoozed_until, updated_at) VALUES (?, 'prepared', ?, ?)
-         ON CONFLICT(url_hash) DO UPDATE SET snoozed_until = ?, updated_at = ?`,
-      ).bind(hash, until, ts, until, ts).run();
-      await jobEvent(c.env, hash, 'snoozed', 'until ' + until.slice(0, 10));
-      return c.redirect('/?m=snoozed 3 days');
+    if (action === 'prepared') {
+      // Prepare = "get me ready to apply": build the kit (Q&A) AND the CV on the spot.
+      const { prepareJob } = await import('../kit/kit');
+      const r = await prepareJob(c.env, hash);
+      const msg = r.ok
+        ? `prepared: kit ready${r.cv?.ok ? ' + CV built' : r.cv?.error ? ` · CV retry queued (${r.cv.error})` : ''}`
+        : `prepare failed: ${r.error ?? 'unknown'}`;
+      return c.redirect(`/jobs/${hash}?m=${encodeURIComponent(msg)}`);
     }
     const appliedAt = action === 'applied' ? ts : null;
     await c.env.DB.prepare(
-      `INSERT INTO applications (url_hash, stage, applied_at, snoozed_until, updated_at) VALUES (?, ?, ?, NULL, ?)
-       ON CONFLICT(url_hash) DO UPDATE SET stage = ?, applied_at = COALESCE(?, applied_at), snoozed_until = NULL, updated_at = ?`,
+      `INSERT INTO applications (url_hash, stage, applied_at, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(url_hash) DO UPDATE SET stage = ?, applied_at = COALESCE(?, applied_at), updated_at = ?`,
     ).bind(hash, action, appliedAt, ts, action, appliedAt, ts).run();
     await jobEvent(c.env, hash, `stage:${action}`);
-    return c.redirect(`/?m=${action}`);
+    return c.redirect(`/jobs/${hash}?m=${encodeURIComponent(action)}`);
   });
 
   // ---------- Jobs ----------
@@ -227,8 +227,7 @@ export function consoleApp(): App {
     const binds: unknown[] = [];
     if (view === 'survivors') {
       where.push("j.status IN ('new','notified') AND j.verdict != 'Skip'");
-      where.push("(a.url_hash IS NULL OR (a.stage='prepared' AND a.snoozed_until IS NOT NULL AND a.snoozed_until <= ?))");
-      binds.push(now());
+      where.push('a.url_hash IS NULL');
     } else if (view === 'skipped') {
       where.push("(j.verdict = 'Skip' OR j.status = 'skipped')");
     } else if (view === 'closed') {
@@ -329,6 +328,7 @@ export function consoleApp(): App {
     const kitSuggestions = (() => { try { return JSON.parse(String(kit?.answer_suggestions ?? '[]')) as Array<{ question: string; suggestion: string }>; } catch { return []; } })();
     const suggBy = new Map(kitSuggestions.map((s) => [s.question, s.suggestion]));
     const hasKit = kit?.updated_at != null;
+    const currentStage = kit?.stage ?? null;
 
     return page(c, String(j.title), (
       <>
@@ -351,18 +351,10 @@ export function consoleApp(): App {
                 <form class="inline" method="post" action="/triage">
                   <input type="hidden" name="hash" value={hash} />
                   <input type="hidden" name="stage" value={stage} />
-                  <button type="submit" class={stage === 'applied' ? 'primary' : ''}>{label}</button>
+                  <button type="submit" class={stage === currentStage ? 'primary' : ''}>{label}</button>
                 </form>
               );
             })}
-            <form class="inline" method="post" action="/triage">
-              <input type="hidden" name="hash" value={hash} />
-              <input type="hidden" name="stage" value="snooze3" />
-              <button type="submit">Snooze 3d</button>
-            </form>
-            <form class="inline" method="post" action={`/jobs/${hash}/cv`}>
-              <button type="submit">Generate CV</button>
-            </form>
           </div>
         </div>
         {j.why_it_fits ? (
@@ -374,17 +366,13 @@ export function consoleApp(): App {
         <div class="card">
           <h2>Application kit</h2>
           <div class="actions">
-            {!hasKit ? (
-              <form class="inline" method="post" action={`/jobs/${hash}/kit`}>
-                <button type="submit" class="primary">Build kit</button>
-              </form>
-            ) : (
+            {hasKit ? (
               <form class="inline" method="post" action={`/jobs/${hash}/polish`}>
                 <button type="submit">✨ Polish answers</button>
               </form>
-            )}
+            ) : null}
             {j.cv_doc_url ? <a class="btnlike" href={String(j.cv_doc_url)} target="_blank" rel="noreferrer">CV Doc ↗</a>
-              : j.cv_pending ? <span class="muted">CV queued — the next run builds it</span> : null}
+              : j.cv_pending ? <span class="muted">CV build failed — retrying next burst</span> : null}
             {kit?.deep_link ? <a class="btnlike" href={String(kit.deep_link)} target="_blank" rel="noreferrer">Application form ↗</a> : null}
           </div>
           {hasKit ? (
@@ -408,7 +396,7 @@ export function consoleApp(): App {
               ) : null}
               <div class="muted mt-2">Checklist: open the form → autofill from this kit → attach the PDF → review EVERYTHING → you click submit.</div>
             </div>
-          ) : <p class="muted">No kit yet — Build kit to detect the form's questions and match your approved answers.</p>}
+          ) : <p class="muted">No kit yet — hit <strong>Prepare</strong> (above) to build the kit + CV on the spot.</p>}
         </div>
         {breakdown ? (
           <div class="card">
@@ -1624,7 +1612,7 @@ export function consoleApp(): App {
           </div>
         ) : null}
         <div class="card actions">
-          <span class="muted">To generate a CV, open the job (Overview or Jobs) and tap <strong>Generate CV</strong> there.</span>
+          <span class="muted">To generate a CV, open the job (Overview or Jobs) and tap <strong>Prepare</strong> there.</span>
           <a href="/blocks_bank/template-check">Check template ↗</a>
         </div>
         {cvs.length === 0 ? <div class="card"><p>No CVs generated yet.</p></div> : (
@@ -1649,20 +1637,8 @@ export function consoleApp(): App {
     ));
   });
 
-  // Generate CV — lives ON the job. Blocks Bank v4 (2026-07-18): everything saved is
-  // live, so there is no SAMPLE mode anymore — this always queues a REAL build
-  // (picked up by the next pipeline run; force one via POST /api/run).
-  app.post('/jobs/:hash/cv', async (c) => {
-    const hash = c.req.param('hash');
-    const j = await c.env.DB.prepare(
-      'SELECT url_hash, status FROM jobs WHERE url_hash = ?',
-    ).bind(hash).first<{ url_hash: string; status: string }>();
-    if (!j || !['new', 'notified'].includes(j.status)) {
-      return c.redirect(`/jobs/${hash}?m=job not found or closed`);
-    }
-    await c.env.DB.prepare('UPDATE jobs SET cv_pending = 1 WHERE url_hash = ?').bind(hash).run();
-    return c.redirect(`/jobs/${hash}?m=${encodeURIComponent('CV queued — the next pipeline run builds it from Blocks Bank')}`);
-  });
+  // (CV is built by Prepare — /jobs/:hash/prepare via /triage — on the spot; the
+  // cron CV-factory only retries failed builds via cv_pending. No manual queue route.)
 
   // ---------- Applications (step 8: kit queue + Q&A) ----------
   // ---------- Q&A (Setup): approved answers reused across kits ----------

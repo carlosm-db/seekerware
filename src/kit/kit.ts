@@ -119,3 +119,45 @@ export async function polishAnswers(
     .bind(JSON.stringify(res.data.suggestions), new Date().toISOString(), urlHash).run();
   return { ok: true, count: res.data.suggestions.length };
 }
+
+/**
+ * "Prepare" = get ready to apply, ON THE SPOT (dedicated request budget): mark the
+ * application `prepared`, build the kit (Q&A, deterministic), and generate the CV
+ * SYNCHRONOUSLY. If the CV build fails, mark `cv_pending` so the next burst's CV
+ * factory retries it. Used by the console (/triage prepared) and the Telegram Prepare
+ * button. Prepare is the single "produce everything" action (§7.8: submit stays human).
+ */
+export async function prepareJob(
+  env: Env, urlHash: string, doFetch: Fetcher = fetch,
+): Promise<{ ok: boolean; kit: KitResult; cv: { ok: boolean; doc_url?: string; error?: string }; error?: string }> {
+  const nowIso = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO applications (url_hash, stage, updated_at) VALUES (?, 'prepared', ?)
+       ON CONFLICT(url_hash) DO UPDATE SET stage = 'prepared', updated_at = excluded.updated_at`,
+    ).bind(urlHash, nowIso),
+    env.DB.prepare('INSERT INTO job_events (url_hash, ts, actor, event, detail) VALUES (?,?,?,?,?)')
+      .bind(urlHash, nowIso, 'user', 'stage:prepared', 'prepare (kit + CV)'),
+  ]);
+
+  const kit = await buildKit(env, urlHash, doFetch);
+
+  const j = await env.DB.prepare(
+    `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, c.name company
+     FROM jobs j JOIN companies c ON c.id = j.company_id WHERE j.url_hash = ?`,
+  ).bind(urlHash).first<Record<string, string | null>>();
+  let cv: { ok: boolean; doc_url?: string; error?: string } = { ok: false, error: 'job not found' };
+  if (j) {
+    const { generateCv } = await import('../ia/cv_factory');
+    const fx = await generateCv(env, {
+      id: String(j.ext_id ?? ''), company: String(j.company), title: String(j.title),
+      location: String(j.location ?? ''), url: String(j.url), description: String(j.description_text ?? ''),
+      posted_at: null, ats: (j.ats ?? 'greenhouse') as Ats, raw: null,
+      url_hash: String(j.url_hash), track: j.track ?? null,
+    }, 'en', false, doFetch);
+    cv = { ok: fx.ok, doc_url: fx.doc_url, error: fx.error };
+    // Fallback: a failed on-the-spot build re-queues for the next burst's CV factory.
+    if (!fx.ok) await env.DB.prepare('UPDATE jobs SET cv_pending = 1 WHERE url_hash = ?').bind(urlHash).run();
+  }
+  return { ok: kit.ok, kit, cv, error: kit.error };
+}

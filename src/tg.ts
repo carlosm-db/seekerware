@@ -1,11 +1,10 @@
 // Two-way Telegram bot (step 8, ratified L1 design): inline buttons on job
-// notifications ("View kit" / "I applied") and a one-question-at-a-time chat
+// notifications ("Prepare" / "I applied" / "Dismiss") and a one-question-at-a-time chat
 // flow for red questions. The bot never submits anything anywhere; owner
 // replies become DRAFT answers the owner approves in the console before reuse.
 
 import type { Env } from './types';
 import { escapeHtml, sendTelegram } from './notify';
-import { buildKit } from './kit/kit';
 import { normalizeQuestion, type MatchedAnswer } from './kit/questions';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -17,8 +16,9 @@ export function kitButtons(urlHash: string): unknown {
   const p = urlHash.slice(0, 32);
   return {
     inline_keyboard: [[
-      { text: '📋 View kit', callback_data: `k:${p}` },
+      { text: '🛠 Prepare', callback_data: `p:${p}` },
       { text: '✅ I applied', callback_data: `a:${p}` },
+      { text: '🗑 Dismiss', callback_data: `d:${p}` },
     ]],
   };
 }
@@ -72,7 +72,7 @@ function formatKitMessage(title: string, company: string, kit: KitRow): string {
   const pos = JSON.parse(kit.positioning ?? '{}') as { why_it_fits?: string; positioning_lead?: string };
   const lines = [
     `📋 <b>Kit — ${escapeHtml(title)}</b> @ ${escapeHtml(company)}`,
-    kit.cv_doc_url ? `📄 CV: ${kit.cv_doc_url}` : '📄 CV: not built yet — Generate CV from the job page first',
+    kit.cv_doc_url ? `📄 CV: ${kit.cv_doc_url}` : '📄 CV: not built yet (build retrying — check the job page)',
     pos.why_it_fits ? `<b>Why it fits:</b> ${escapeHtml(pos.why_it_fits)}` : '',
     pos.positioning_lead ? `<b>Positioning:</b> ${escapeHtml(pos.positioning_lead)}` : '',
   ];
@@ -96,7 +96,9 @@ function formatKitMessage(title: string, company: string, kit: KitRow): string {
 }
 
 /** Entry point for POST /tg/:token updates. Chat-guarded; errors are swallowed into events. */
-export async function handleTelegramUpdate(env: Env, update: TgUpdate, doFetch: Fetcher = fetch): Promise<void> {
+export async function handleTelegramUpdate(
+  env: Env, update: TgUpdate, doFetch: Fetcher = fetch, waitUntil?: (p: Promise<unknown>) => void,
+): Promise<void> {
   const chatId = update.callback_query?.message?.chat?.id ?? update.message?.chat?.id;
   if (!chatId || String(chatId) !== String(env.TELEGRAM_CHAT_ID ?? '')) return; // foreign chat: ignore silently
 
@@ -121,30 +123,45 @@ export async function handleTelegramUpdate(env: Env, update: TgUpdate, doFetch: 
       return;
     }
 
-    if (kind === 'k') {
-      let kit = await env.DB.prepare(
-        'SELECT answers, red_questions, eeoc_questions, positioning, cv_doc_url, deep_link FROM application_kits WHERE url_hash = ?',
-      ).bind(hash).first<KitRow>();
-      if (!kit) {
-        await buildKit(env, hash, doFetch);
-        kit = await env.DB.prepare(
+    if (kind === 'd') {
+      const nowIso = new Date().toISOString();
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO applications (url_hash, stage, updated_at) VALUES (?, 'dismissed', ?)
+           ON CONFLICT(url_hash) DO UPDATE SET stage='dismissed', updated_at=excluded.updated_at`,
+        ).bind(hash, nowIso),
+        env.DB.prepare("INSERT INTO job_events (url_hash, ts, actor, event, detail) VALUES (?,?,?,?,?)")
+          .bind(hash, nowIso, 'user', 'dismissed', 'dismissed via Telegram'),
+      ]);
+      await answerCallback(env, cb.id, 'Dismissed', doFetch);
+      return;
+    }
+
+    if (kind === 'p') {
+      // Prepare = build the kit (Q&A) + CV ON THE SPOT. Ack immediately, do the
+      // heavy build in the background (waitUntil), then push the kit + start the
+      // red-question chat. The submit click stays the owner's (§7.8).
+      await answerCallback(env, cb.id, 'Preparing kit + CV… ⏳', doFetch);
+      const finish = (async () => {
+        const { prepareJob } = await import('./kit/kit');
+        await prepareJob(env, hash, doFetch);
+        const kit = await env.DB.prepare(
           'SELECT answers, red_questions, eeoc_questions, positioning, cv_doc_url, deep_link FROM application_kits WHERE url_hash = ?',
         ).bind(hash).first<KitRow>();
-      }
-      const j = await env.DB.prepare(
-        'SELECT j.title, c.name company FROM jobs j JOIN companies c ON c.id = j.company_id WHERE j.url_hash = ?',
-      ).bind(hash).first<{ title: string; company: string }>();
-      if (!kit || !j) { await answerCallback(env, cb.id, 'kit unavailable', doFetch); return; }
-      await answerCallback(env, cb.id, 'Kit sent ⬇', doFetch);
-      await sendTelegram(env, formatKitMessage(j.title, j.company, kit), doFetch);
-
-      const red = JSON.parse(kit.red_questions ?? '[]') as string[];
-      if (red.length) {
-        const pending: PendingQuestion = { url_hash: hash, question: red[0]!, remaining: red.slice(1) };
-        await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('tg_pending', ?)")
-          .bind(JSON.stringify(pending)).run();
-        await sendTelegram(env, `❓ Reply here to answer:\n<b>${escapeHtml(red[0]!)}</b>`, doFetch);
-      }
+        const j = await env.DB.prepare(
+          'SELECT j.title, c.name company FROM jobs j JOIN companies c ON c.id = j.company_id WHERE j.url_hash = ?',
+        ).bind(hash).first<{ title: string; company: string }>();
+        if (!kit || !j) { await sendTelegram(env, '⚠️ Prepare failed — open the job in the console.', doFetch); return; }
+        await sendTelegram(env, formatKitMessage(j.title, j.company, kit), doFetch);
+        const red = JSON.parse(kit.red_questions ?? '[]') as string[];
+        if (red.length) {
+          const pending: PendingQuestion = { url_hash: hash, question: red[0]!, remaining: red.slice(1) };
+          await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('tg_pending', ?)")
+            .bind(JSON.stringify(pending)).run();
+          await sendTelegram(env, `❓ Reply here to answer:\n<b>${escapeHtml(red[0]!)}</b>`, doFetch);
+        }
+      })();
+      if (waitUntil) waitUntil(finish); else await finish;
       return;
     }
     await answerCallback(env, cb.id, 'unknown action', doFetch);
@@ -156,7 +173,7 @@ export async function handleTelegramUpdate(env: Env, update: TgUpdate, doFetch: 
   if (!text) return;
   const pendingRow = await env.DB.prepare("SELECT value FROM config WHERE key='tg_pending'").first<{ value: string }>();
   if (!pendingRow) {
-    await sendTelegram(env, 'No question is pending. Tap 📋 View kit on a job notification to start.', doFetch);
+    await sendTelegram(env, 'No question is pending. Tap 🛠 Prepare on a job notification to start.', doFetch);
     return;
   }
   const pending = JSON.parse(pendingRow.value) as PendingQuestion;
@@ -192,6 +209,6 @@ export async function handleTelegramUpdate(env: Env, update: TgUpdate, doFetch: 
     await sendTelegram(env, `Saved ✓ (draft in Q&A)\n\n❓ Next:\n<b>${escapeHtml(next.question)}</b>`, doFetch);
   } else {
     await env.DB.prepare("DELETE FROM config WHERE key='tg_pending'").run();
-    await sendTelegram(env, 'Saved ✓ — all red questions answered. The kit is ready on the job page; review draft answers under Answers to reuse them.', doFetch);
+    await sendTelegram(env, 'Saved ✓ — all red questions answered. The kit is ready on the job page; review draft answers under Q&A to reuse them.', doFetch);
   }
 }

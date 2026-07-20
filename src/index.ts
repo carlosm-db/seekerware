@@ -45,7 +45,9 @@ app.post('/tg/:token', async (c) => {
   const { handleTelegramUpdate } = await import('./tg');
   try {
     const update = await c.req.json();
-    await handleTelegramUpdate(c.env, update);
+    // Prepare (kit+CV) runs in the background so the webhook responds fast.
+    await handleTelegramUpdate(c.env, update, fetch, (p) =>
+      c.executionCtx.waitUntil(p.catch((e) => console.log(`tg bg: ${e instanceof Error ? e.message : 'err'}`))));
   } catch (err) {
     console.log(`tg webhook error: ${err instanceof Error ? err.message : 'unknown'}`);
   }

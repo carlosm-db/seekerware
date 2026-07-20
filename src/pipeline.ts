@@ -335,7 +335,7 @@ async function processCompany(
             whyItFits: texts.whyItFits, gapToAddress: texts.gapToAddress,
             positioningLead: texts.positioningLead, ruleBased,
           });
-          // Step-8 buttons: View kit / I applied (two-way bot).
+          // Step-8 buttons: Prepare / I applied / Dismiss (two-way bot).
           const { kitButtons } = await import('./tg');
           const sent = await sendTelegram(env, msg, doFetch, kitButtons(hash));
           stats.notifications.push({
@@ -346,11 +346,9 @@ async function processCompany(
             status = 'notified';
             notifiedAt = nowIso;
             stats.notified++;
-            // CV factory only for verdict Apply: leaves cv_pending=1 and the
-            // run's startup builds it (1 build/run, fixed budget). The kit is
-            // NOT pre-built here — the job row flushes at run end, so the
-            // Telegram "View kit" button builds it on demand instead.
-            if (result.best.verdict === 'Apply') cvPending = 1;
+            // CV and kit are NOT built at notify — they're produced on Prepare
+            // (console or Telegram), on the spot, in a dedicated request with its
+            // own subrequest budget. Notify just alerts; the burst stays light.
           } else {
             stats.event({ type: 'telegram_fail', severity: 'error', url_hash: hash, detail: sent.error });
             // stays 'new': the next run retries
