@@ -149,27 +149,25 @@ details.sect > summary::-webkit-details-marker { display:none }
 .rowactions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px }
 .rowactions .spacer { flex:1 }
 
-/* Calibration matrix (2026-07-18): 5 categories x favor/against x EN/ES.
-   Wide content scrolls inside its own container (phone-safe). */
-.matrix-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch }
-.matrix { border:1px solid var(--line); border-radius:10px; min-width:900px;
-  background:var(--card); margin-bottom:14px }
-.mrow { display:grid; grid-template-columns:140px 1.15fr 1.15fr 1fr 1fr }
-.mrow > div { padding:10px 12px; border-top:1px solid var(--line);
-  border-left:1px solid var(--line); min-width:0 }
-.mrow > div:first-child { border-left:none }
-.mrow.mhead > div { border-top:none; background:var(--bg); font-size:11px; font-weight:700;
-  text-transform:uppercase; letter-spacing:.05em; color:var(--muted) }
-.mrow.mhead .fav { color:var(--ok) } .mrow.mhead .agn { color:var(--bad) }
-.mcat { font-weight:600; font-size:14px }
-.mcat .sub { display:block; font-weight:400; font-size:12px; color:var(--muted) }
-.chip.neg { background:var(--bad-soft) }
-.chip.w3 { box-shadow:inset 0 0 0 1px var(--accent) }
-.chip.w1 { opacity:.75 }
-.chip.extra { display:none }
-.mcell.open .chip.extra { display:inline-block }
-.chip.hit { outline:2px solid var(--accent) }
-.chip.dim { opacity:.25 }
+/* Calibration matrix (2026-07-19 rebuild): BANK-style collapsible groups (reuse
+   details.rc), each concept ONE row — English in front of Español — reflecting
+   the DB 1:1 (no mirror). Three honest states: twin · "= same word" · gap. */
+.matrix-groups { margin-bottom:14px }
+.mside + .mside { margin-top:14px }
+.msidehead { font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--muted); font-weight:700; margin:8px 0 2px }
+.mconcept { display:grid; grid-template-columns:1fr 1fr 28px; gap:8px; align-items:center;
+  padding:6px 0; border-top:1px solid var(--line) }
+.mside .mconcept:first-of-type { border-top:none }
+.mc-en, .mc-es { font-size:14px; min-width:0; overflow-wrap:anywhere }
+.mc-x { text-align:right }
+.msame { color:var(--muted); font-style:italic; font-size:13px }
+.gapwarn { color:var(--warn); font-weight:700; margin-right:4px }
+.gapcount { color:var(--warn); font-weight:600 }
+.mgap { display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap }
+.mgap button { min-height:32px; padding:4px 10px; font-size:13px }
+.gapin { min-height:32px; padding:4px 8px; font-size:13px; width:130px; max-width:100%;
+  border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg) }
 .path { display:inline-block; font-size:10px; font-weight:700; border-radius:4px;
   padding:0 5px; margin-left:4px; white-space:nowrap }
 .p-0 { background:var(--bad-soft); color:var(--bad) }

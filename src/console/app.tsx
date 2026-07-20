@@ -9,8 +9,8 @@ import { validateScoringConfig } from '../config-store';
 import { SKCATS, newBlockId, parseBulletEdits } from './blocks-form';
 import { fmtDates, normalizeMonth, tokensOfRole, validateRoleCode } from './roles';
 import {
-  applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES, parseMeta,
-  type Chip, type MatrixCategory, type MatrixMeta, type RemoveTarget,
+  applyPairComplete, applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES, parseMeta,
+  type ConceptRow, type MatrixCategory, type MatrixGroup, type MatrixMeta, type RemoveTarget,
 } from './matrix';
 import { connectors } from '../connectors';
 import { parseAtsUrl } from '../connectors/common';
@@ -684,37 +684,84 @@ export function consoleApp(): App {
     const trackLabel = (t: string) => TRACK_LABELS[t] ?? t;
     const pathClass = (t: string) => `path p-${Math.max(0, cfg.tracks.findIndex((x) => x.id === t))}`;
 
-    /** One word chip: term, weight (or penalty), path badge, ✕ removes the pair. */
-    const chipEl = (ch: Chip, extra: boolean) => (
-      <span class={`chip${extra ? ' extra' : ''}${!ch.favor ? ' neg' : ''}${Math.abs(ch.weight ?? 0) >= 3 ? ' w3' : ''}${Math.abs(ch.weight ?? 0) === 1 ? ' w1' : ''}`}>
-        {ch.term}
-        {ch.weight !== undefined ? <span class="muted"> {ch.weight > 0 ? `+${ch.weight}` : ch.weight}</span>
-          : ch.penalty !== undefined ? <span class="muted"> −{ch.penalty}</span> : null}
-        {ch.path ? <span class={pathClass(ch.path)}>{trackLabel(ch.path)}</span> : null}
-        <form class="inline" method="post" action="/config/word-remove">
-          <input type="hidden" name="kind" value={ch.source.kind} />
-          {ch.source.kind === 'keyword' ? (
-            <input type="hidden" name="category" value={ch.category} />
-          ) : (
-            <>
-              <input type="hidden" name="track" value={ch.source.track} />
-              <input type="hidden" name="gate" value={ch.source.gate} />
-            </>
-          )}
-          <input type="hidden" name="term" value={ch.term} />
-          <button type="submit" class="chipx" title="remove word (both languages)">✕</button>
-        </form>
-      </span>
+    const pathBadge = (t?: string) => (t ? <span class={pathClass(t)}>{trackLabel(t)}</span> : null);
+    const weightTag = (r: ConceptRow) =>
+      (r.weight !== undefined ? <span class="muted"> {r.weight > 0 ? `+${r.weight}` : r.weight}</span>
+        : r.penalty !== undefined ? <span class="muted"> −{r.penalty}</span> : null);
+
+    /** ✕ removes the whole concept (both languages). */
+    const removeForm = (r: ConceptRow) => (
+      <form class="inline" method="post" action="/config/word-remove">
+        <input type="hidden" name="kind" value={r.source.kind} />
+        {r.source.kind === 'keyword' ? (
+          <input type="hidden" name="category" value={r.category} />
+        ) : (
+          <>
+            <input type="hidden" name="track" value={r.source.track} />
+            <input type="hidden" name="gate" value={r.source.gate} />
+          </>
+        )}
+        <input type="hidden" name="term" value={r.en} />
+        <button type="submit" class="chipx" title="remove concept (both languages)">✕</button>
+      </form>
     );
-    const SHOW = 8;
-    const cellEl = (chips: Chip[]) => (
-      <div class="mcell">
-        {chips.length === 0 ? <span class="muted fs-sm">none</span>
-          : chips.map((ch, i) => chipEl(ch, i >= SHOW))}
-        {chips.length > SHOW ? (
-          <div><button type="button" class="morebtn">show {chips.length - SHOW} more</button></div>
-        ) : null}
+
+    /** Español cell: real twin · "= same word" · GAP (inline complete form). */
+    const esCell = (r: ConceptRow) => {
+      if (r.es) return <span class="mc-twin">{r.es}</span>;
+      if (r.same) return <span class="msame">= same word</span>;
+      return (
+        <form class="inline mgap" method="post" action="/config/pair-complete">
+          <input type="hidden" name="category" value={r.category} />
+          <input type="hidden" name="en" value={r.en} />
+          <input type="hidden" name="favor" value={r.favor ? 'favor' : 'against'} />
+          <input type="hidden" name="kind" value={r.source.kind} />
+          {r.source.kind === 'gate' ? (
+            <>
+              <input type="hidden" name="track" value={r.source.track} />
+              <input type="hidden" name="gate" value={r.source.gate} />
+            </>
+          ) : null}
+          <span class="gapwarn" title="Spanish missing">⚠</span>
+          <input type="text" name="es" class="gapin" placeholder="español…" aria-label={`Spanish for ${r.en}`} />
+          <button type="submit" class="btnlike sec" title="add the Spanish twin">＋</button>
+          <button type="submit" class="btnlike" name="same" value="1" title="reads the same in both languages">= same</button>
+        </form>
+      );
+    };
+
+    const conceptRow = (r: ConceptRow) => (
+      <div class="mconcept">
+        <div class="mc-en">{r.en}{weightTag(r)} {pathBadge(r.path)}</div>
+        <div class="mc-es">{esCell(r)}</div>
+        <div class="mc-x">{removeForm(r)}</div>
       </div>
+    );
+
+    const side = (label: string, rows: ConceptRow[]) => (rows.length ? (
+      <div class="mside">
+        <div class="msidehead">{label}</div>
+        {rows.map(conceptRow)}
+      </div>
+    ) : null);
+
+    const groupCard = (g: MatrixGroup) => (
+      <details class="rc" open={g.counts.gap > 0}>
+        <summary class="rc-head">
+          <span class="caret" />
+          <span class="rc-title">{MATRIX_LABELS[g.category][0]}</span>
+          <span class="rc-sub">{MATRIX_LABELS[g.category][1]}</span>
+          <span class="rc-meta">
+            {g.counts.paired + g.counts.same + g.counts.gap} concepts · {g.counts.paired} paired · {g.counts.same} same
+            {g.counts.gap ? <span class="gapcount"> · {g.counts.gap} gap{g.counts.gap > 1 ? 's' : ''}</span> : null}
+          </span>
+        </summary>
+        <div class="rc-body">
+          {side('In favor', g.favor)}
+          {side('Against', g.against)}
+          {g.favor.length + g.against.length === 0 ? <p class="muted">none yet — ＋ Add word below</p> : null}
+        </div>
+      </details>
     );
 
     return page(c, 'Calibration', (
@@ -749,31 +796,16 @@ export function consoleApp(): App {
           <button type="button" id="calsearch-clear" class="cs-x" aria-label="Clear filter">×</button>
         </div>
 
-        <div class="matrix-wrap">
-          <div class="matrix">
-            <div class="mrow mhead">
-              <div>Category</div>
-              <div class="fav">In favor · English</div>
-              <div class="fav">In favor · Español</div>
-              <div class="agn">Against · English</div>
-              <div class="agn">Against · Español</div>
-            </div>
-            {matrix.map((r) => (
-              <div class="mrow">
-                <div class="mcat">{MATRIX_LABELS[r.category][0]}<span class="sub">{MATRIX_LABELS[r.category][1]}</span></div>
-                {cellEl(r.favor_en)}
-                {cellEl(r.favor_es)}
-                {cellEl(r.against_en)}
-                {cellEl(r.against_es)}
-              </div>
-            ))}
-          </div>
+        <div class="matrix-groups">
+          {matrix.map(groupCard)}
         </div>
 
         <p class="muted mb-2">
-          Weight: <strong>+3</strong> strong · <strong>+2</strong> medium · <strong>+1</strong> light ·
-          <strong> −2</strong> against · <strong>−3</strong> strongly against — ✕ removes a word in BOTH
-          languages; adding happens in ONE place, below.
+          Each concept is <strong>English → Español</strong>. <span class="msame">= same word</span> means
+          it reads the same in both languages; <span class="gapwarn">⚠</span> means the Spanish is missing —
+          type it and press <strong>＋</strong>, or press <strong>= same</strong> if it doesn’t translate.
+          Weight: <strong>+3</strong>/<strong>+2</strong>/<strong>+1</strong> in favor ·
+          <strong> −2</strong>/<strong>−3</strong> against. ✕ removes the concept in BOTH languages.
         </p>
         <p class="muted mb-3">
           <strong>Path</strong> — the track a word unlocks (or, on an against word, blocks):
@@ -840,20 +872,13 @@ export function consoleApp(): App {
   const q = document.getElementById('calsearch-input');
   if (q) q.addEventListener('input', () => {
     const s = q.value.trim().toLowerCase();
-    document.querySelectorAll('.matrix .chip').forEach((ch) => {
-      ch.classList.remove('hit', 'dim');
-      if (!s) return;
-      if (ch.textContent.toLowerCase().includes(s)) { ch.classList.add('hit'); ch.classList.remove('extra'); }
-      else ch.classList.add('dim');
+    document.querySelectorAll('.matrix-groups .mconcept').forEach((row) => {
+      row.style.display = (!s || row.textContent.toLowerCase().includes(s)) ? '' : 'none';
     });
+    if (s) document.querySelectorAll('.matrix-groups details.rc').forEach((d) => { d.open = true; });
   });
   const clr = document.getElementById('calsearch-clear');
   if (clr && q) clr.addEventListener('click', () => { q.value = ''; q.dispatchEvent(new Event('input')); q.focus(); });
-  document.querySelectorAll('.morebtn').forEach((b) => b.addEventListener('click', () => {
-    const cell = b.closest('.mcell');
-    cell.classList.toggle('open');
-    b.textContent = cell.classList.contains('open') ? 'show fewer' : b.textContent.replace('fewer', 'more');
-  }));
   const dirSel = document.getElementById('dir-sel');
   const strSel = document.getElementById('str-sel');
   if (dirSel && strSel) dirSel.addEventListener('change', () => {
@@ -908,6 +933,35 @@ export function consoleApp(): App {
     await saveDraft(c.env, cfg);
     await saveMeta(c.env, meta);
     return c.redirect(`/config?m=${encodeURIComponent(`removed ${r.removed.map((t) => `"${t}"`).join(' + ')} — Preview impact to apply`)}`);
+  });
+
+  // Completes a GAP concept: adds the real Spanish twin, or marks it identical.
+  app.post('/config/pair-complete', async (c) => {
+    const b = await c.req.parseBody();
+    const category = String(b.category ?? '') as MatrixCategory;
+    if (!MATRIX_CATEGORIES.includes(category)) return c.redirect('/config?m=invalid category');
+    const { cfg } = await loadDraftOrLive(c.env);
+    const meta = await loadMeta(c.env);
+    const isSame = String(b.same ?? '') === '1';
+    const err = applyPairComplete(cfg, meta, {
+      category,
+      en: String(b.en ?? ''),
+      es: String(b.es ?? ''),
+      same: isSame,
+      favor: String(b.favor ?? 'favor') !== 'against',
+      kind: String(b.kind ?? 'keyword') === 'gate' ? 'gate' : 'keyword',
+      track: String(b.track ?? '') || undefined,
+      gate: String(b.gate ?? '') || undefined,
+    });
+    if (err) return c.redirect(`/config?m=${encodeURIComponent(`rejected: ${err.error}`)}`);
+    try { validateScoringConfig(cfg); } catch (e) {
+      return c.redirect(`/config?m=${encodeURIComponent(`rejected: ${e instanceof Error ? e.message : 'invalid'}`)}`);
+    }
+    await saveDraft(c.env, cfg);
+    await saveMeta(c.env, meta);
+    const en = String(b.en ?? '').trim().toLowerCase();
+    const note = isSame ? `marked "${en}" same in both languages` : `added Spanish for "${en}"`;
+    return c.redirect(`/config?m=${encodeURIComponent(`${note} — Preview impact to apply`)}`);
   });
 
   async function saveConfig(env: ConsoleEnv, key: string, value: string): Promise<void> {

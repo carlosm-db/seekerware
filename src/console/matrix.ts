@@ -1,10 +1,13 @@
-// Calibration matrix projection (2026-07-18 redesign, mockups v3.3): ONE grid
-// — 5 category rows × (in favor / against) × (EN / ES) — where the track is a
-// `path` attribute of the word. This module is a pure PROJECTION over the
-// existing ScoringConfig: gates keep owning verdicts (domain rule 2); nothing
-// here softens them. DB-free so it can be unit-tested.
+// Calibration matrix projection (2026-07-19 rebuild): the grid is now BANK-style
+// — one collapsible GROUP per category (Location, Role titles, Seniority,
+// Industry & domain, Tools), and inside it CONCEPT ROWS with English in front of
+// Spanish. This module is a pure PROJECTION over the existing ScoringConfig that
+// reflects the DB 1:1 — NO mirror, no cloning. A concept is one of three honest
+// states: a real EN/ES twin, `same` (identical word in both languages, stored
+// once), or a GAP (English present, Spanish missing). Gates keep owning verdicts
+// (domain rule 2); nothing here softens them. DB-free so it can be unit-tested.
 
-import { CATEGORIES, type Category, type ScoringConfig } from '../scoring';
+import { CATEGORIES, type Category, type Keyword, type ScoringConfig } from '../scoring';
 
 export type MatrixCategory = Category | 'location';
 /** Row order per the owner's sketch: Location, Role titles, Seniority, Industry, Tools. */
@@ -13,50 +16,65 @@ export const MATRIX_CATEGORIES: MatrixCategory[] = ['location', 'role_type', 'le
 /**
  * Console-only display metadata for GATE terms (config key 'matrix_meta').
  * Gate lists stay plain string[] — zero engine risk; this is cosmetic:
- * which column a gate term renders in, and which two terms form one pair.
+ * which column a gate term renders in, which two terms form one pair, and which
+ * are confirmed identical in both languages.
  */
 export interface MatrixMeta {
   /** Gate terms displayed in the Español column (absent = English). */
   gate_langs: Record<string, 'es'>;
   /** Pair id per gate term (both twins of one concept share an id). */
   gate_pairs: Record<string, string>;
+  /** Gate terms confirmed identical in both languages (display "= same word"). */
+  gate_same: Record<string, true>;
 }
 
-export const emptyMeta = (): MatrixMeta => ({ gate_langs: {}, gate_pairs: {} });
+export const emptyMeta = (): MatrixMeta => ({ gate_langs: {}, gate_pairs: {}, gate_same: {} });
 
 export function parseMeta(raw: string | null | undefined): MatrixMeta {
   if (!raw) return emptyMeta();
   try {
     const p = JSON.parse(raw) as Partial<MatrixMeta>;
-    return { gate_langs: p.gate_langs ?? {}, gate_pairs: p.gate_pairs ?? {} };
+    return {
+      gate_langs: p.gate_langs ?? {},
+      gate_pairs: p.gate_pairs ?? {},
+      gate_same: p.gate_same ?? {},
+    };
   } catch {
     return emptyMeta();
   }
 }
 
-export interface Chip {
-  term: string;
-  lang: 'en' | 'es';
-  favor: boolean;
+/** Where a concept lives — the remove/complete round-trips need it. */
+export type ConceptSource =
+  | { kind: 'keyword' }
+  | { kind: 'gate'; track: string; gate: string; list: 'require' | 'reject' };
+
+/** One concept = ONE row: English in front of Spanish, honest about pairing. */
+export interface ConceptRow {
   category: MatrixCategory;
+  favor: boolean;
+  /** English term (canonical; always present). */
+  en: string;
+  /** Distinct Spanish twin, or null when `same` or a gap. */
+  es: string | null;
+  /** True when the concept reads the same in both languages (stored once). */
+  same: boolean;
   /** Keyword chips: signed weight. Gate chips carry no weight (gates are absolute). */
   weight?: number;
+  /** Points, when the owning gate is a penalty (display "−N"). */
+  penalty?: number;
   /** Track whose gate contains this term — the path badge. */
   path?: string;
-  /** Points, when the owning gate is a penalty (display “−N”). */
-  penalty?: number;
-  /** True when this EN==ES concept is one stored entry mirrored into both columns. */
-  mirrored?: boolean;
-  /** Where the term lives — the remove round-trip needs it. */
-  source: { kind: 'keyword' } | { kind: 'gate'; track: string; gate: string; list: 'require' | 'reject' };
+  source: ConceptSource;
 }
 
-export interface MatrixRow {
+/** A collapsible category group with its concept rows and a parity meter. */
+export interface MatrixGroup {
   category: MatrixCategory;
-  favor_en: Chip[];
-  favor_es: Chip[];
-  against_en: Chip[];
-  against_es: Chip[];
+  favor: ConceptRow[];
+  against: ConceptRow[];
+  /** paired = real EN/ES twin · same = identical · gap = Spanish missing. */
+  counts: { paired: number; same: number; gap: number };
 }
 
 interface GateHit { track: string; gate: string; list: 'require' | 'reject'; penalty?: number; titleScope: boolean }
@@ -83,80 +101,103 @@ function indexGates(cfg: ScoringConfig): Map<string, GateHit> {
   return idx;
 }
 
-/** Strongest first (keyword chips by |weight| desc), gate chips after, stable otherwise. */
-function sortChips(chips: Chip[]): Chip[] {
-  return [...chips].sort((a, b) => Math.abs(b.weight ?? 0) - Math.abs(a.weight ?? 0));
+/** Strongest first (by |weight| desc), stable otherwise. */
+function sortRows(rows: ConceptRow[]): ConceptRow[] {
+  return [...rows].sort((a, b) => Math.abs(b.weight ?? 0) - Math.abs(a.weight ?? 0));
 }
 
-export function buildMatrix(cfg: ScoringConfig, meta: MatrixMeta): MatrixRow[] {
-  const gateIdx = indexGates(cfg);
-  const rows = new Map<MatrixCategory, MatrixRow>();
-  for (const cat of MATRIX_CATEGORIES) {
-    rows.set(cat, { category: cat, favor_en: [], favor_es: [], against_en: [], against_es: [] });
+function countStates(rows: ConceptRow[]): { paired: number; same: number; gap: number } {
+  let paired = 0, same = 0, gap = 0;
+  for (const r of rows) {
+    if (r.es) paired++;
+    else if (r.same) same++;
+    else gap++;
   }
-  const place = (row: MatrixRow, chip: Chip) => {
-    const cell = chip.favor
-      ? (chip.lang === 'es' ? row.favor_es : row.favor_en)
-      : (chip.lang === 'es' ? row.against_es : row.against_en);
-    cell.push(chip);
+  return { paired, same, gap };
+}
+
+/**
+ * Projects the ScoringConfig into the BANK-style matrix, DB 1:1 (no mirror):
+ * every concept-row maps to real entries. A single entry marked `same` renders
+ * as identical; a single entry without a twin and without `same` is a GAP.
+ */
+export function buildMatrix(cfg: ScoringConfig, meta: MatrixMeta): MatrixGroup[] {
+  const gateIdx = indexGates(cfg);
+  const groups = new Map<MatrixCategory, { favor: ConceptRow[]; against: ConceptRow[] }>();
+  for (const cat of MATRIX_CATEGORIES) groups.set(cat, { favor: [], against: [] });
+  const push = (row: ConceptRow) => {
+    const g = groups.get(row.category)!;
+    (row.favor ? g.favor : g.against).push(row);
   };
 
-  // Keyword chips (the 4 scoring categories). Path derived from gate membership.
+  // 1) Keyword concepts (the 4 scoring categories), grouped by pair id.
   const keywordTerms = new Set<string>();
   for (const cat of CATEGORIES) {
-    const row = rows.get(cat)!;
     const list = cfg.keywords[cat] ?? [];
-    const pairCount = new Map<string, number>();
-    for (const k of list) if (k.pair) pairCount.set(k.pair, (pairCount.get(k.pair) ?? 0) + 1);
+    const byPair = new Map<string, Keyword[]>();
     for (const k of list) {
       keywordTerms.add(k.term);
-      const hit = gateIdx.get(k.term);
-      const base: Chip = {
-        term: k.term, lang: k.lang === 'es' ? 'es' : 'en', favor: k.weight > 0,
-        category: cat, weight: k.weight, path: hit?.track, penalty: hit?.penalty,
+      const pid = k.pair ?? k.term;
+      const arr = byPair.get(pid) ?? [];
+      arr.push(k);
+      byPair.set(pid, arr);
+    }
+    for (const entries of byPair.values()) {
+      const enEntry = entries.find((e) => e.lang !== 'es') ?? entries[0];
+      if (!enEntry) continue;
+      const esEntry = entries.find((e) => e.lang === 'es' && e.term !== enEntry.term);
+      const en = enEntry.term;
+      const es = esEntry ? esEntry.term : null;
+      const hit = gateIdx.get(en);
+      push({
+        category: cat,
+        favor: enEntry.weight > 0,
+        en,
+        es,
+        same: !es && enEntry.same === true,
+        weight: enEntry.weight,
+        path: hit?.track,
+        penalty: hit?.penalty,
         source: { kind: 'keyword' },
-      };
-      place(row, base);
-      // A paired concept stored once (EN == ES) mirrors into the other column.
-      if (k.pair && pairCount.get(k.pair) === 1) {
-        place(row, { ...base, lang: base.lang === 'es' ? 'en' : 'es', mirrored: true });
-      }
+      });
     }
   }
 
-  // Gate-only chips (terms in no keyword list): title-scope gates project into
-  // Role titles; everything else (location/text) is the Location row. A concept
-  // stored as ONE term (same word in both languages, e.g. "colombia") MIRRORS
-  // into both language columns — full EN/ES parity in the grid; a distinct twin
-  // pair (latin america / latinoamérica) already fills both columns on its own.
-  const gatePairCount = new Map<string, number>();
+  // 2) Gate-only concepts (terms in no keyword list). Title-scope gates project
+  // into Role titles; everything else (location/text) into the Location row.
+  // Pairing/language/identity come from matrix_meta (display-only).
+  const gatePairs = new Map<string, string[]>();
   for (const [term] of gateIdx) {
     if (keywordTerms.has(term)) continue;
     const pid = meta.gate_pairs[term] ?? term;
-    gatePairCount.set(pid, (gatePairCount.get(pid) ?? 0) + 1);
+    const arr = gatePairs.get(pid) ?? [];
+    arr.push(term);
+    gatePairs.set(pid, arr);
   }
-  for (const [term, hit] of gateIdx) {
-    if (keywordTerms.has(term)) continue;
-    const row = rows.get(hit.titleScope ? 'role_type' : 'location')!;
-    const base: Chip = {
-      term, lang: meta.gate_langs[term] === 'es' ? 'es' : 'en',
-      favor: hit.list === 'require', category: row.category,
-      path: hit.track, penalty: hit.penalty,
+  for (const terms of gatePairs.values()) {
+    const enTerm = terms.find((t) => meta.gate_langs[t] !== 'es') ?? terms[0];
+    if (!enTerm) continue;
+    const esTerm = terms.find((t) => meta.gate_langs[t] === 'es' && t !== enTerm) ?? null;
+    const hit = gateIdx.get(enTerm);
+    if (!hit) continue;
+    const category: MatrixCategory = hit.titleScope ? 'role_type' : 'location';
+    push({
+      category,
+      favor: hit.list === 'require',
+      en: enTerm,
+      es: esTerm,
+      same: !esTerm && meta.gate_same[enTerm] === true,
+      path: hit.track,
+      penalty: hit.penalty,
       source: { kind: 'gate', track: hit.track, gate: hit.gate, list: hit.list },
-    };
-    place(row, base);
-    if ((gatePairCount.get(meta.gate_pairs[term] ?? term) ?? 0) === 1) {
-      place(row, { ...base, lang: base.lang === 'es' ? 'en' : 'es', mirrored: true });
-    }
+    });
   }
 
   return MATRIX_CATEGORIES.map((cat) => {
-    const r = rows.get(cat)!;
-    return {
-      ...r,
-      favor_en: sortChips(r.favor_en), favor_es: sortChips(r.favor_es),
-      against_en: sortChips(r.against_en), against_es: sortChips(r.against_es),
-    };
+    const g = groups.get(cat)!;
+    const favor = sortRows(g.favor);
+    const against = sortRows(g.against);
+    return { category: cat, favor, against, counts: countStates([...favor, ...against]) };
   });
 }
 
@@ -220,6 +261,7 @@ export function applyWordAdd(cfg: ScoringConfig, meta: MatrixMeta, input: WordAd
     meta.gate_pairs[en] = en;
     meta.gate_pairs[es] = en;
     if (es !== en) meta.gate_langs[es] = 'es';
+    else meta.gate_same[en] = true;
     return null;
   }
 
@@ -228,8 +270,8 @@ export function applyWordAdd(cfg: ScoringConfig, meta: MatrixMeta, input: WordAd
   if (list.some((k) => k.term === en || k.term === es)) return { error: `"${en}" / "${es}" is already listed` };
   const signed = input.favor ? weight : -weight;
   if (en === es) {
-    // One concept, one entry (twice would double-count in scoring); mirrored in display.
-    list.push({ term: en, weight: signed, pair: en });
+    // One concept, one entry (twice would double-count in scoring); marked identical.
+    list.push({ term: en, weight: signed, pair: en, same: true });
   } else {
     list.push({ term: en, weight: signed, pair: en });
     list.push({ term: es, weight: signed, lang: 'es', pair: en });
@@ -242,6 +284,62 @@ export function applyWordAdd(cfg: ScoringConfig, meta: MatrixMeta, input: WordAd
     const glist = input.favor ? gate.require! : gate.reject!;
     for (const term of new Set([en, es])) if (!glist.includes(term)) glist.push(term);
   }
+  return null;
+}
+
+/** Completes a GAP concept in place: adds the real Spanish twin, or marks it identical. */
+export interface PairCompleteInput {
+  category: MatrixCategory;
+  /** The existing English term to complete. */
+  en: string;
+  /** The real Spanish twin (empty when marking identical). */
+  es?: string;
+  /** Mark the concept identical in both languages instead of adding a twin. */
+  same?: boolean;
+  favor: boolean;
+  kind: 'keyword' | 'gate';
+  /** Gate coordinates (from the row) when kind === 'gate'. */
+  track?: string;
+  gate?: string;
+}
+
+export function applyPairComplete(cfg: ScoringConfig, meta: MatrixMeta, input: PairCompleteInput): ApplyError | null {
+  const en = norm(input.en);
+  if (!en) return { error: 'missing concept' };
+  const es = norm(input.es ?? '');
+  const asSame = input.same || (!!es && es === en);
+  if (!asSame && !es) return { error: 'type the Spanish twin, or mark "= same word"' };
+
+  if (input.kind === 'gate') {
+    const track = cfg.tracks.find((t) => t.id === input.track);
+    const gate = track?.gates.find((g) => g.id === input.gate);
+    if (!gate) return { error: `gate ${input.gate ?? '?'} not found in ${input.track ?? '?'}` };
+    meta.gate_pairs[en] = en;
+    if (asSame) {
+      meta.gate_same[en] = true;
+      return null;
+    }
+    const list = input.favor ? (gate.require ?? (gate.require = [])) : (gate.reject ?? (gate.reject = []));
+    if (!list.includes(es)) list.push(es);
+    meta.gate_pairs[es] = en;
+    meta.gate_langs[es] = 'es';
+    delete meta.gate_same[en];
+    return null;
+  }
+
+  const list = cfg.keywords[input.category as Category];
+  if (!list) return { error: 'invalid category' };
+  const existing = list.find((k) => k.term === en);
+  if (!existing) return { error: `"${en}" not found in ${input.category}` };
+  const pid = existing.pair ?? en;
+  existing.pair = pid;
+  if (asSame) {
+    existing.same = true;
+    return null;
+  }
+  if (list.some((k) => k.term === es)) return { error: `"${es}" is already listed` };
+  delete existing.same;
+  list.push({ term: es, weight: existing.weight, lang: 'es', pair: pid });
   return null;
 }
 
@@ -266,7 +364,7 @@ export function applyPairRemove(cfg: ScoringConfig, meta: MatrixMeta, target: Re
         }
       }
     }
-    for (const term of terms) { delete meta.gate_pairs[term]; delete meta.gate_langs[term]; }
+    for (const term of terms) { delete meta.gate_pairs[term]; delete meta.gate_langs[term]; delete meta.gate_same[term]; }
     return { removed: terms };
   }
 
@@ -280,6 +378,6 @@ export function applyPairRemove(cfg: ScoringConfig, meta: MatrixMeta, target: Re
   for (const lname of ['require', 'reject'] as const) {
     if (gate[lname]) gate[lname] = gate[lname]!.filter((x) => !terms.includes(x));
   }
-  for (const term of terms) { delete meta.gate_pairs[term]; delete meta.gate_langs[term]; }
+  for (const term of terms) { delete meta.gate_pairs[term]; delete meta.gate_langs[term]; delete meta.gate_same[term]; }
   return { removed: terms };
 }
