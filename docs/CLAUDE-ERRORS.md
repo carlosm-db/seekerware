@@ -4,6 +4,23 @@ Running record of times an agent (Claude or other) broke a rule or caused
 harm on this project, so the pattern is not repeated. Newest first. Process
 failures only — no owner private data here (CLAUDE.md §4).
 
+## 2026-07-20 — Bundled an unrequested size change into a narrow "reorder" task (repeat)
+- **What:** the owner asked ONLY to reorder the `/jobs` filter controls so they follow the column
+  order (the title-search was last, but TITLE is the first column). The agent moved the search first
+  (correct) but ALSO changed its CSS `flex:1 1 240px` → `flex:0 1 240px` — a size/grow change nobody
+  asked for — reasoning it "looked more balanced." It was mentioned in the proposal and the owner said
+  "go", so both shipped. The owner: "solo había que cambiar orden y cambiaste los tamaños? … revierte
+  tu fucking cambio inútil que no se pidió." Reverted (`990c533`; the requested reorder kept).
+- **Impact:** an extra revert + round-trip and more eroded trust. This is a REPEAT of an already-logged
+  lesson (2026-07-18 "never bundle unrequested changes into approved work") — the rest of the session
+  (dead-code collapse, docs alignment, header redesign, brand-badge fix) went clean via propose→OK→ship,
+  which makes the slip more glaring, not less.
+- **Rules broken:** no unrequested changes bundled into approved work (CLAUDE.md §1 spirit); change ONLY
+  what is asked.
+- **Lessons:** (1) a narrow ask ("reorder") means change EXACTLY that — nothing adjacent. (2) Flagging an
+  extra tweak does NOT make it requested; a "go" approves the asked change, not bundled extras. (3) If a
+  side issue seems worth touching, finish the ask, then raise it SEPARATELY as its own proposal.
+
 ## 2026-07-20 — Calibration rework: edited/committed without approval (repeatedly), over-engineered, audited piecemeal
 - **What:** across a long calibration/scoring rework the agent broke propose-first over and over:
   1. **Unrequested mechanism.** Added a third parity state "= same word" (`Keyword.same` flag) + a
