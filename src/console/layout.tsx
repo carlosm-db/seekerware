@@ -272,7 +272,7 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
   .cols-2.main-side { grid-template-columns:3fr 2fr }
   .twoup { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start }
   .twoup > .card { margin-bottom:0 }
-  .filterbar input[type=text] { flex:0 1 240px }
+  .filterbar input[type=text] { flex:1 1 240px }
 }
 `;
 
