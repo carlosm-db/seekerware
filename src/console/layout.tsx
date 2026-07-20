@@ -284,7 +284,13 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
 .modal { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:22px 26px; max-width:460px; width:90% }
 .modal h3 { margin:0 0 12px }
 .steps { list-style:none; margin:0; padding:0 }
-.steps li { padding:5px 0; display:flex; align-items:center; gap:8px }
+.steps li { padding:6px 0; display:flex; align-items:flex-start; gap:8px; line-height:1.35 }
+.steps .mk { flex:none; width:16px; text-align:center }
+.steps li.pending { color:var(--muted) }
+.steps li.done .mk { color:var(--ok) }
+.steps .tx { color:var(--fg) }
+.steps li.pending .tx { color:var(--muted) }
+.steps .qd { color:var(--muted); font-size:.85em; margin-top:2px; font-variant-numeric:tabular-nums }
 .sm { font-size:.85em }
 .spin { display:inline-block; width:13px; height:13px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite }
 @keyframes spin { to { transform:rotate(360deg) } }

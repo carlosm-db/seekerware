@@ -32,11 +32,12 @@ const prepJs = `
     var hash = form.querySelector('input[name=hash]').value;
     modal.hidden = false;
     var tries = 0;
-    function render(steps, done) {
-      stepsEl.innerHTML = (steps || []).map(function (s, i) {
-        var last = i === steps.length - 1;
-        var mark = (done || !last) ? '\\u2713' : '<span class="spin"></span>';
-        return '<li>' + mark + ' ' + s + '</li>';
+    function render(plan, current, qdetail, done) {
+      stepsEl.innerHTML = (plan || []).map(function (label, i) {
+        var st = (done || i < current) ? 'done' : (i === current ? 'active' : 'pending');
+        var mark = st === 'done' ? '\\u2713' : (st === 'active' ? '<span class="spin"></span>' : '\\u25CB');
+        var det = (i === 0 && qdetail) ? '<div class="qd">' + qdetail + '</div>' : '';
+        return '<li class="' + st + '"><span class="mk">' + mark + '</span><div class="tx">' + label + det + '</div></li>';
       }).join('');
     }
     fetch('/jobs/' + hash + '/prepare', { method: 'POST', headers: { 'x-progress': '1' } }).catch(function () {});
@@ -45,7 +46,7 @@ const prepJs = `
       fetch('/jobs/' + hash + '/prepare-progress', { headers: { accept: 'application/json' } })
         .then(function (r) { return r.json(); })
         .then(function (p) {
-          render(p.steps, !!p.done);
+          render(p.plan, p.current, p.qdetail, !!p.done);
           if (p.done) {
             if (p.error) {
               stepsEl.innerHTML += '<li class="warn">\\u2717 ' + p.error + '</li>';
@@ -272,14 +273,31 @@ export function consoleApp(): App {
 
     if (c.req.header('x-progress') === '1') {
       const key = `prepare_progress:${hash}`;
-      const steps: string[] = [];
+      // FIXED step list, shown up-front. onProgress advances `current` by label match; the
+      // question-review counts attach as `qdetail` on step 0. No step appears/disappears —
+      // each just goes pending → in-progress → done.
+      const PLAN = [
+        'Revisar preguntas del formulario',
+        'Leer plantilla + Blocks Bank',
+        'Seleccionar bloques (IA)',
+        'Verificar el CV (IA)',
+        'Crear Doc + rellenar',
+        'Exportar PDF + archivar',
+      ];
+      let current = 0;
+      let qdetail: string | null = null;
       const write = (extra: Record<string, unknown>) => c.env.DB.prepare(
         'INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-      ).bind(key, JSON.stringify({ steps, ...extra })).run();
+      ).bind(key, JSON.stringify({ plan: PLAN, current, qdetail, ...extra })).run();
       await write({ done: false });
       try {
-        const r = await prepareJob(c.env, hash, fetch, async (step) => { steps.push(step); await write({ done: false }); });
-        steps.push('Listo');
+        const r = await prepareJob(c.env, hash, fetch, async (step, detail) => {
+          const i = PLAN.indexOf(step);
+          if (i >= 0) current = i;
+          if (detail != null) qdetail = detail;
+          await write({ done: false });
+        });
+        current = PLAN.length; // all done
         await write({ done: true, msg: doneMsg(r), doc_url: r.cv?.doc_url ?? null });
         return c.json({ ok: true });
       } catch (e) {
@@ -297,7 +315,7 @@ export function consoleApp(): App {
   app.get('/jobs/:hash/prepare-progress', async (c) => {
     const row = await c.env.DB.prepare('SELECT value FROM config WHERE key = ?')
       .bind(`prepare_progress:${c.req.param('hash')}`).first<{ value: string }>();
-    return c.json(row ? JSON.parse(row.value) : { steps: [], done: false });
+    return c.json(row ? JSON.parse(row.value) : { plan: [], current: 0, qdetail: null, done: false });
   });
 
   // ---------- Jobs ----------
@@ -449,7 +467,7 @@ export function consoleApp(): App {
             <div class="modal" role="dialog" aria-label="Preparing">
               <h3>Preparando kit + CV…</h3>
               <ol id="prep-steps" class="steps"></ol>
-              <p class="muted sm">Puede tardar; no cierres esta pestaña. (El submit está siempre en tus manos.)</p>
+              <p class="muted sm">Puede tardar un momento; no cierres esta pestaña.</p>
             </div>
           </div>
           <script dangerouslySetInnerHTML={{ __html: prepJs }} />

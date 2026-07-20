@@ -129,7 +129,7 @@ export async function polishAnswers(
  */
 export async function prepareJob(
   env: Env, urlHash: string, doFetch: Fetcher = fetch,
-  onProgress?: (step: string) => void | Promise<void>,
+  onProgress?: (step: string, detail?: string) => void | Promise<void>,
 ): Promise<{ ok: boolean; kit: KitResult; cv: { ok: boolean; doc_url?: string; error?: string }; error?: string }> {
   const nowIso = new Date().toISOString();
   await env.DB.batch([
@@ -141,11 +141,12 @@ export async function prepareJob(
       .bind(urlHash, nowIso, 'user', 'stage:prepared', 'prepare (kit + CV)'),
   ]);
 
-  await onProgress?.('Revisando preguntas del formulario…');
+  await onProgress?.('Revisar preguntas del formulario');
   const kit = await buildKit(env, urlHash, doFetch);
-  // Real question-review state (detected = matched + red). This is the part the popup must
-  // surface — not just "agents running". No new work: read from the KitResult buildKit returns.
-  await onProgress?.(kit.detectable
+  // Attach the real question-review state as the DETAIL of the SAME fixed step (detected =
+  // matched + red) — the popup shows it under that step; it is not a new step. Read straight
+  // from the KitResult buildKit returns (no extra work).
+  await onProgress?.('Revisar preguntas del formulario', kit.detectable
     ? `${kit.matched + kit.red} preguntas · ${kit.matched} con respuesta · ${kit.red} 🔴 · ${kit.eeoc} EEOC`
     : 'Formulario no legible por API — se abre a mano');
 
