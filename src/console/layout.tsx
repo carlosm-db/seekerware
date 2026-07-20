@@ -149,27 +149,23 @@ details.sect > summary::-webkit-details-marker { display:none }
 .rowactions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px }
 .rowactions .spacer { flex:1 }
 
-/* Calibration matrix (2026-07-18): 5 categories x favor/against x EN/ES.
-   Wide content scrolls inside its own container (phone-safe). */
-.matrix-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch }
-.matrix { border:1px solid var(--line); border-radius:10px; min-width:900px;
-  background:var(--card); margin-bottom:14px }
-.mrow { display:grid; grid-template-columns:140px 1.15fr 1.15fr 1fr 1fr }
-.mrow > div { padding:10px 12px; border-top:1px solid var(--line);
-  border-left:1px solid var(--line); min-width:0 }
-.mrow > div:first-child { border-left:none }
-.mrow.mhead > div { border-top:none; background:var(--bg); font-size:11px; font-weight:700;
-  text-transform:uppercase; letter-spacing:.05em; color:var(--muted) }
-.mrow.mhead .fav { color:var(--ok) } .mrow.mhead .agn { color:var(--bad) }
-.mcat { font-weight:600; font-size:14px }
-.mcat .sub { display:block; font-weight:400; font-size:12px; color:var(--muted) }
-.chip.neg { background:var(--bad-soft) }
-.chip.w3 { box-shadow:inset 0 0 0 1px var(--accent) }
-.chip.w1 { opacity:.75 }
-.chip.extra { display:none }
-.mcell.open .chip.extra { display:inline-block }
-.chip.hit { outline:2px solid var(--accent) }
-.chip.dim { opacity:.25 }
+/* Calibration matrix (2026-07-19 rebuild): BANK-style collapsible groups (reuse
+   details.rc); each concept is ONE row — English | Español | Strength | Path —
+   reflecting the DB 1:1. Location rows are gates (no Strength). */
+.matrix-groups { margin-bottom:14px }
+.mside + .mside { margin-top:16px }
+.msidehead { font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+  color:var(--muted); font-weight:700; margin:6px 0 4px }
+.mconcept { display:grid; grid-template-columns:1fr 1fr 74px 132px 30px; gap:10px;
+  align-items:center; padding:7px 0; border-top:1px solid var(--line) }
+.mconcept.loc { grid-template-columns:1fr 1fr 132px 30px }
+.mside .mconcept:first-of-type { border-top:none }
+.mconcept.mhead { border-top:none; font-size:11px; text-transform:uppercase;
+  letter-spacing:.04em; color:var(--muted); font-weight:700 }
+.mc-en, .mc-es { min-width:0; overflow-wrap:anywhere; font-size:14px }
+.mc-str { font-variant-numeric:tabular-nums; font-size:14px }
+.mc-empty { color:var(--warn); font-weight:700 }
+.mc-x { text-align:right }
 .path { display:inline-block; font-size:10px; font-weight:700; border-radius:4px;
   padding:0 5px; margin-left:4px; white-space:nowrap }
 .p-0 { background:var(--bad-soft); color:var(--bad) }

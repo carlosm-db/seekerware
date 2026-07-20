@@ -5,12 +5,12 @@ import { Hono, type Context } from 'hono';
 import type { Child } from 'hono/jsx';
 import { Layout, type FooterStatus } from './layout';
 import { authMiddleware, createSession, setSessionCookie, verifyPassword, type ConsoleEnv } from './auth';
-import { validateScoringConfig } from '../config-store';
+import { normalizeScoringConfig, validateScoringConfig } from '../config-store';
 import { SKCATS, newBlockId, parseBulletEdits } from './blocks-form';
 import { fmtDates, normalizeMonth, tokensOfRole, validateRoleCode } from './roles';
 import {
-  applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES, parseMeta,
-  type Chip, type MatrixCategory, type MatrixMeta, type RemoveTarget,
+  applyPairRemove, applyWordAdd, buildMatrix, MATRIX_CATEGORIES,
+  type ConceptRow, type MatrixCategory, type MatrixGroup, type RemoveTarget,
 } from './matrix';
 import { connectors } from '../connectors';
 import { parseAtsUrl } from '../connectors/common';
@@ -651,26 +651,17 @@ export function consoleApp(): App {
     colombia_perm: 'Colombia permanent',
     contractor_usd: 'Contractor international',
   };
-  /** Draft-or-live scoring config: chip edits accumulate in a draft until activated. */
+  /** Draft-or-live scoring config (normalized to the {en,es} shape); edits accumulate in a draft until activated. */
   async function loadDraftOrLive(env: ConsoleEnv): Promise<{ cfg: import('../scoring').ScoringConfig; isDraft: boolean }> {
     const d = await env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'").first<{ value: string }>();
-    if (d) return { cfg: JSON.parse(d.value), isDraft: true };
+    if (d) return { cfg: normalizeScoringConfig(JSON.parse(d.value)), isDraft: true };
     const l = await env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
     if (!l) throw new Error('scoring config missing');
-    return { cfg: JSON.parse(l.value), isDraft: false };
+    return { cfg: normalizeScoringConfig(JSON.parse(l.value)), isDraft: false };
   }
   async function saveDraft(env: ConsoleEnv, cfg: unknown): Promise<void> {
     await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring_draft', ?)")
       .bind(JSON.stringify(cfg)).run();
-  }
-  /** Console-only display metadata for gate terms (language/pairing). Cosmetic — outside the draft flow. */
-  async function loadMeta(env: ConsoleEnv): Promise<MatrixMeta> {
-    const r = await env.DB.prepare("SELECT value FROM config WHERE key='matrix_meta'").first<{ value: string }>();
-    return parseMeta(r?.value);
-  }
-  async function saveMeta(env: ConsoleEnv, meta: MatrixMeta): Promise<void> {
-    await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('matrix_meta', ?)")
-      .bind(JSON.stringify(meta)).run();
   }
 
   app.get('/config', async (c) => {
@@ -679,43 +670,74 @@ export function consoleApp(): App {
     ).results;
     const freshness = rows.find((r) => r.key === 'FRESHNESS_MAX_DAYS')?.value ?? '3';
     const { cfg, isDraft } = await loadDraftOrLive(c.env);
-    const meta = await loadMeta(c.env);
-    const matrix = buildMatrix(cfg, meta);
+    const matrix = buildMatrix(cfg);
     const trackLabel = (t: string) => TRACK_LABELS[t] ?? t;
     const pathClass = (t: string) => `path p-${Math.max(0, cfg.tracks.findIndex((x) => x.id === t))}`;
+    const isLocation = (cat: MatrixCategory) => cat === 'location';
 
-    /** One word chip: term, weight (or penalty), path badge, ✕ removes the pair. */
-    const chipEl = (ch: Chip, extra: boolean) => (
-      <span class={`chip${extra ? ' extra' : ''}${!ch.favor ? ' neg' : ''}${Math.abs(ch.weight ?? 0) >= 3 ? ' w3' : ''}${Math.abs(ch.weight ?? 0) === 1 ? ' w1' : ''}`}>
-        {ch.term}
-        {ch.weight !== undefined ? <span class="muted"> {ch.weight > 0 ? `+${ch.weight}` : ch.weight}</span>
-          : ch.penalty !== undefined ? <span class="muted"> −{ch.penalty}</span> : null}
-        {ch.path ? <span class={pathClass(ch.path)}>{trackLabel(ch.path)}</span> : null}
-        <form class="inline" method="post" action="/config/word-remove">
-          <input type="hidden" name="kind" value={ch.source.kind} />
-          {ch.source.kind === 'keyword' ? (
-            <input type="hidden" name="category" value={ch.category} />
-          ) : (
-            <>
-              <input type="hidden" name="track" value={ch.source.track} />
-              <input type="hidden" name="gate" value={ch.source.gate} />
-            </>
-          )}
-          <input type="hidden" name="term" value={ch.term} />
-          <button type="submit" class="chipx" title="remove word (both languages)">✕</button>
-        </form>
-      </span>
+    /** ✕ removes the whole concept (both languages). */
+    const removeForm = (r: ConceptRow) => (
+      <form class="inline" method="post" action="/config/word-remove">
+        <input type="hidden" name="kind" value={r.source.kind} />
+        {r.source.kind === 'keyword' ? (
+          <input type="hidden" name="category" value={r.category} />
+        ) : (
+          <>
+            <input type="hidden" name="track" value={r.source.track} />
+            <input type="hidden" name="gate" value={r.source.gate} />
+          </>
+        )}
+        <input type="hidden" name="en" value={r.en} />
+        <button type="submit" class="chipx" title="remove concept (both languages)">✕</button>
+      </form>
     );
-    const SHOW = 8;
-    const cellEl = (chips: Chip[]) => (
-      <div class="mcell">
-        {chips.length === 0 ? <span class="muted fs-sm">none</span>
-          : chips.map((ch, i) => chipEl(ch, i >= SHOW))}
-        {chips.length > SHOW ? (
-          <div><button type="button" class="morebtn">show {chips.length - SHOW} more</button></div>
-        ) : null}
+
+    /** One concept row: English | Español | Strength | Path | ✕. Location has no Strength. */
+    const conceptRow = (r: ConceptRow, loc: boolean) => (
+      <div class={`mconcept${loc ? ' loc' : ''}`}>
+        <div class="mc-en">{r.en}</div>
+        <div class="mc-es">{r.es ? r.es : <span class="mc-empty" title="Spanish not filled yet">—</span>}</div>
+        {loc ? null : (
+          <div class="mc-str">{r.weight !== undefined ? (r.weight > 0 ? `+${r.weight}` : r.weight)
+            : r.penalty !== undefined ? `−${r.penalty}` : ''}</div>
+        )}
+        <div class="mc-path">{r.path ? <span class={pathClass(r.path)}>{trackLabel(r.path)}</span> : <span class="muted">—</span>}</div>
+        <div class="mc-x">{removeForm(r)}</div>
       </div>
     );
+
+    const sideBlock = (label: string, rows: ConceptRow[], loc: boolean) => (rows.length ? (
+      <div class="mside">
+        <div class="msidehead">{label}</div>
+        <div class={`mconcept mhead${loc ? ' loc' : ''}`}>
+          <div>Word — English (required)</div>
+          <div>Word — Español (required)</div>
+          {loc ? null : <div>Strength</div>}
+          <div>Path</div>
+          <div />
+        </div>
+        {rows.map((r) => conceptRow(r, loc))}
+      </div>
+    ) : null);
+
+    const groupCard = (g: MatrixGroup) => {
+      const loc = isLocation(g.category);
+      return (
+        <details class="rc">
+          <summary class="rc-head">
+            <span class="caret" />
+            <span class="rc-title">{MATRIX_LABELS[g.category][0]}</span>
+            <span class="rc-sub">{MATRIX_LABELS[g.category][1]}</span>
+            <span class="rc-meta">{g.count} concepts{loc ? ' · gates (pass/fail)' : ''}</span>
+          </summary>
+          <div class="rc-body">
+            {sideBlock('In favor', g.favor, loc)}
+            {sideBlock('Against', g.against, loc)}
+            {g.count === 0 ? <p class="muted">none yet — ＋ Add word below</p> : null}
+          </div>
+        </details>
+      );
+    };
 
     return page(c, 'Calibration', (
       <>
@@ -749,31 +771,15 @@ export function consoleApp(): App {
           <button type="button" id="calsearch-clear" class="cs-x" aria-label="Clear filter">×</button>
         </div>
 
-        <div class="matrix-wrap">
-          <div class="matrix">
-            <div class="mrow mhead">
-              <div>Category</div>
-              <div class="fav">In favor · English</div>
-              <div class="fav">In favor · Español</div>
-              <div class="agn">Against · English</div>
-              <div class="agn">Against · Español</div>
-            </div>
-            {matrix.map((r) => (
-              <div class="mrow">
-                <div class="mcat">{MATRIX_LABELS[r.category][0]}<span class="sub">{MATRIX_LABELS[r.category][1]}</span></div>
-                {cellEl(r.favor_en)}
-                {cellEl(r.favor_es)}
-                {cellEl(r.against_en)}
-                {cellEl(r.against_es)}
-              </div>
-            ))}
-          </div>
+        <div class="matrix-groups">
+          {matrix.map(groupCard)}
         </div>
 
         <p class="muted mb-2">
-          Weight: <strong>+3</strong> strong · <strong>+2</strong> medium · <strong>+1</strong> light ·
-          <strong> −2</strong> against · <strong>−3</strong> strongly against — ✕ removes a word in BOTH
-          languages; adding happens in ONE place, below.
+          Every concept has an <strong>English</strong> and a <strong>Español</strong> value — both required.
+          <strong> —</strong> in the Español column means it isn’t filled yet. Strength:
+          <strong> +3</strong>/<strong>+2</strong>/<strong>+1</strong> in favor · <strong>−2</strong>/<strong>−3</strong> against.
+          ✕ removes the concept in both languages.
         </p>
         <p class="muted mb-3">
           <strong>Path</strong> — the track a word unlocks (or, on an against word, blocks):
@@ -840,20 +846,13 @@ export function consoleApp(): App {
   const q = document.getElementById('calsearch-input');
   if (q) q.addEventListener('input', () => {
     const s = q.value.trim().toLowerCase();
-    document.querySelectorAll('.matrix .chip').forEach((ch) => {
-      ch.classList.remove('hit', 'dim');
-      if (!s) return;
-      if (ch.textContent.toLowerCase().includes(s)) { ch.classList.add('hit'); ch.classList.remove('extra'); }
-      else ch.classList.add('dim');
+    document.querySelectorAll('.matrix-groups .mconcept:not(.mhead)').forEach((row) => {
+      row.style.display = (!s || row.textContent.toLowerCase().includes(s)) ? '' : 'none';
     });
+    if (s) document.querySelectorAll('.matrix-groups details.rc').forEach((d) => { d.open = true; });
   });
   const clr = document.getElementById('calsearch-clear');
   if (clr && q) clr.addEventListener('click', () => { q.value = ''; q.dispatchEvent(new Event('input')); q.focus(); });
-  document.querySelectorAll('.morebtn').forEach((b) => b.addEventListener('click', () => {
-    const cell = b.closest('.mcell');
-    cell.classList.toggle('open');
-    b.textContent = cell.classList.contains('open') ? 'show fewer' : b.textContent.replace('fewer', 'more');
-  }));
   const dirSel = document.getElementById('dir-sel');
   const strSel = document.getElementById('str-sel');
   if (dirSel && strSel) dirSel.addEventListener('change', () => {
@@ -874,8 +873,7 @@ export function consoleApp(): App {
     const category = String(b.category ?? '') as MatrixCategory;
     if (!MATRIX_CATEGORIES.includes(category)) return c.redirect('/config?m=invalid category');
     const { cfg } = await loadDraftOrLive(c.env);
-    const meta = await loadMeta(c.env);
-    const err = applyWordAdd(cfg, meta, {
+    const err = applyWordAdd(cfg, {
       en: String(b.term_en ?? ''),
       es: String(b.term_es ?? ''),
       category,
@@ -888,25 +886,22 @@ export function consoleApp(): App {
       return c.redirect(`/config?m=${encodeURIComponent(`rejected: ${e instanceof Error ? e.message : 'invalid'}`)}`);
     }
     await saveDraft(c.env, cfg);
-    await saveMeta(c.env, meta);
     return c.redirect(`/config?m=${encodeURIComponent(`added "${String(b.term_en).trim().toLowerCase()}" (EN+ES) — Preview impact to apply`)}`);
   });
 
   app.post('/config/word-remove', async (c) => {
     const b = await c.req.parseBody();
-    const term = String(b.term ?? '');
+    const en = String(b.en ?? '');
     const target: RemoveTarget = String(b.kind ?? '') === 'gate'
-      ? { kind: 'gate', track: String(b.track ?? ''), gate: String(b.gate ?? ''), term }
-      : { kind: 'keyword', category: String(b.category ?? '') as Category, term };
+      ? { kind: 'gate', track: String(b.track ?? ''), gate: String(b.gate ?? ''), en }
+      : { kind: 'keyword', category: String(b.category ?? '') as Category, en };
     if (target.kind === 'keyword' && !CATEGORIES.includes(target.category)) {
       return c.redirect('/config?m=invalid category');
     }
     const { cfg } = await loadDraftOrLive(c.env);
-    const meta = await loadMeta(c.env);
-    const r = applyPairRemove(cfg, meta, target);
+    const r = applyPairRemove(cfg, target);
     if ('error' in r) return c.redirect(`/config?m=${encodeURIComponent(`remove failed: ${r.error}`)}`);
     await saveDraft(c.env, cfg);
-    await saveMeta(c.env, meta);
     return c.redirect(`/config?m=${encodeURIComponent(`removed ${r.removed.map((t) => `"${t}"`).join(' + ')} — Preview impact to apply`)}`);
   });
 
@@ -1194,7 +1189,10 @@ export function consoleApp(): App {
     if (!draft) return c.redirect('/config?m=no draft');
     const old = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring'").first<{ value: string }>();
     const { diffScoring } = await import('./config-diff');
-    const diff = old ? diffScoring(JSON.parse(old.value), JSON.parse(draft.value)) : 'initial config';
+    // Normalize both sides so the diff is computed on the {en,es} shape (either may be legacy).
+    const diff = old
+      ? diffScoring(normalizeScoringConfig(JSON.parse(old.value)), normalizeScoringConfig(JSON.parse(draft.value)))
+      : 'initial config';
     await c.env.DB.batch([
       c.env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('scoring', ?)").bind(draft.value),
       c.env.DB.prepare("DELETE FROM config WHERE key='scoring_draft'"),

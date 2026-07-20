@@ -6,14 +6,20 @@ import type { Job, Verdict } from './types';
 export type Category = 'domain' | 'role_type' | 'tool_overlap' | 'level_fit';
 export const CATEGORIES: Category[] = ['domain', 'role_type', 'tool_overlap', 'level_fit'];
 
+/** One concept with BOTH languages required. `es` equals `en` when the word is
+ * the same in both (e.g. "sql"); a distinct Spanish otherwise (payments/pagos).
+ * The engine matches `en` OR `es` and counts the concept ONCE (no double count). */
 export interface Keyword {
-  term: string;
+  en: string;
+  es: string;
   /** Weight; negative = signal against (subtracts within the category, floor 0). */
   weight: number;
-  /** Display language ('es' = Spanish list in the console; absent = English). Matching ignores it. */
-  lang?: 'es';
-  /** Pair id linking the EN/ES twins of one concept (console matrix, 2026-07-18). Matching ignores it. */
-  pair?: string;
+}
+
+/** A gate term as a concept with both languages (`es` equals `en` when the same). */
+export interface GateTerm {
+  en: string;
+  es: string;
 }
 
 export interface Gate {
@@ -21,10 +27,10 @@ export interface Gate {
   type: 'hard' | 'penalty';
   /** Points a penalty subtracts (ignored on hard). */
   points?: number;
-  /** Passes if AT LEAST ONE matches; hard fails / penalty subtracts if none match. */
-  require?: string[];
-  /** Fails (hard) / subtracts (penalty) if ANY matches. */
-  reject?: string[];
+  /** Passes if AT LEAST ONE matches (en or es); hard fails / penalty if none match. */
+  require?: GateTerm[];
+  /** Fails (hard) / subtracts (penalty) if ANY matches (en or es). */
+  reject?: GateTerm[];
   /** Where to search. Default: 'text' (title + location + description). */
   scope?: 'title' | 'location' | 'title_location' | 'text';
 }
@@ -126,6 +132,11 @@ function matchesIn(term: string, normalizedText: string): boolean {
   return termRegex(term).test(normalizedText);
 }
 
+/** Match a concept's term; an empty string (a language not filled yet) never matches. */
+function hitTerm(term: string, normalizedText: string): boolean {
+  return !!term && matchesIn(term, normalizedText);
+}
+
 interface Corpus {
   title: string;
   location: string;
@@ -163,11 +174,12 @@ function scoreCategory(
   }
 
   for (const kw of effective) {
-    const inTitle = matchesIn(kw.term, corpus.title);
-    const inBody = inTitle || matchesIn(kw.term, corpus.text);
+    // One concept = one match check across BOTH languages → counted once (no double count).
+    const inTitle = hitTerm(kw.en, corpus.title) || hitTerm(kw.es, corpus.title);
+    const inBody = inTitle || hitTerm(kw.en, corpus.text) || hitTerm(kw.es, corpus.text);
     if (!inBody) continue;
     const contribution = kw.weight * (inTitle && kw.weight > 0 ? config.title_multiplier : 1);
-    matches.push({ term: kw.term, weight: contribution, in_title: inTitle });
+    matches.push({ term: kw.en, weight: contribution, in_title: inTitle });
     raw += contribution;
   }
 
@@ -180,27 +192,28 @@ function scoreCategory(
 function evaluateGate(gate: Gate, corpus: Corpus): GateResult {
   const scope = corpus[gate.scope ?? 'text'];
   const points = gate.points ?? 0;
+  const gmatch = (t: GateTerm) => hitTerm(t.en, scope) || hitTerm(t.es, scope);
 
   if (gate.reject?.length) {
-    const hit = gate.reject.find((t) => matchesIn(t, scope));
+    const hit = gate.reject.find(gmatch);
     if (hit) {
       return {
         id: gate.id, type: gate.type, passed: false,
-        evidence: `matched '${hit}'`,
+        evidence: `matched '${hit.en}'`,
         points_delta: gate.type === 'penalty' ? -points : 0,
       };
     }
   }
   if (gate.require?.length) {
-    const hit = gate.require.find((t) => matchesIn(t, scope));
+    const hit = gate.require.find(gmatch);
     if (!hit) {
       return {
         id: gate.id, type: gate.type, passed: false,
-        evidence: `no match for: ${gate.require.slice(0, 4).join(', ')}…`,
+        evidence: `no match for: ${gate.require.slice(0, 4).map((t) => t.en).join(', ')}…`,
         points_delta: gate.type === 'penalty' ? -points : 0,
       };
     }
-    return { id: gate.id, type: gate.type, passed: true, evidence: `matched '${hit}'`, points_delta: 0 };
+    return { id: gate.id, type: gate.type, passed: true, evidence: `matched '${hit.en}'`, points_delta: 0 };
   }
   return { id: gate.id, type: gate.type, passed: true, evidence: 'no failing conditions', points_delta: 0 };
 }

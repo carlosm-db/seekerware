@@ -15,15 +15,20 @@ export function diffScoring(oldC: ScoringConfig, newC: ScoringConfig): string {
   }
 
   for (const cat of Object.keys(newC.keywords) as Array<keyof ScoringConfig['keywords']>) {
-    const oldTerms = new Map((oldC.keywords[cat] ?? []).map((k) => [k.term, k.weight]));
-    const newTerms = new Map((newC.keywords[cat] ?? []).map((k) => [k.term, k.weight]));
+    const oldTerms = new Map((oldC.keywords[cat] ?? []).map((k) => [k.en, k.weight]));
+    const newTerms = new Map((newC.keywords[cat] ?? []).map((k) => [k.en, k.weight]));
+    // Spanish twins added onto existing concepts (the contamination cleanup).
+    const oldEs = new Map((oldC.keywords[cat] ?? []).map((k) => [k.en, k.es]));
+    const newEs = new Map((newC.keywords[cat] ?? []).map((k) => [k.en, k.es]));
     const added = [...newTerms.keys()].filter((t) => !oldTerms.has(t));
     const removed = [...oldTerms.keys()].filter((t) => !newTerms.has(t));
     const reweighted = [...newTerms.keys()].filter((t) => oldTerms.has(t) && oldTerms.get(t) !== newTerms.get(t));
+    const translated = [...newEs.keys()].filter((t) => oldTerms.has(t) && !oldEs.get(t) && newEs.get(t));
     const bits = [
       ...added.map((t) => `+${t}`),
       ...removed.map((t) => `−${t}`),
       ...reweighted.map((t) => `${t} ${oldTerms.get(t)}→${newTerms.get(t)}`),
+      ...translated.map((t) => `${t} +es:${newEs.get(t)}`),
     ];
     if (bits.length) parts.push(`${cat}: ${bits.join(', ')}`);
   }
@@ -38,8 +43,8 @@ export function diffScoring(oldC: ScoringConfig, newC: ScoringConfig): string {
       if (!og) { parts.push(`${nt.id}: gate ${ng.id} added`); continue; }
       if ((og.points ?? 0) !== (ng.points ?? 0)) parts.push(`${ng.id} penalty ${og.points ?? 0}→${ng.points ?? 0}`);
       for (const list of ['require', 'reject'] as const) {
-        const o = new Set(og[list] ?? []);
-        const n = new Set(ng[list] ?? []);
+        const o = new Set((og[list] ?? []).map((t) => t.en));
+        const n = new Set((ng[list] ?? []).map((t) => t.en));
         const bits = [
           ...[...n].filter((t) => !o.has(t)).map((t) => `+${t}`),
           ...[...o].filter((t) => !n.has(t)).map((t) => `−${t}`),

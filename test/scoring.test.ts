@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeTitle, scoreJob, type ScoringConfig } from '../src/scoring';
+import { normalizeScoringConfig } from '../src/config-store';
 import type { Job } from '../src/types';
 
-const config: ScoringConfig = {
+// Authored in the legacy shape and up-converted through the real normalizer, so
+// this suite exercises BOTH the engine and the legacy→{en,es} migration path.
+const config: ScoringConfig = normalizeScoringConfig({
   weights: {
     domain: { weight: 40, saturation: 6 },
     role_type: { weight: 25, saturation: 4 },
@@ -64,7 +67,7 @@ const config: ScoringConfig = {
       ],
     },
   ],
-};
+});
 
 function job(over: Partial<Job>): Job {
   return {

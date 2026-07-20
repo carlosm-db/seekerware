@@ -4,7 +4,7 @@ import type { Ats, Company, Job } from './types';
 import { connectors } from './connectors/index';
 import { urlHash } from './connectors/common';
 import { counts } from './store';
-import { loadScoringConfig } from './config-store';
+import { loadScoringConfig, normalizeScoringConfig } from './config-store';
 import { scoreJob, type ScoreResult, type ScoringConfig } from './scoring';
 import { runPipeline } from './pipeline';
 import { ruleBasedTexts, sendTelegram } from './notify';
@@ -46,7 +46,7 @@ app.get('/api/replay-batch', async (c) => {
   const draftRow = await c.env.DB.prepare("SELECT value FROM config WHERE key='scoring_draft'")
     .first<{ value: string }>();
   if (!draftRow) return c.json({ error: 'no scoring draft' }, 400);
-  const draft = JSON.parse(draftRow.value) as ScoringConfig;
+  const draft = normalizeScoringConfig(JSON.parse(draftRow.value));
 
   const rows = (
     await c.env.DB.prepare(
