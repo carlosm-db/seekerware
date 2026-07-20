@@ -28,22 +28,22 @@ const makeCfg = (): ScoringConfig => ({
     {
       id: 'canada_coop',
       gates: [
-        { id: 'location_canada', type: 'hard', scope: 'location', require: [{ en: 'canada', es: 'canada' }, { en: 'toronto', es: 'toronto' }] },
-        { id: 'coop_signal', type: 'penalty', points: 15, scope: 'title', require: [{ en: 'co-op', es: 'co-op' }, { en: 'work term', es: 'período de trabajo' }] },
+        { id: 'location_canada', scope: 'location', require: [{ en: 'canada', es: 'canada' }, { en: 'toronto', es: 'toronto' }] },
+        { id: 'coop_signal', scope: 'title', require: [{ en: 'co-op', es: 'co-op' }, { en: 'work term', es: 'período de trabajo' }] },
       ],
     },
     {
       id: 'colombia_perm',
       gates: [
-        { id: 'location_latam', type: 'hard', scope: 'location', require: [{ en: 'colombia', es: 'colombia' }, { en: 'latam', es: 'latam' }] },
-        { id: 'reject_us_only', type: 'hard', scope: 'text', reject: [{ en: 'us only', es: 'solo estados unidos' }, { en: 'no sponsorship', es: 'sin patrocinio' }] },
+        { id: 'location_latam', scope: 'location', require: [{ en: 'colombia', es: 'colombia' }, { en: 'latam', es: 'latam' }] },
+        { id: 'reject_us_only', scope: 'text', reject: [{ en: 'us only', es: 'solo estados unidos' }, { en: 'no sponsorship', es: 'sin patrocinio' }] },
       ],
     },
     {
       id: 'contractor_usd',
       gates: [
-        { id: 'remote_required', type: 'hard', scope: 'location', require: [{ en: 'remote', es: 'remoto' }, { en: 'worldwide', es: 'mundial' }] },
-        { id: 'reject_restricted_remote', type: 'hard', scope: 'location', reject: [{ en: 'emea', es: 'emea' }, { en: 'san francisco', es: 'san francisco' }] },
+        { id: 'remote_required', scope: 'location', require: [{ en: 'remote', es: 'remoto' }, { en: 'worldwide', es: 'mundial' }] },
+        { id: 'reject_restricted_remote', scope: 'location', reject: [{ en: 'emea', es: 'emea' }, { en: 'san francisco', es: 'san francisco' }] },
       ],
     },
   ],
@@ -72,10 +72,9 @@ describe('buildMatrix', () => {
     expect(rec.es).toBe('');
   });
 
-  it('derives the path badge and penalty from gate membership', () => {
+  it('derives the path badge from gate membership', () => {
     const coop = row(rows, 'role_type').favor.find((r) => r.en === 'co-op')!;
     expect(coop.path).toBe('canada_coop');
-    expect(coop.penalty).toBe(15);
     expect(coop.source.kind).toBe('keyword');
   });
 

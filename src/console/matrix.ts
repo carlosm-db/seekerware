@@ -24,8 +24,6 @@ export interface ConceptRow {
   es: string;
   /** Keyword rows: signed weight. Gate rows carry no weight (gates are absolute). */
   weight?: number;
-  /** Points, when the owning gate is a penalty (display "−N"). */
-  penalty?: number;
   /** Track whose gate contains this term — the path badge. */
   path?: string;
   source: ConceptSource;
@@ -39,7 +37,7 @@ export interface MatrixGroup {
   count: number;
 }
 
-interface GateHit { track: string; gate: string; list: 'require' | 'reject'; penalty?: number; titleScope: boolean }
+interface GateHit { track: string; gate: string; list: 'require' | 'reject'; titleScope: boolean }
 
 /** Index every gate term (by en, first hit wins) for keyword path derivation. */
 function indexGates(cfg: ScoringConfig): Map<string, GateHit> {
@@ -50,11 +48,7 @@ function indexGates(cfg: ScoringConfig): Map<string, GateHit> {
       for (const list of ['require', 'reject'] as const) {
         for (const term of g[list] ?? []) {
           if (!idx.has(term.en)) {
-            idx.set(term.en, {
-              track: t.id, gate: g.id, list,
-              penalty: g.type === 'penalty' ? (g.points ?? 0) : undefined,
-              titleScope,
-            });
+            idx.set(term.en, { track: t.id, gate: g.id, list, titleScope });
           }
         }
       }
@@ -85,7 +79,7 @@ export function buildMatrix(cfg: ScoringConfig): MatrixGroup[] {
       const hit = gateIdx.get(k.en);
       push({
         category: cat, favor: k.weight > 0, en: k.en, es: k.es,
-        weight: k.weight, path: hit?.track, penalty: hit?.penalty,
+        weight: k.weight, path: hit?.track,
         source: { kind: 'keyword' },
       });
     }
@@ -98,14 +92,13 @@ export function buildMatrix(cfg: ScoringConfig): MatrixGroup[] {
     for (const g of t.gates) {
       const titleScope = g.scope === 'title' || g.scope === 'title_location';
       const category: MatrixCategory = titleScope ? 'role_type' : 'location';
-      const penalty = g.type === 'penalty' ? (g.points ?? 0) : undefined;
       for (const list of ['require', 'reject'] as const) {
         for (const term of g[list] ?? []) {
           if (keywordEns.has(term.en) || seenGate.has(term.en)) continue;
           seenGate.add(term.en);
           push({
             category, favor: list === 'require', en: term.en, es: term.es,
-            path: t.id, penalty, source: { kind: 'gate', track: t.id, gate: g.id, list },
+            path: t.id, source: { kind: 'gate', track: t.id, gate: g.id, list },
           });
         }
       }

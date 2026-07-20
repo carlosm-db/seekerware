@@ -73,10 +73,12 @@ export function normalizeScoringConfig(raw: unknown): ScoringConfig {
   const rawTracks = Array.isArray(c.tracks) ? (c.tracks as Record<string, unknown>[]) : [];
   const tracks = rawTracks.map((t) => ({
     ...t,
+    // Gates are always hard (pass/fail). Legacy `type`/`points` are dropped here.
     gates: (Array.isArray(t.gates) ? (t.gates as Record<string, unknown>[]) : []).map((g) => ({
-      ...g,
-      require: g.require === undefined ? undefined : normalizeGateTerms(g.require),
-      reject: g.reject === undefined ? undefined : normalizeGateTerms(g.reject),
+      id: g.id,
+      ...(g.scope === undefined ? {} : { scope: g.scope }),
+      ...(g.require === undefined ? {} : { require: normalizeGateTerms(g.require) }),
+      ...(g.reject === undefined ? {} : { reject: normalizeGateTerms(g.reject) }),
     })),
   }));
 
@@ -124,9 +126,7 @@ function validate(c: ScoringConfig): ScoringConfig {
   for (const t of c.tracks) {
     if (!t.id || !Array.isArray(t.gates)) throw new Error("config 'scoring': track without id or gates");
     for (const g of t.gates) {
-      if (!g.id || (g.type !== 'hard' && g.type !== 'penalty')) {
-        throw new Error(`config 'scoring': invalid gate in track ${t.id}`);
-      }
+      if (!g.id) throw new Error(`config 'scoring': gate without id in track ${t.id}`);
     }
   }
   return c;

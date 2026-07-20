@@ -63,7 +63,6 @@ const config: ScoringConfig = normalizeScoringConfig({
       id: 'contractor_usd',
       gates: [
         { id: 'remoto', type: 'hard', require: ['remote', 'worldwide', 'anywhere'], scope: 'text' },
-        { id: 'senal_contractor', type: 'penalty', points: 15, require: ['contractor', 'b2b', 'freelance'], scope: 'text' },
       ],
     },
   ],
@@ -102,21 +101,6 @@ describe('scoreJob — tracks and gates', () => {
     expect(gate.evidence).toContain('us only');
   });
 
-  it('remote contractor without a B2B signal gets a penalty (subtracts 15)', () => {
-    const withSignalJob = job({
-      title: 'Business Analyst',
-      location: 'Remote worldwide',
-      description: 'Payments and banking. SQL. Independent contractor, B2B.',
-    });
-    const withoutSignalJob = job({
-      title: 'Business Analyst',
-      location: 'Remote worldwide',
-      description: 'Payments and banking. SQL.',
-    });
-    const withSignal = scoreJob(withSignalJob, config).tracks.contractor_usd!;
-    const withoutSignal = scoreJob(withoutSignalJob, config).tracks.contractor_usd!;
-    expect(withSignal.adjusted_score - withoutSignal.adjusted_score).toBeGreaterThanOrEqual(15);
-  });
 });
 
 describe('scoreJob — near-miss and explainability', () => {

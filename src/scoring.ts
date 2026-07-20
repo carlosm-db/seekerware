@@ -24,12 +24,9 @@ export interface GateTerm {
 
 export interface Gate {
   id: string;
-  type: 'hard' | 'penalty';
-  /** Points a penalty subtracts (ignored on hard). */
-  points?: number;
-  /** Passes if AT LEAST ONE matches (en or es); hard fails / penalty if none match. */
+  /** Passes if AT LEAST ONE matches (en or es); the track hard-fails if none match. */
   require?: GateTerm[];
-  /** Fails (hard) / subtracts (penalty) if ANY matches (en or es). */
+  /** The track hard-fails if ANY matches (en or es). */
   reject?: GateTerm[];
   /** Where to search. Default: 'text' (title + location + description). */
   scope?: 'title' | 'location' | 'title_location' | 'text';
@@ -76,11 +73,9 @@ export interface CategoryBreakdown {
 
 export interface GateResult {
   id: string;
-  type: 'hard' | 'penalty';
   passed: boolean;
   /** Evidence: term that matched (in reject) or that was missing (in require). */
   evidence: string;
-  points_delta: number;
 }
 
 export interface TrackResult {
@@ -195,31 +190,20 @@ function scoreCategory(
 
 function evaluateGate(gate: Gate, corpus: Corpus): GateResult {
   const scope = corpus[gate.scope ?? 'text'];
-  const points = gate.points ?? 0;
   const gmatch = (t: GateTerm) => hitTerm(t.en, scope) || hitTerm(t.es, scope);
 
   if (gate.reject?.length) {
     const hit = gate.reject.find(gmatch);
-    if (hit) {
-      return {
-        id: gate.id, type: gate.type, passed: false,
-        evidence: `matched '${hit.en}'`,
-        points_delta: gate.type === 'penalty' ? -points : 0,
-      };
-    }
+    if (hit) return { id: gate.id, passed: false, evidence: `matched '${hit.en}'` };
   }
   if (gate.require?.length) {
     const hit = gate.require.find(gmatch);
     if (!hit) {
-      return {
-        id: gate.id, type: gate.type, passed: false,
-        evidence: `no match for: ${gate.require.slice(0, 4).map((t) => t.en).join(', ')}…`,
-        points_delta: gate.type === 'penalty' ? -points : 0,
-      };
+      return { id: gate.id, passed: false, evidence: `no match for: ${gate.require.slice(0, 4).map((t) => t.en).join(', ')}…` };
     }
-    return { id: gate.id, type: gate.type, passed: true, evidence: `matched '${hit.en}'`, points_delta: 0 };
+    return { id: gate.id, passed: true, evidence: `matched '${hit.en}'` };
   }
-  return { id: gate.id, type: gate.type, passed: true, evidence: 'no failing conditions', points_delta: 0 };
+  return { id: gate.id, passed: true, evidence: 'no failing conditions' };
 }
 
 function verdictFor(score: number, thresholds: ScoringConfig['thresholds']): Verdict {
@@ -252,14 +236,12 @@ export function scoreJob(job: Job, config: ScoringConfig): ScoreResult {
   const tracks: Record<string, TrackResult> = {};
   for (const track of config.tracks) {
     const gates = track.gates.map((g) => evaluateGate(g, corpus));
-    const hardFailed = gates.some((g) => g.type === 'hard' && !g.passed);
-    const penalty = gates.reduce((acc, g) => acc + g.points_delta, 0);
-    const adjusted = Math.max(0, score + penalty);
+    const hardFailed = gates.some((g) => !g.passed);
     tracks[track.id] = {
       gates,
       hard_failed: hardFailed,
-      adjusted_score: adjusted,
-      verdict: hardFailed ? 'Skip' : verdictFor(adjusted, track.thresholds ?? config.thresholds),
+      adjusted_score: score,
+      verdict: hardFailed ? 'Skip' : verdictFor(score, track.thresholds ?? config.thresholds),
     };
   }
 
@@ -289,7 +271,7 @@ function nearMissReason(result: ScoreResult, config: ScoringConfig): string {
   }
   if (!closest) return 'no tracks configured';
   const { track, t } = closest;
-  const failedHard = t.gates.find((g) => g.type === 'hard' && !g.passed);
+  const failedHard = t.gates.find((g) => !g.passed);
   if (failedHard) return `gate: ${failedHard.id} (${track}) — ${failedHard.evidence}`;
   const stretch =
     config.tracks.find((tc) => tc.id === track)?.thresholds?.stretch ?? config.thresholds.stretch;
