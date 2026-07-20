@@ -373,7 +373,6 @@ export function consoleApp(): App {
             ) : null}
             {j.cv_doc_url ? <a class="btnlike" href={String(j.cv_doc_url)} target="_blank" rel="noreferrer">CV Doc ↗</a>
               : j.cv_pending ? <span class="muted">CV build failed — retrying next burst</span> : null}
-            {kit?.deep_link ? <a class="btnlike" href={String(kit.deep_link)} target="_blank" rel="noreferrer">Application form ↗</a> : null}
           </div>
           {hasKit ? (
             <div class="mt-1">
