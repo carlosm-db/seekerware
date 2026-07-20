@@ -326,19 +326,18 @@ export function consoleApp(): App {
     return page(c, String(j.title), (
       <>
         <div class="card">
-          <div class="actions"><a class="btnlike right" href={String(j.url)} target="_blank" rel="noreferrer">Open job ↗</a></div>
-          <div class="kv">
+          <div class="jobmeta">
             <div><span class="k">Company:</span>{j.company}</div>
+            <div class="span2"><span class="k">Location:</span>{j.location || '—'}</div>
             <div><span class="k">Verdict:</span><span class={`v-${j.verdict}`}>{j.verdict}</span></div>
-            <div><span class="k">Location:</span>{j.location || '—'}</div>
             <div><span class="k">Score:</span>{j.score}/100</div>
             <div><span class="k">Track:</span>{j.track ?? '—'}</div>
-            <div><span class="k">Status:</span><span class={`s-${j.status}`}>{j.status}</span></div>
             <div><span class="k">Posted:</span>{fmt(j.posted_at as string)}</div>
             <div><span class="k">Seen:</span>{fmt(j.first_seen as string)}</div>
-            <div><span class="k">Notified:</span>{fmt(j.notified_at as string)}</div>
+            <div><span class="k">Status:</span><span class={`s-${j.status}`}>● {j.status}</span></div>
           </div>
           <div class="actions mt-1">
+            <a class="btnlike" href={String(j.url)} target="_blank" rel="noreferrer">Open job ↗</a>
             {(['prepared|Prepare', 'applied|I applied ✓', 'dismissed|Dismiss'] as const).map((x) => {
               const [stage, label] = x.split('|');
               return (

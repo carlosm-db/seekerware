@@ -236,6 +236,10 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
 .hidden { display:none } .cap { text-transform:capitalize } .bd-warn { border-color:var(--warn) }
 .kv { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:var(--sp-2) var(--sp-6); margin:var(--sp-4) 0 }
 .kv .k { color:var(--muted); font-size:var(--fs-sm); margin-right:var(--sp-2) }
+.jobmeta { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:var(--sp-3) var(--sp-6); margin:var(--sp-4) 0; max-width:920px }
+.jobmeta .span2 { grid-column:span 2 }
+.jobmeta .k { color:var(--muted); font-size:var(--fs-sm); text-transform:uppercase; letter-spacing:.03em; margin-right:var(--sp-2) }
+@media (max-width:719px) { .jobmeta { grid-template-columns:1fr } .jobmeta .span2 { grid-column:auto } }
 
 @media (min-width:720px) {
   main { padding:22px 26px }
