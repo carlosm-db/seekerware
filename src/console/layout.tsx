@@ -309,7 +309,7 @@ export const Layout: FC<{
       <input type="checkbox" id="navtoggle" />
       <div class="topbar">
         <label class="hamburger" for="navtoggle" aria-label="menu" dangerouslySetInnerHTML={{ __html: '☰' }} />
-        <span class="brand">Seekerware{pendingTriage > 0 ? <span class="badge">{pendingTriage}</span> : null}</span>
+        <span class="brand">Seekerware</span>
         <button
           type="button"
           class="theme-btn"
