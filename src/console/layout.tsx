@@ -60,7 +60,10 @@ button.chipx:hover { color:var(--bad) }
 .s-new { color:var(--accent) } .s-notified { color:var(--ok) } .s-closed { color:var(--muted) }
 .s-skipped { color:var(--muted) }
 .muted { color:var(--muted) } .ok { color:var(--ok) } .warn { color:var(--warn) } .bad { color:var(--bad) }
-form.inline { display:inline }
+/* display:contents removes the form's box so its <button> is a DIRECT flex child
+   of .actions — same alignment as a bare <a.btnlike>. (A form as an inline flex
+   item was centering its button lower than the sibling link.) */
+form.inline { display:contents }
 button, input[type=submit] { cursor:pointer; border:1px solid var(--line);
   background:var(--card); color:var(--fg); border-radius:8px; padding:10px 14px; font-size:15px;
   min-height:44px; display:inline-flex; align-items:center; justify-content:center;
@@ -74,7 +77,7 @@ button.danger { background:var(--bad); color:#fff; border-color:var(--bad) }
    every action has the same affordance without JS. .sec = secondary skin. ---- */
 a.btnlike, details.btnlike > summary { display:inline-flex; align-items:center; justify-content:center; gap:5px;
   border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:8px;
-  padding:10px 14px; font-size:15px; min-height:44px; cursor:pointer; box-sizing:border-box; vertical-align:middle }
+  padding:10px 14px; font-size:15px; line-height:1; min-height:44px; cursor:pointer; box-sizing:border-box; vertical-align:middle }
 a.btnlike:hover { text-decoration:none; border-color:var(--accent) }
 details.btnlike { display:inline-block }
 details.btnlike[open] > summary { border-color:var(--accent) }
