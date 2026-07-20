@@ -267,10 +267,10 @@ export function consoleApp(): App {
         </div>
         <form method="get" action="/jobs" class="card actions filterbar">
           <input type="hidden" name="view" value={view} />
+          <input type="text" name="q" placeholder="search in title" value={q.q ?? ''} />
           {sel('track', ['canada_coop', 'colombia_perm', 'contractor_usd'], q.track)}
           {sel('verdict', ['Apply', 'Stretch-worth-it', 'Skip'], q.verdict)}
           {sel('status', ['new', 'notified', 'closed', 'skipped'], q.status)}
-          <input type="text" name="q" placeholder="search in title" value={q.q ?? ''} />
           <button type="submit" class="primary">Filter</button>
         </form>
         <div class="table-wrap"><table>
