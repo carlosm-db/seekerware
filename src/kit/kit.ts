@@ -1,5 +1,5 @@
 // Application-kit assembly (step 8, ratified L1): CV artifacts + rule-based
-// positioning inputs + matched answers from the APPROVED bank + red questions
+// positioning inputs + matched answers from the APPROVED Q&A + red questions
 // + deep link. The kit prepares; the human submits. Zero AI in this module.
 
 import type { Ats, Env } from '../types';
@@ -69,7 +69,7 @@ export async function buildKit(env: Env, urlHash: string, doFetch: Fetcher = fet
     env.DB.prepare('INSERT INTO job_events (url_hash, ts, actor, event, detail) VALUES (?,?,?,?,?)')
       .bind(urlHash, nowIso, 'system', 'kit_built',
         detectError
-          ? `questions not detected (${detectError}); answers bank ready`
+          ? `questions not detected (${detectError}); Q&A ready`
           : `${answers.length - red.length} matched · ${red.length} red · ${eeoc.length} EEOC-flagged`),
   ]);
 

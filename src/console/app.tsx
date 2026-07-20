@@ -49,7 +49,7 @@ export function consoleApp(): App {
     );
   }
 
-  // ---------- Bank shared bits (docs/UI.md §2; v4 2026-07-18: LinkedIn-style
+  // ---------- Blocks Bank shared bits (docs/UI.md §2; v4 2026-07-18: LinkedIn-style
   // collapsible cards, edit-in-place, saving IS the approval) ----------
   type AnchorOpt = {
     id: string; company: string | null; kind: string;
@@ -125,7 +125,8 @@ export function consoleApp(): App {
   });
 
   // ---------- Overview (indicators) ----------
-  app.get('/', async (c) => {
+  app.get('/', (c) => c.redirect('/overview'));
+  app.get('/overview', async (c) => {
     const strip = await c.env.DB.prepare(
       `SELECT
         (SELECT COUNT(*) FROM applications WHERE stage='applied' AND applied_at >= datetime('now','-7 days')) applied_week,
@@ -162,7 +163,7 @@ export function consoleApp(): App {
       ['Operate', '/tracker', `${panel?.tracker_active ?? 0}`, 'active applications'],
       ['Operate', '/jobs', `${panel?.jobs_total ?? 0}`, 'jobs seen (all)'],
       ['Profile & setup', '/companies', `${panel?.companies_active ?? 0}/${panel?.companies_total ?? 0}`, 'companies active'],
-      ['Profile & setup', '/blocks', `${panel?.blocks_approved ?? 0}/${panel?.blocks_total ?? 0}`, 'blocks approved'],
+      ['Profile & setup', '/blocks_bank', `${panel?.blocks_approved ?? 0}/${panel?.blocks_total ?? 0}`, 'blocks approved'],
       ['Profile & setup', '/contact', panel?.contact_set ? 'set ✓' : 'not set', 'contact profile'],
       ['System', '/health', strip?.run_status ?? '—', 'last run'],
     ];
@@ -385,7 +386,7 @@ export function consoleApp(): App {
               {kitRed.length ? (
                 <div class="mt-2"><strong class="warn">Unanswered:</strong>
                   {kitRed.map((q) => <div class="muted">🔴 {q}</div>)}
-                  <div class="muted">answer them from the Telegram kit message, or add them in <a href="/answers">Answers</a></div>
+                  <div class="muted">answer them from the Telegram kit message, or add them in <a href="/qa">Q&A</a></div>
                 </div>
               ) : null}
               {kitEeoc.length ? (
@@ -1091,7 +1092,7 @@ export function consoleApp(): App {
   // Replay/Preview and Re-score removed 2026-07-19: calibration edits now apply
   // live immediately; stored jobs keep their score, new jobs use the active config.
 
-  // ---------- Bank (v6 2026-07-18, the owner's sketch): a role/group is ONE
+  // ---------- Blocks Bank (v6 2026-07-18, the owner's sketch): a role/group is ONE
   // form — its fields plus ALL its bullets — edited together via the single ✏️
   // and saved in ONE transaction. Tap = read mode (clean full-width text).
   // Saving IS the approval. Editors open in native <dialog> popups
@@ -1101,7 +1102,7 @@ export function consoleApp(): App {
   // Section order per owner: Summary → Skills → Roles → Projects, each a
   // collapsible group.
 
-  app.get('/blocks', async (c) => {
+  app.get('/blocks_bank', async (c) => {
     const anchors = await fetchAnchors(c.env);
     const rows = (
       await c.env.DB.prepare(
@@ -1234,7 +1235,7 @@ export function consoleApp(): App {
       const fid = `gf-${key}`;
       return (
         <div class="editpane">
-          <form method="post" action="/blocks/group-save" id={fid}>
+          <form method="post" action="/blocks_bank/group-save" id={fid}>
             {Object.entries(hidden).map(([k, v]) => <input type="hidden" name={k} value={v} />)}
             {bulletsSection('items', items.map((b, i) => bulletBox(b, `item ${i + 1}`)))}
           </form>
@@ -1338,11 +1339,11 @@ export function consoleApp(): App {
       <button type="button" class="btnlike sec" onclick={`document.getElementById('${id}').showModal()`}>＋ {label}</button>
     );
 
-    return page(c, 'Blocks bank', (
+    return page(c, 'Blocks Bank', (
       <>
         <div class="actions mb-4">
           <span><strong>{rows.length}</strong> <span class="muted">bullets</span> · <strong>{roleCount}</strong> <span class="muted">roles</span></span>
-          <a href="/blocks/template-check">Check template ↗</a>
+          <a href="/blocks_bank/template-check">Check template ↗</a>
         </div>
 
         <details class="sect" open>
@@ -1405,23 +1406,23 @@ export function consoleApp(): App {
   };
 
   // Skills category / summary: ONE save for all the group's items.
-  app.post('/blocks/group-save', async (c) => {
+  app.post('/blocks_bank/group-save', async (c) => {
     const b = await c.req.parseBody();
     const section = String(b.section ?? '');
     const skcat = String(b.skcat ?? '') || null;
     if (section === 'skills' ? !skcat || !(SKCATS as readonly string[]).includes(skcat) : section !== 'summary') {
-      return c.redirect('/blocks?m=invalid group');
+      return c.redirect('/blocks_bank?m=invalid group');
     }
     const key = section === 'summary' ? 'sum' : `skl-${skcat}`;
     const edits = parseBulletEdits(b);
-    if ('error' in edits) return c.redirect(`/blocks?reopen=dlg-group-${key}&m=${encodeURIComponent(`save failed: ${edits.error}`)}`);
+    if ('error' in edits) return c.redirect(`/blocks_bank?reopen=dlg-group-${key}&m=${encodeURIComponent(`save failed: ${edits.error}`)}`);
     try {
       const stmts = bulletStmts(c.env, edits, { section, anchor_id: null, skcat });
       if (stmts.length) await c.env.DB.batch(stmts);
     } catch (err) {
-      return c.redirect(`/blocks?reopen=dlg-group-${key}&m=${encodeURIComponent(`save failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
+      return c.redirect(`/blocks_bank?reopen=dlg-group-${key}&m=${encodeURIComponent(`save failed: ${err instanceof Error ? err.message : 'db error'}`)}`);
     }
-    return c.redirect('/blocks?m=saved');
+    return c.redirect('/blocks_bank?m=saved');
   });
 
   // ---------- Roles (anchors) — the missing write path (2026-07-18) ----------
@@ -1439,13 +1440,13 @@ export function consoleApp(): App {
     const dateTo = isProject || b.current != null ? null : normalizeMonth(String(b.date_to ?? ''));
     const reopen = isProject ? 'dlg-addproject' : 'dlg-addrole';
     if (isProject ? !title : !company) {
-      return c.redirect(`/blocks?reopen=${reopen}&m=add ${kind} failed: ${isProject ? 'project name' : 'company/name'} is required`);
+      return c.redirect(`/blocks_bank?reopen=${reopen}&m=add ${kind} failed: ${isProject ? 'project name' : 'company/name'} is required`);
     }
     const edits = parseBulletEdits(b);
-    if ('error' in edits) return c.redirect(`/blocks?reopen=${reopen}&m=${encodeURIComponent(`add ${kind} failed: ${edits.error}`)}`);
+    if ('error' in edits) return c.redirect(`/blocks_bank?reopen=${reopen}&m=${encodeURIComponent(`add ${kind} failed: ${edits.error}`)}`);
     const existing = ((await c.env.DB.prepare('SELECT id FROM anchors').all<{ id: string }>()).results).map((a) => a.id);
     const err = validateRoleCode(code, existing);
-    if (err) return c.redirect(`/blocks?reopen=${reopen}&m=${encodeURIComponent(`add ${kind} failed: ${err}`)}`);
+    if (err) return c.redirect(`/blocks_bank?reopen=${reopen}&m=${encodeURIComponent(`add ${kind} failed: ${err}`)}`);
     const section = isProject ? 'projects' : 'experience';
     await c.env.DB.batch([
       c.env.DB.prepare(
@@ -1453,7 +1454,7 @@ export function consoleApp(): App {
       ).bind(code, kind, company, title, dateFrom, dateTo),
       ...bulletStmts(c.env, edits, { section, anchor_id: code, skcat: null }),
     ]);
-    return c.redirect(`/blocks?m=${encodeURIComponent(
+    return c.redirect(`/blocks_bank?m=${encodeURIComponent(
       `${kind} ${code} added — now paste {{${code}R1}}, {{${code}R2}}, … lines into your CV template Doc (with its static header) and run Check template`,
     )}`);
   });
@@ -1467,7 +1468,7 @@ export function consoleApp(): App {
     const newCode = String(b.new_code ?? '').trim().toUpperCase();
     const row = await c.env.DB.prepare('SELECT id, kind, company FROM anchors WHERE id = ?')
       .bind(id).first<{ id: string; kind: string; company: string | null }>();
-    if (!row) return c.redirect('/blocks?m=role not found');
+    if (!row) return c.redirect('/blocks_bank?m=role not found');
     const isProject = row.kind === 'project';
     // Projects carry no employment semantics: company/dates stay null.
     const company = isProject ? null : (String(b.company ?? '').trim() || row.company);
@@ -1475,14 +1476,14 @@ export function consoleApp(): App {
     // "I currently work here" wins over any stale To value.
     const dateTo = isProject || b.current != null ? null : normalizeMonth(String(b.date_to ?? ''));
     const edits = parseBulletEdits(b);
-    if ('error' in edits) return c.redirect(`/blocks?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${edits.error}`)}`);
+    if ('error' in edits) return c.redirect(`/blocks_bank?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(`save failed: ${edits.error}`)}`);
     const renaming = !!newCode && newCode !== id;
     if (renaming) {
       // CODE rename: template-coupled. Refuse while {{OLD…}} tokens remain in
       // the Doc; abort on any Google failure (never rename blind).
       const existing = ((await c.env.DB.prepare('SELECT id FROM anchors WHERE id != ?').bind(id).all<{ id: string }>()).results).map((a) => a.id);
       const err = validateRoleCode(newCode, existing);
-      if (err) return c.redirect(`/blocks?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(`rename failed: ${err}`)}`);
+      if (err) return c.redirect(`/blocks_bank?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(`rename failed: ${err}`)}`);
       try {
         if (!c.env.CV_TEMPLATE_DOC_ID) throw new Error('CV_TEMPLATE_DOC_ID not configured');
         const { googleAccessToken, readPlaceholders } = await import('../gdocs');
@@ -1490,12 +1491,12 @@ export function consoleApp(): App {
         const docTokens = await readPlaceholders(token, c.env.CV_TEMPLATE_DOC_ID);
         const leftovers = tokensOfRole(id, docTokens.map((t) => t.name));
         if (leftovers.length) {
-          return c.redirect(`/blocks?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(
+          return c.redirect(`/blocks_bank?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(
             `rename refused: the template still contains ${leftovers.slice(0, 3).join(', ')}${leftovers.length > 3 ? '…' : ''} — update the Doc to {{${newCode}R…}} first`,
           )}`);
         }
       } catch (err2) {
-        return c.redirect(`/blocks?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(
+        return c.redirect(`/blocks_bank?reopen=dlg-role-${encodeURIComponent(id)}&m=${encodeURIComponent(
           `rename aborted (cannot verify the template): ${err2 instanceof Error ? err2.message : 'Google unreachable'}`,
         )}`);
       }
@@ -1517,7 +1518,7 @@ export function consoleApp(): App {
       ...bulletStmts(c.env, edits, { section, anchor_id: finalCode, skcat: null }),
       ...(renaming ? [c.env.DB.prepare('DELETE FROM anchors WHERE id = ?').bind(id)] : []),
     ]);
-    return c.redirect(`/blocks?m=${encodeURIComponent(renaming ? `saved — role renamed ${id} → ${newCode}` : 'saved')}`);
+    return c.redirect(`/blocks_bank?m=${encodeURIComponent(renaming ? `saved — role renamed ${id} → ${newCode}` : 'saved')}`);
   });
 
   // Hard delete, LinkedIn-style (owner decision 2026-07-18): the role AND its
@@ -1525,18 +1526,18 @@ export function consoleApp(): App {
   app.post('/roles/delete', async (c) => {
     const b = await c.req.parseBody();
     const id = String(b.id ?? '');
-    if (!id) return c.redirect('/blocks?m=role not found');
+    if (!id) return c.redirect('/blocks_bank?m=role not found');
     await c.env.DB.batch([
       c.env.DB.prepare('DELETE FROM blocks WHERE anchor_id = ?').bind(id),
       c.env.DB.prepare('DELETE FROM anchors WHERE id = ?').bind(id),
     ]);
-    return c.redirect(`/blocks?m=${encodeURIComponent(
+    return c.redirect(`/blocks_bank?m=${encodeURIComponent(
       `role ${id} and its bullets deleted — remove its {{${id}R…}} lines from the CV template Doc and run Check template`,
     )}`);
   });
 
-  // ---------- Check template: bank ↔ Google Doc contract, both directions ----------
-  app.get('/blocks/template-check', async (c) => {
+  // ---------- Check template: Blocks Bank ↔ Google Doc contract, both directions ----------
+  app.get('/blocks_bank/template-check', async (c) => {
     const { checkTemplate } = await import('./template-check');
     const roles = (
       await c.env.DB.prepare(
@@ -1573,7 +1574,7 @@ export function consoleApp(): App {
     return page(c, 'Check template', (
       <>
         <div class="card">
-          <p>Compared your CV template Doc ({tokenCount} tokens) against the bank ({roles.length} active roles). <a href="/blocks">← back to the Bank</a></p>
+          <p>Compared your CV template Doc ({tokenCount} tokens) against Blocks Bank ({roles.length} active roles). <a href="/blocks_bank">← back to Blocks Bank</a></p>
         </div>
         <div class="card">
           {findings.map((f) => <div class={`${cls[f.level]} py-1`}>{f.level === 'ok' ? '✓' : f.level === 'warn' ? '⚠' : '✗'} {f.text}</div>)}
@@ -1606,7 +1607,7 @@ export function consoleApp(): App {
         ) : null}
         <div class="card actions">
           <span class="muted">To generate a CV, open the job (Today or Jobs) and tap <strong>Generate CV</strong> there.</span>
-          <a href="/blocks/template-check">Check template ↗</a>
+          <a href="/blocks_bank/template-check">Check template ↗</a>
         </div>
         {cvs.length === 0 ? <div class="card"><p>No CVs generated yet.</p></div> : (
           <div class="table-wrap"><table>
@@ -1630,7 +1631,7 @@ export function consoleApp(): App {
     ));
   });
 
-  // Generate CV — lives ON the job. Bank v4 (2026-07-18): everything saved is
+  // Generate CV — lives ON the job. Blocks Bank v4 (2026-07-18): everything saved is
   // live, so there is no SAMPLE mode anymore — this always queues a REAL build
   // (picked up by the next pipeline run; force one via POST /api/run).
   app.post('/jobs/:hash/cv', async (c) => {
@@ -1642,12 +1643,12 @@ export function consoleApp(): App {
       return c.redirect(`/jobs/${hash}?m=job not found or closed`);
     }
     await c.env.DB.prepare('UPDATE jobs SET cv_pending = 1 WHERE url_hash = ?').bind(hash).run();
-    return c.redirect(`/jobs/${hash}?m=${encodeURIComponent('CV queued — the next pipeline run builds it from your bank')}`);
+    return c.redirect(`/jobs/${hash}?m=${encodeURIComponent('CV queued — the next pipeline run builds it from Blocks Bank')}`);
   });
 
-  // ---------- Applications (step 8: kit queue + answers bank) ----------
-  // ---------- Answers bank (Setup): approved answers reused across kits ----------
-  app.get('/answers', async (c) => {
+  // ---------- Applications (step 8: kit queue + Q&A) ----------
+  // ---------- Q&A (Setup): approved answers reused across kits ----------
+  app.get('/qa', async (c) => {
     const answersBank = (
       await c.env.DB.prepare(
         'SELECT id, question_label, answer_en, status FROM profile_answers ORDER BY status, question_label LIMIT 200',
@@ -1664,7 +1665,7 @@ export function consoleApp(): App {
     }
     const censusTop = [...census.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
 
-    return page(c, 'Answers', (
+    return page(c, 'Q&A', (
       <>
         <p class="muted">Approved answers are matched into every application kit automatically. EEOC/demographic questions are never auto-answered. Each job's kit lives on its <a href="/jobs">job page</a>.</p>
         {censusTop.length ? (
@@ -1676,9 +1677,9 @@ export function consoleApp(): App {
             </div>
           </>
         ) : null}
-        <h2>Answers bank ({answersBank.length})</h2>
+        <h2>Q&A ({answersBank.length})</h2>
         <div class="card">
-          <form method="post" action="/answers/add">
+          <form method="post" action="/qa/add">
             <div class="field"><label>Question (as forms ask it)</label><input type="text" name="label" required /></div>
             <div class="field"><label>Your answer</label><textarea name="answer" required /></div>
             <div class="actions"><button type="submit" class="primary">Add as draft</button></div>
@@ -1691,12 +1692,12 @@ export function consoleApp(): App {
             <div class="actions mt-3">
               <span class={`pill ${a.status === 'approved' ? 'approved' : 'draft'}`}>{a.status}</span>
               {a.status !== 'approved' ? (
-                <form class="inline" method="post" action="/answers/approve">
+                <form class="inline" method="post" action="/qa/approve">
                   <input type="hidden" name="id" value={String(a.id)} />
                   <button type="submit" class="primary">Approve</button>
                 </form>
               ) : null}
-              <form class="inline" method="post" action="/answers/delete"
+              <form class="inline" method="post" action="/qa/delete"
                 onsubmit="return confirm('Delete this answer permanently?')">
                 <input type="hidden" name="id" value={String(a.id)} />
                 <button type="submit">Delete</button>
@@ -1720,11 +1721,11 @@ export function consoleApp(): App {
     return c.redirect(`/jobs/${hash}?m=${encodeURIComponent(msg)}`);
   });
 
-  app.post('/answers/add', async (c) => {
+  app.post('/qa/add', async (c) => {
     const b = await c.req.parseBody();
     const label = String(b.label ?? '').trim();
     const answer = String(b.answer ?? '').trim();
-    if (!label || !answer) return c.redirect('/answers?m=question and answer are required');
+    if (!label || !answer) return c.redirect('/qa?m=question and answer are required');
     const { normalizeQuestion } = await import('../kit/questions');
     await c.env.DB.prepare(
       `INSERT INTO profile_answers (question_norm, question_label, answer_en, status, updated_at)
@@ -1732,24 +1733,24 @@ export function consoleApp(): App {
        ON CONFLICT(question_norm) DO UPDATE SET question_label=excluded.question_label,
          answer_en=excluded.answer_en, status='draft', updated_at=excluded.updated_at`,
     ).bind(normalizeQuestion(label), label, answer, now()).run();
-    return c.redirect('/answers?m=answer saved as draft — approve it to use in kits');
+    return c.redirect('/qa?m=answer saved as draft — approve it to use in kits');
   });
 
-  app.post('/answers/approve', async (c) => {
+  app.post('/qa/approve', async (c) => {
     const b = await c.req.parseBody();
     await c.env.DB.prepare("UPDATE profile_answers SET status='approved', updated_at=? WHERE id=?")
       .bind(now(), Number(b.id)).run();
-    return c.redirect('/answers?m=answer approved');
+    return c.redirect('/qa?m=answer approved');
   });
 
-  app.post('/answers/delete', async (c) => {
+  app.post('/qa/delete', async (c) => {
     const b = await c.req.parseBody();
     await c.env.DB.prepare('DELETE FROM profile_answers WHERE id=?').bind(Number(b.id)).run();
-    return c.redirect('/answers?m=answer deleted');
+    return c.redirect('/qa?m=answer deleted');
   });
 
-  // ---------- AI (enrichment pipeline visibility + ML tooling over stored data) ----------
-  app.get('/ai', async (c) => {
+  // ---------- Intelligence (enrichment pipeline visibility + ML tooling over stored data) ----------
+  app.get('/intelligence', async (c) => {
     const enabled = !!c.env.GEMINI_API_KEY;
     const calls = await c.env.DB.prepare(
       "SELECT COALESCE(SUM(gemini_calls),0) n FROM runs WHERE started_at >= datetime('now','-7 days')",
@@ -1796,7 +1797,7 @@ export function consoleApp(): App {
     nearMiss.sort((a, b) => b.score - a.score);
     const topNear = nearMiss.slice(0, 15);
 
-    return page(c, 'AI', (
+    return page(c, 'Intelligence', (
       <>
         <div class="card">
           <h2>Enrichment pipeline</h2>

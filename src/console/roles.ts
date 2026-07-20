@@ -42,7 +42,7 @@ export function tokensOfRole(code: string, tokenNames: string[]): string[] {
   return tokenNames.filter((n) => re.test(n));
 }
 
-// ---- Role dates (2026-07-18 Bank redesign): stored as 'YYYY-MM' month
+// ---- Role dates (2026-07-18 Blocks Bank redesign): stored as 'YYYY-MM' month
 // values (migration 0009); date_to NULL = current role. Pure + unit-tested.
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -61,7 +61,7 @@ function fmtMonth(ym: string | null): string | null {
   return idx >= 0 && idx <= 11 ? `${MONTHS[idx]} ${m[1]}` : null;
 }
 
-/** Role date range for the Bank header: 'Feb 2021 – Dec 2023', 'Feb 2021 – present', '' when unset. */
+/** Role date range for the Blocks Bank header: 'Feb 2021 – Dec 2023', 'Feb 2021 – present', '' when unset. */
 export function fmtDates(from: string | null, to: string | null): string {
   const f = fmtMonth(from);
   const t = fmtMonth(to);

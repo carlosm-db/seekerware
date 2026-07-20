@@ -88,7 +88,7 @@ details.btnlike > form, details.btnlike > .panel { margin-top:8px }
 .pill.missing { background:var(--bad-soft); color:var(--bad) }
 .pill.retired { background:var(--chip); color:var(--muted) }
 
-/* Bank v4 (2026-07-18, LinkedIn-inspired): collapsible role cards, one pencil
+/* Blocks Bank v4 (2026-07-18, LinkedIn-inspired): collapsible role cards, one pencil
    per item, in-place editors. Summary = the whole header row; caret via CSS. */
 details.rc { background:var(--card); border:1px solid var(--line); border-radius:10px; margin-bottom:12px }
 details.rc > summary { list-style:none; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
@@ -251,7 +251,7 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
   .hide-sm { display:table-cell }
   .kanban { flex-direction:row; align-items:flex-start; overflow-x:auto }
   .kancol { flex:1; min-width:230px }
-  /* Bank editors: 80% of the screen; EN | ES side by side. */
+  /* Blocks Bank editors: 80% of the screen; EN | ES side by side. */
   dialog { width:80vw; height:80vh; max-height:none; padding:20px }
   .bbox-langs { grid-template-columns:1fr 1fr }
 }
@@ -279,10 +279,9 @@ export interface FooterStatus {
 }
 
 const NAV_GROUPS: Array<[string, Array<[string, string]>]> = [
-  ['Operate', [['/jobs', 'Jobs'], ['/tracker', 'Tracker']]],
-  ['Profile & setup', [['/contact', 'Contact'], ['/companies', 'Companies'], ['/calibration', 'Calibration'], ['/blocks', 'Bank'], ['/answers', 'Answers']]],
-  ['AI', [['/ai', 'AI']]],
-  ['System', [['/', 'Overview'], ['/health', 'Health']]],
+  ['Operate', [['/overview', 'Overview'], ['/jobs', 'Jobs'], ['/tracker', 'Tracker']]],
+  ['Profile & setup', [['/contact', 'Contact'], ['/companies', 'Companies'], ['/calibration', 'Calibration'], ['/blocks_bank', 'Blocks Bank'], ['/qa', 'Q&A']]],
+  ['System', [['/intelligence', 'Intelligence'], ['/health', 'Health']]],
 ];
 
 export const Layout: FC<{

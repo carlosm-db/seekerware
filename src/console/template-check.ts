@@ -1,6 +1,6 @@
-// Check template (2026-07-18 role-lifecycle audit): pure diff between the
-// bank's content and the CV template Doc's {{...}} tokens. Both breach
-// directions of the bank↔template contract fail silently at render time —
+// Check template (2026-07-18 role-lifecycle audit): pure diff between
+// Blocks Bank's content and the CV template Doc's {{...}} tokens. Both breach
+// directions of the Blocks Bank↔template contract fail silently at render time —
 // this surfaces every mismatch BEFORE it costs a CV.
 
 export interface DocTokenLite {
@@ -23,7 +23,7 @@ export interface Finding {
 
 const CONTACT = new Set(['phone', 'location']);
 
-/** Diffs template tokens against the bank. Deterministic, DB/network-free. */
+/** Diffs template tokens against Blocks Bank. Deterministic, DB/network-free. */
 export function checkTemplate(tokens: DocTokenLite[], bank: BankShape): Finding[] {
   const out: Finding[] = [];
   const names = tokens.map((t) => t.name);
@@ -49,7 +49,7 @@ export function checkTemplate(tokens: DocTokenLite[], bank: BankShape): Finding[
   if (sumSlots.length === 0) out.push({ level: 'warn', text: 'no {{sum_N}} tokens — the CV will have no AI-picked summary bullets' });
   const maxSum = Math.max(0, ...sumSlots);
   if (maxSum > bank.summaryCount) {
-    out.push({ level: 'error', text: `template has ${maxSum} summary slots but the bank only has ${bank.summaryCount} summary lines — the extra slots will render blank` });
+    out.push({ level: 'error', text: `template has ${maxSum} summary slots but Blocks Bank only has ${bank.summaryCount} summary lines — the extra slots will render blank` });
   }
 
   // 4) Skill category tokens
@@ -61,12 +61,12 @@ export function checkTemplate(tokens: DocTokenLite[], bank: BankShape): Finding[
     if (!(cat in bank.skillCats)) {
       out.push({ level: 'error', text: `{{skills_${cat}}} names an unknown category — valid: ${Object.keys(bank.skillCats).join(', ')}` });
     } else if (bank.skillCats[cat] === 0) {
-      out.push({ level: 'warn', text: `{{skills_${cat}}} exists but the bank has no ${cat} skills — the line will render blank` });
+      out.push({ level: 'warn', text: `{{skills_${cat}}} exists but Blocks Bank has no ${cat} skills — the line will render blank` });
     }
   }
   for (const [cat, n] of Object.entries(bank.skillCats)) {
     if (n > 0 && !catTokens.includes(cat)) {
-      out.push({ level: 'warn', text: `the bank has ${n} ${cat} skills but the template has no {{skills_${cat}}} line — they can never appear` });
+      out.push({ level: 'warn', text: `Blocks Bank has ${n} ${cat} skills but the template has no {{skills_${cat}}} line — they can never appear` });
     }
   }
 
@@ -80,7 +80,7 @@ export function checkTemplate(tokens: DocTokenLite[], bank: BankShape): Finding[
       out.push({ level: 'error', text: `role ${r.id} has ${r.bullets} bullets but the template has NO {{${r.id}R…}} tokens — its content can never appear in a CV` });
     }
     if (slots.length > r.bullets) {
-      out.push({ level: 'warn', text: `role ${r.id}: ${slots.length} template slots but only ${r.bullets} bullets in the bank — some lines will render blank` });
+      out.push({ level: 'warn', text: `role ${r.id}: ${slots.length} template slots but only ${r.bullets} bullets in Blocks Bank — some lines will render blank` });
     } else if (slots.length > 0 && r.approved < slots.length) {
       out.push({ level: 'warn', text: `role ${r.id}: ${slots.length} slots but only ${r.approved} APPROVED bullets — real CVs fill from approved content only` });
     }
@@ -97,6 +97,6 @@ export function checkTemplate(tokens: DocTokenLite[], bank: BankShape): Finding[
     }
   }
 
-  if (out.length === 0) out.push({ level: 'ok', text: 'template and bank match — every token resolves and every role has its slots' });
+  if (out.length === 0) out.push({ level: 'ok', text: 'template and Blocks Bank match — every token resolves and every role has its slots' });
   return out;
 }

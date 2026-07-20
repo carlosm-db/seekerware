@@ -108,7 +108,7 @@ export async function generateCv(
       return true;
     });
     if (usable.length < 8) {
-      return { ok: false, gemini_calls: 0, error: `insufficient bank to render ${lang}${sample ? '' : ' (approved)'}: ${usable.length} blocks` };
+      return { ok: false, gemini_calls: 0, error: `insufficient Blocks Bank to render ${lang}${sample ? '' : ' (approved)'}: ${usable.length} blocks` };
     }
     const catalog: CatalogBlock[] = usable.map((b) => ({
       id: b.id, section: b.section, anchor_id: b.anchor_id, skcat: b.skcat,

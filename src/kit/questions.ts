@@ -54,7 +54,7 @@ export function isEeocQuestion(text: string): boolean {
 }
 
 /**
- * Matches detected questions against the APPROVED answers bank.
+ * Matches detected questions against the APPROVED Q&A answers.
  * Exact normalized match first; then containment either way (min 10 chars) —
  * conservative on purpose: a wrong auto-match is worse than a red question.
  */

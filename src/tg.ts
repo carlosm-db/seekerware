@@ -162,7 +162,7 @@ export async function handleTelegramUpdate(env: Env, update: TgUpdate, doFetch: 
   const pending = JSON.parse(pendingRow.value) as PendingQuestion;
   const nowIso = new Date().toISOString();
 
-  // Attach the answer to the kit and save it as a DRAFT bank answer (the owner
+  // Attach the answer to the kit and save it as a DRAFT Q&A answer (the owner
   // approves it in the console before it is ever reused automatically).
   const kit = await env.DB.prepare('SELECT answers FROM application_kits WHERE url_hash = ?')
     .bind(pending.url_hash).first<{ answers: string | null }>();
@@ -189,7 +189,7 @@ export async function handleTelegramUpdate(env: Env, update: TgUpdate, doFetch: 
     };
     await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('tg_pending', ?)")
       .bind(JSON.stringify(next)).run();
-    await sendTelegram(env, `Saved ✓ (draft in the answers bank)\n\n❓ Next:\n<b>${escapeHtml(next.question)}</b>`, doFetch);
+    await sendTelegram(env, `Saved ✓ (draft in Q&A)\n\n❓ Next:\n<b>${escapeHtml(next.question)}</b>`, doFetch);
   } else {
     await env.DB.prepare("DELETE FROM config WHERE key='tg_pending'").run();
     await sendTelegram(env, 'Saved ✓ — all red questions answered. The kit is ready on the job page; review draft answers under Answers to reuse them.', doFetch);

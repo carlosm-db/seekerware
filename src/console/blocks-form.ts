@@ -1,4 +1,4 @@
-// Bank form helpers (docs/UI.md §2; v6 2026-07-18, owner's sketch): a role or
+// Blocks Bank form helpers (docs/UI.md §2; v6 2026-07-18, owner's sketch): a role or
 // group is edited as ONE form — its fields plus ALL its bullets — saved in one
 // transaction. This module is the pure, DB-free parser for that form's bullet
 // fields so it can be unit-tested. SAVING is the approval (owner decision):
