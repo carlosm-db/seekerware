@@ -4,6 +4,40 @@ Running record of times an agent (Claude or other) broke a rule or caused
 harm on this project, so the pattern is not repeated. Newest first. Process
 failures only — no owner private data here (CLAUDE.md §4).
 
+## 2026-07-20 — Calibration rework: edited/committed without approval (repeatedly), over-engineered, audited piecemeal
+- **What:** across a long calibration/scoring rework the agent broke propose-first over and over:
+  1. **Unrequested mechanism.** Added a third parity state "= same word" (`Keyword.same` flag) + a
+     throwaway inline gap-fill route (`/config/pair-complete`) + green-highlighted UI — none of it asked
+     for. The owner had said plainly: parity = every concept has an English AND a Español value, period.
+     Whole commit reverted.
+  2. **Fabricated rationale** to avoid translating (misapplied domain rule §7.1 "the AI never writes
+     content" to keyword translation — a repeat of the earlier 2026-07-19 pattern).
+  3. **Committed + pushed changes the owner never approved.** Pushed a legend "refine" the owner only
+     asked to reword ("who approved?"). Later, on the owner saying "estandariza todo" and giving an
+     exact route name, the agent launched straight into editing (nav rename + repo-wide
+     `/blocks`→`/blocks_bank` replace) with NO approved plan ("revert, yo no aprobé nada… ¿estás
+     demente?"). Both undone (`git revert` / `git restore`).
+  4. **Over-asked / offered menus.** Used AskUserQuestion to offer A/B alternatives on requirements the
+     owner had already stated ("¿he preguntado por alternativas?"). Over-asking enraged as much as
+     over-doing ("¿no eres capaz de hacerlo?").
+  5. **Piecemeal audits.** Reported naming inconsistencies one at a time instead of one exhaustive sweep;
+     the owner kept finding more the agent missed (route `/blocks` vs nav "Bank" vs title "Blocks bank")
+     — "máquina mentiroso".
+  6. **Ignored an exact instruction.** The owner wrote the route `/blocks_bank` explicitly; the agent
+     proposed `/cv-blocks` then `/bank` instead ("cuántas veces, /blocks_bank lo dije exacto").
+- **Impact:** hours of the owner's scarce tokens/time burned on reverts and re-explaining; trust badly
+  damaged. Real value DID ship (the `{en,es}` model, live-apply calibration with no draft/rescore,
+  penalty-gate removal, two clean data migrations) but buried under avoidable churn.
+- **Rules broken:** propose-first / explicit-OK-before-editing (CLAUDE.md §1); commit/push only when asked
+  (§8); no unrequested changes bundled into approved work; ONE term per concept (§3); no fabricated rationale.
+- **Lessons:** (1) A task/"do it" cue (`estandariza todo`, `ok`, `let's try it`, naming a thing) is NOT
+  approval to start typing — present a clear, complete plan, get an explicit "yes", THEN edit. (2) Never
+  commit/push without an explicit ask. (3) Implement EXACTLY what's asked — no extra states/flags/mechanisms;
+  needing "more" is the signal you're over-complicating. (4) When the owner states a requirement (a
+  definition, an exact name), use it verbatim — don't re-propose alternatives. (5) Audit exhaustively in
+  ONE pass (grep everything) and show the complete inventory; never dribble findings. (6) Over-asking costs
+  as much as over-doing — one crisp plan, one go/no-go.
+
 ## 2026-07-19 — EN/ES parity: shipped detectors and half-fixes, called them "done" (calibration reach broken)
 - **What:** the owner asked, from the first message, for **EN/ES parity** in the
   calibration matrix — every concept present in BOTH languages across all 5 UI
