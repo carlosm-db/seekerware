@@ -781,17 +781,12 @@ export function consoleApp(): App {
           {matrix.map(groupCard)}
         </div>
 
-        <p class="muted mb-2">
-          Every concept has an <strong>English</strong> and a <strong>Español</strong> value — both required.
-          <strong> —</strong> in the Español column means it isn’t filled yet. Strength:
-          <strong> +3</strong>/<strong>+2</strong>/<strong>+1</strong> in favor · <strong>−2</strong>/<strong>−3</strong> against.
-          ✏️ edits a concept · ✕ removes it (both languages).
-        </p>
-        <p class="muted mb-3">
-          <strong>Path</strong> — the track a word unlocks (or, on an against word, blocks):
-          {cfg.tracks.map((t) => <span class={pathClass(t.id)}>{trackLabel(t.id)}</span>)}
-          <span> · no badge = scores every track · path words are gates: absolute, not points</span>
-        </p>
+        <ul class="legend">
+          <li>Each concept has an <strong>English</strong> and a <strong>Español</strong> value — both required.</li>
+          <li><strong>Strength:</strong> +3 / +2 / +1 in favor · −2 / −3 against.</li>
+          <li><strong>✏️</strong> edit a concept · <strong>✕</strong> remove it (both languages).</li>
+          <li><strong>Path badge</strong> = which track the word applies to · no badge = every track.</li>
+        </ul>
 
         <div class="card">
           <strong>＋ Add word</strong>

@@ -172,6 +172,8 @@ details.sect > summary::-webkit-details-marker { display:none }
 .mc-in { min-height:34px; padding:5px 8px; font-size:13px; width:100%;
   border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--fg) }
 .mc-btn { min-height:30px; padding:3px 9px; font-size:13px }
+.legend { list-style:none; padding:0; margin:2px 0 14px; color:var(--muted); font-size:13.5px }
+.legend li { padding:3px 0 }
 .path { display:inline-block; font-size:10px; font-weight:700; border-radius:4px;
   padding:0 5px; margin-left:4px; white-space:nowrap }
 .p-0 { background:var(--bad-soft); color:var(--bad) }
