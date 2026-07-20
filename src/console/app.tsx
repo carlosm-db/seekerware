@@ -2078,7 +2078,7 @@ export function consoleApp(): App {
             {' '}covers {activeCompanies} companies in {batchesNeeded} batch(es)/burst
           </span>
         </form>
-        <form method="post" action="/health/run" class="card actions">
+        <form method="post" action="/health/run" class="card actions" data-burst>
           <strong>Ráfaga manual</strong>
           {forceBurst > 0 ? (
             <>
@@ -2088,10 +2088,15 @@ export function consoleApp(): App {
           ) : (
             <>
               <button type="submit" class="primary">▶ Iniciar ráfaga</button>
-              <span class="muted">corre TODAS las empresas ahora ({batchesNeeded} lote(s) · ~{batchesNeeded * sched.batch_every_min} min · se completa sola)</span>
+              <span class="muted">corre todas las empresas activas ahora, por lotes; se completa sola.</span>
             </>
           )}
         </form>
+        <script dangerouslySetInnerHTML={{ __html:
+          "(function(){var f=document.querySelector('form[data-burst]');if(!f)return;" +
+          "f.addEventListener('submit',function(e){var b=e.submitter||f.querySelector('button[type=submit]');" +
+          "if(b){b.disabled=true;if(b.classList.contains('primary'))b.textContent='\\u23f3 En proceso\\u2026';}});})();"
+        }} />
         <div class="table-wrap"><table>
           <tr><th>run</th><th>start</th><th>status</th><th class="hide-sm">ms</th><th>companies</th><th class="hide-sm">seen</th><th class="hide-sm">new</th><th>surv.</th><th>notif.</th><th class="hide-sm">closed</th><th class="hide-sm">subreq</th><th>errors</th></tr>
           {runs.map((r) => (
@@ -2142,13 +2147,13 @@ export function consoleApp(): App {
     ]);
     const pageSize = Math.max(1, Number(pageRow?.value ?? '25') || 25);
     const batchesNeeded = Math.max(1, Math.ceil((countRow?.n ?? 0) / pageSize));
-    const { runPipeline } = await import('../pipeline');
-    const stats = await runPipeline(c.env, 'manual'); // batch 1 now (foreground, one page)
+    // Non-blocking: just QUEUE the burst (force_burst = N batches). The cron runs one page per
+    // tick until it hits 0. We do NOT run the pipeline in this request — a blocking run can be
+    // cut before it returns, leaving the click with no redirect/feedback. Redirect instantly;
+    // the "⏳ Ráfaga en curso" state renders on the reload.
     await c.env.DB.prepare("INSERT INTO config (key, value) VALUES ('force_burst', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-      .bind(String(Math.max(0, batchesNeeded - 1))).run();
-    return c.redirect(`/health?m=${encodeURIComponent(
-      `ráfaga iniciada: lote 1/${batchesNeeded} · ${stats.companiesOk} empresas · ${stats.jobsNew} nuevos · ${stats.notified} notificados`,
-    )}`);
+      .bind(String(batchesNeeded)).run();
+    return c.redirect(`/health?m=${encodeURIComponent(`ráfaga iniciada: ${batchesNeeded} lote(s) en cola`)}`);
   });
 
   app.post('/health/run-cancel', async (c) => {
