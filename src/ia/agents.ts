@@ -1,12 +1,41 @@
-// Declarative agents (docs/TRD.md §4). Inviolable domain rules:
+// Declarative agents (docs/TRD.md §4). Each agent is a {models, temperature,
+// instruction, buildPrompt, schema} object run through the generic `runAgent`
+// executor; the exported functions build the per-agent state and return the
+// parsed result. There is NO monolithic runner — agents fire at different
+// lifecycle points (notify / CV build / on-demand). Inviolable domain rules:
 // - enricher: ONLY improves survivor texts; never touches verdicts or gates.
 // - cv_selector: ONLY selects IDs of approved blocks (enum forced by schema).
 // - cv_verifier: temp 0; suggests tweaks, NEVER edits.
 
 import type { Env, Job } from '../types';
 import { callGemini, wrapUntrusted, type GeminiResult } from './gemini';
+import { profile } from './knowledge';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+/** A declarative agent: model tier + how to build its instruction, prompt and JSON schema. */
+export interface Agent<S> {
+  name: string;
+  /** Ordered model fallback chain (primary first). */
+  models: string[];
+  temperature: number;
+  instruction: () => string;
+  buildPrompt: (state: S) => string;
+  schema: (state: S) => object;
+}
+
+/** Generic executor: assemble the call and run it through the Gemini wrapper (forced JSON). */
+export function runAgent<T, S>(
+  env: Env, agent: Agent<S>, state: S, doFetch: Fetcher = fetch,
+): Promise<GeminiResult<T>> {
+  return callGemini<T>(env, {
+    models: agent.models,
+    temperature: agent.temperature,
+    instruction: agent.instruction(),
+    input: agent.buildPrompt(state),
+    responseSchema: agent.schema(state),
+  }, doFetch);
+}
 
 // ---------- enricher ----------
 
@@ -16,31 +45,38 @@ export interface EnrichedTexts {
   positioning_lead: string;
 }
 
+interface EnrichState {
+  job: Job;
+  ruleTexts: EnrichedTexts;
+}
+
+const enricherAgent: Agent<EnrichState> = {
+  name: 'enricher',
+  models: ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'],
+  temperature: 0.4,
+  instruction: () =>
+    'You are the enricher of a job-discovery engine. Improve the wording of three short ' +
+    'texts (English, 1-2 sentences each) about why a job fits the profile of ' + profile() + '. ' +
+    'Rely ONLY on the job and the rule-based drafts. Do not invent experience or figures. ' +
+    'Do NOT change verdicts or mention scores.',
+  buildPrompt: (s) =>
+    `RULE-BASED DRAFTS:\n${JSON.stringify(s.ruleTexts)}\n\nJOB (title: ${s.job.title})\n` +
+    wrapUntrusted(s.job.description.slice(0, 6000)),
+  schema: () => ({
+    type: 'OBJECT',
+    required: ['why_it_fits', 'gap_to_address', 'positioning_lead'],
+    properties: {
+      why_it_fits: { type: 'STRING' },
+      gap_to_address: { type: 'STRING' },
+      positioning_lead: { type: 'STRING' },
+    },
+  }),
+};
+
 export async function enricher(
   env: Env, job: Job, ruleTexts: EnrichedTexts, doFetch: Fetcher = fetch,
 ): Promise<GeminiResult<EnrichedTexts>> {
-  return callGemini<EnrichedTexts>(env, {
-    models: ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'],
-    temperature: 0.4,
-    instruction:
-      'You are the enricher of a job-discovery engine. Improve the wording of three short ' +
-      'texts (English, 1-2 sentences each) about why a job fits the profile of a ' +
-      'business analyst/data professional in banking, payments, collections, and compliance transitioning to data. ' +
-      'Rely ONLY on the job and the rule-based drafts. Do not invent experience or figures. ' +
-      'Do NOT change verdicts or mention scores.',
-    input:
-      `RULE-BASED DRAFTS:\n${JSON.stringify(ruleTexts)}\n\nJOB (title: ${job.title})\n` +
-      wrapUntrusted(job.description.slice(0, 6000)),
-    responseSchema: {
-      type: 'OBJECT',
-      required: ['why_it_fits', 'gap_to_address', 'positioning_lead'],
-      properties: {
-        why_it_fits: { type: 'STRING' },
-        gap_to_address: { type: 'STRING' },
-        positioning_lead: { type: 'STRING' },
-      },
-    },
-  }, doFetch);
+  return runAgent<EnrichedTexts, EnrichState>(env, enricherAgent, { job, ruleTexts }, doFetch);
 }
 
 // ---------- cv_selector ----------
@@ -63,40 +99,84 @@ export interface Selection {
   rationale: string;
 }
 
+/** The template's fixed slot budget (read at RUNTIME from the template, never
+ * hardcoded — §4): how many summary slots, which skill categories, and how many
+ * responsibility slots each active role has. Guides the selector so it fills the
+ * REAL slots instead of arbitrary caps. */
+export interface SlotBudget {
+  summary: number;
+  skillCats: string[];
+  roles: Array<{ code: string; title: string; slots: number }>;
+}
+
+interface SelectState {
+  job: Job;
+  catalog: CatalogBlock[];
+  budget?: SlotBudget;
+}
+
+/** Explicit "placeholder -> source" map the selector is told to fill (runtime data, no PII in code). */
+function renderBudget(b: SlotBudget): string {
+  const lines = ['TEMPLATE SLOTS — fill EXACTLY these; the source of each is noted:'];
+  lines.push(`- Summary: ${b.summary} slots (sum_1..sum_${b.summary}) <- from SUMMARY blocks`);
+  if (b.skillCats.length) {
+    lines.push(`- Skills categories: ${b.skillCats.join(', ')} <- each from SKILLS blocks of that category`);
+  }
+  if (b.roles.length) {
+    lines.push("- Experience (per role — never exceed a role's slots):");
+    for (const r of b.roles) {
+      lines.push(`    "${r.title}" (${r.code}): ${r.slots} slots <- EXPERIENCE blocks anchored to ${r.code}`);
+    }
+  }
+  return lines.join('\n') + '\n\n';
+}
+
 /** The schema restricts each ID to the catalog's block enum: hallucination is impossible by construction. */
-export async function cvSelector(
-  env: Env, job: Job, catalog: CatalogBlock[], doFetch: Fetcher = fetch,
-): Promise<GeminiResult<Selection>> {
-  const idsBySection = (s: string) => catalog.filter((b) => b.section === s).map((b) => b.id);
-  const enumOrNull = (ids: string[]) => (ids.length ? { type: 'STRING', enum: ids } : { type: 'STRING' });
-  const catalogText = catalog
-    .map((b) => `${b.id} [${b.section}${b.skcat ? '/' + b.skcat : ''}] tags:${b.tags} :: ${b.text.slice(0, 140)}`)
-    .join('\n');
-  return callGemini<Selection>(env, {
-    models: ['gemini-3.5-flash', 'gemini-3.1-flash-lite'],
-    temperature: 0.3,
-    instruction:
-      'You are the cv_selector. Choose the most relevant block IDs for this job, prioritizing what ' +
-      'the job calls for. The template has fixed slots the render will fill in your order: pick up to ' +
-      '~7 summary bullets; the strongest responsibilities for EACH experience role (group naturally by ' +
-      'role — the render places them under the right role); and relevant skills spread across their ' +
-      'categories. Never select two phrasings of the same achievement. Projects are static in the ' +
-      'template: always return an empty projects array. Select ONLY IDs from the catalog. ' +
-      'In rationale, explain the chosen approach in 1 sentence.',
-    input: `CATALOG:\n${catalogText}\n\nJOB (title: ${job.title})\n` + wrapUntrusted(job.description.slice(0, 6000)),
-    responseSchema: {
+const cvSelectorAgent: Agent<SelectState> = {
+  name: 'cv_selector',
+  models: ['gemini-3.5-flash', 'gemini-3.1-flash-lite'],
+  temperature: 0.3,
+  instruction: () =>
+    'You are the cv_selector for a CV built from a FIXED template whose exact slot budget is given ' +
+    'below. Fill the slots that exist — no arbitrary counts. SUMMARY: the strongest, most job-relevant ' +
+    "summary blocks, up to the summary-slot count. EXPERIENCE: for EACH role in the budget, its most " +
+    "job-relevant responsibilities UP TO that role's slot count — cover every role, never exceed it " +
+    '(return IDs; the render places each under its role by anchor). SKILLS: for each category in the ' +
+    'budget, the most job-relevant skills. Prioritize blocks that match the job; never pick two ' +
+    'phrasings of one achievement; Projects and Education are static → return an empty projects array; ' +
+    'select ONLY IDs from the catalog; rationale = 1 sentence on the approach.',
+  buildPrompt: (s) => {
+    const catalogText = s.catalog
+      .map((b) => `${b.id} [${b.section}${b.skcat ? '/' + b.skcat : ''}] tags:${b.tags} :: ${b.text.slice(0, 140)}`)
+      .join('\n');
+    const budgetText = s.budget ? renderBudget(s.budget) : '';
+    return `${budgetText}CATALOG:\n${catalogText}\n\nJOB (title: ${s.job.title})\n` + wrapUntrusted(s.job.description.slice(0, 6000));
+  },
+  schema: (s) => {
+    const idsBySection = (sec: string) => s.catalog.filter((b) => b.section === sec).map((b) => b.id);
+    const enumOrNull = (ids: string[]) => (ids.length ? { type: 'STRING', enum: ids } : { type: 'STRING' });
+    // maxItems follows the real template budget (fallback to the old caps when unknown).
+    const sumMax = s.budget && s.budget.summary ? s.budget.summary : 8;
+    const expMax = s.budget && s.budget.roles.length ? s.budget.roles.reduce((a, r) => a + r.slots, 0) : 24;
+    return {
       type: 'OBJECT',
       required: ['summary', 'skills', 'experience', 'projects', 'rationale'],
       properties: {
-        summary: { type: 'ARRAY', items: enumOrNull(idsBySection('summary')), minItems: 1, maxItems: 8 },
+        summary: { type: 'ARRAY', items: enumOrNull(idsBySection('summary')), minItems: 1, maxItems: sumMax },
         skills: { type: 'ARRAY', items: enumOrNull(idsBySection('skills')), maxItems: 16 },
-        experience: { type: 'ARRAY', items: enumOrNull(idsBySection('experience')), maxItems: 24 },
+        experience: { type: 'ARRAY', items: enumOrNull(idsBySection('experience')), maxItems: expMax },
         // Projects are static in the template (v1) — the selector must not spend picks on them.
         projects: { type: 'ARRAY', items: enumOrNull(idsBySection('projects')), maxItems: 0 },
         rationale: { type: 'STRING' },
       },
-    },
-  }, doFetch);
+    };
+  },
+};
+
+export async function cvSelector(
+  env: Env, job: Job, catalog: CatalogBlock[], budget: SlotBudget | undefined, doFetch: Fetcher = fetch,
+): Promise<GeminiResult<Selection>> {
+  return runAgent<Selection, SelectState>(env, cvSelectorAgent, { job, catalog, budget }, doFetch);
 }
 
 // ---------- cv_verifier ----------
@@ -105,22 +185,31 @@ export interface VerifierNotes {
   tweaks: string[];
 }
 
+interface VerifyState {
+  job: Job;
+  renderedBody: string;
+}
+
+const cvVerifierAgent: Agent<VerifyState> = {
+  name: 'cv_verifier',
+  models: ['gemini-3.5-flash', 'gemini-2.5-flash'],
+  temperature: 0,
+  instruction: () =>
+    'You are the cv_verifier (temperature 0). Compare the rendered CV against the job. ' +
+    'Return 0-5 SHORT improvement suggestions (reorder, emphasize, visible gap). ' +
+    'These are SUGGESTIONS for the owner: do not rewrite the CV or propose literal new text.',
+  buildPrompt: (s) =>
+    `RENDERED CV:\n${s.renderedBody.slice(0, 5000)}\n\nJOB (title: ${s.job.title})\n` +
+    wrapUntrusted(s.job.description.slice(0, 5000)),
+  schema: () => ({
+    type: 'OBJECT',
+    required: ['tweaks'],
+    properties: { tweaks: { type: 'ARRAY', items: { type: 'STRING' }, maxItems: 5 } },
+  }),
+};
+
 export async function cvVerifier(
   env: Env, job: Job, renderedBody: string, doFetch: Fetcher = fetch,
 ): Promise<GeminiResult<VerifierNotes>> {
-  return callGemini<VerifierNotes>(env, {
-    models: ['gemini-3.5-flash', 'gemini-2.5-flash'],
-    temperature: 0,
-    instruction:
-      'You are the cv_verifier (temperature 0). Compare the rendered CV against the job. ' +
-      'Return 0-5 SHORT improvement suggestions (reorder, emphasize, visible gap). ' +
-      'These are SUGGESTIONS for the owner: do not rewrite the CV or propose literal new text.',
-    input: `RENDERED CV:\n${renderedBody.slice(0, 5000)}\n\nJOB (title: ${job.title})\n` +
-      wrapUntrusted(job.description.slice(0, 5000)),
-    responseSchema: {
-      type: 'OBJECT',
-      required: ['tweaks'],
-      properties: { tweaks: { type: 'ARRAY', items: { type: 'STRING' }, maxItems: 5 } },
-    },
-  }, doFetch);
+  return runAgent<VerifierNotes, VerifyState>(env, cvVerifierAgent, { job, renderedBody }, doFetch);
 }
