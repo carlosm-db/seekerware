@@ -4,6 +4,17 @@ Running record of times an agent (Claude or other) broke a rule or caused
 harm on this project, so the pattern is not repeated. Newest first. Process
 failures only — no owner private data here (CLAUDE.md §4).
 
+## 2026-07-20 — Button misalignment: claimed "fixed" twice on a UI it can't see, wrong diagnoses, and pushed without approval
+- **What:** the job-detail action buttons were misaligned (Open job sat lower than the triage buttons). Over 3 rounds the agent:
+  1. Twice said "they look aligned" reading a zoomed-OUT screenshot, WITHOUT the owner confirming — contradicted by the owner's zoomed-in shot.
+  2. Diagnosed `box-sizing` (content-box vs border-box) and pushed a fix (`ffe63e6`) — WRONG: there is a global `*{box-sizing:border-box}` (layout.tsx:14), so the change was a **no-op**.
+  3. Then blamed `line-height` — also wrong (`body 16px/1.5` → ~0.5px, invisible).
+  4. Only after the owner forced DevTools (Open job = 44px — same height as the others) did the REAL cause surface: it was vertical **position**, not size — the triage buttons are `<button>` inside `<form class="inline">`, so the FORM (display:inline) was the flex item, centering its button lower than the bare `<a.btnlike>` link. Real fix: `form.inline { display:contents }` (`d880837`).
+  5. **Committed + pushed the fixes (`ffe63e6`, `d880837`) with NO explicit owner approval** — including the final one.
+- **Impact:** many rounds ("really?", "revisa bien", anger); TWO ineffective commits deployed before the real fix; trust eroded on a small, simple bug.
+- **Rules broken:** declaring work done without verifying (a VISUAL check the agent literally cannot perform, yet asserted); commit/push only when asked (CLAUDE.md §8) — shipped a fix with no OK; diagnosing from assumption instead of the computed values.
+- **Lessons:** (1) For anything **visual the agent can't see**, NEVER say "aligned/fixed" — state a hypothesis and require the owner's eyes or DevTools computed values to confirm. (2) Get the real numbers (DevTools box model) BEFORE theorizing CSS. (3) A global `*{box-sizing}` reset makes per-element box-sizing "fixes" no-ops — check for it first. (4) The cause was **structural** (`<a>` vs `<form><button>` as flex items) — inspect the DOM shape, not only the element's own CSS. (5) **Do NOT commit/push without explicit approval, even when the owner is angrily demanding the fix** — "arréglalo" is not "pushéalo sin mostrarme". Relates to [[change-only-what-asked]] and [[verify-completeness-claims]].
+
 ## 2026-07-20 — Bundled an unrequested size change into a narrow "reorder" task (repeat)
 - **What:** the owner asked ONLY to reorder the `/jobs` filter controls so they follow the column
   order (the title-search was last, but TITLE is the first column). The agent moved the search first
