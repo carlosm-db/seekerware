@@ -199,8 +199,10 @@ const cvSelectorAgent: Agent<SelectState> = {
   temperature: 0.3,
   instruction: () =>
     'You are the cv_selector for a CV built from a FIXED template whose exact slot budget is given ' +
-    'below. Fill the slots that exist — no arbitrary counts. SUMMARY: the strongest, most job-relevant ' +
-    "summary blocks, up to the summary-slot count. EXPERIENCE: for EACH role in the budget, its most " +
+    'below. Fill the slots that exist — no arbitrary counts. SUMMARY: pick DISTINCT, complementary ' +
+    'bullets (up to the summary-slot count) — each must add a DIFFERENT point; NEVER pick two that ' +
+    'restate the same positioning or experience, and prefer FEWER strong bullets over paraphrases that ' +
+    "just fill slots. EXPERIENCE: for EACH role in the budget, its most " +
     "job-relevant responsibilities UP TO that role's slot count — cover every role, never exceed it " +
     '(return IDs; the render places each under its role by anchor). SKILLS: for each category in the ' +
     'budget, the most job-relevant skills. Prioritize blocks that match the job; never pick two ' +

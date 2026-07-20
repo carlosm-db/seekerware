@@ -5,7 +5,7 @@
 
 import type { Env, Job } from '../types';
 import { cvSelector, cvVerifier, type CatalogBlock, type RoleAnalysis, type Selection, type SlotBudget } from './agents';
-import { appendDocText, copyTemplate, exportAndArchivePdf, googleAccessToken, readPlaceholders, replacePlaceholders } from '../gdocs';
+import { copyTemplate, exportAndArchivePdf, googleAccessToken, readPlaceholders, replacePlaceholders } from '../gdocs';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -167,13 +167,8 @@ export async function generateCv(
 
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').slice(0, 12);
     const pdfId = await exportAndArchivePdf(env, token, doc.id, `${stamp} — ${job.company} — generated.pdf`, doFetch);
-    const appendix = [
-      '\n\n────────────────────────────────',
-      'SUGGESTED TWEAKS (delete before sending)',
-      `Selection: ${selection.rationale}`,
-      ...tweaks.map((t) => `• ${t}`),
-    ].join('\n');
-    await appendDocText(token, doc.id, appendix, doFetch);
+    // The Doc stays CLEAN — the verifier tweaks + selection rationale live only in
+    // the cvs table / console (/cvs), never appended into the CV (they contaminated it).
 
     // 6) Persistence
     const nowIso = new Date().toISOString();
