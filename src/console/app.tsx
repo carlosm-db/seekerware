@@ -31,7 +31,7 @@ export function consoleApp(): App {
   // more than PAGE rows came back there's a next page (drop the extra row).
   const PAGE = 30;
   const pageNum = (c: Context<{ Bindings: ConsoleEnv }>) => Math.max(0, Math.floor(Number(c.req.query('page')) || 0));
-  function pager(base: string, pg: number, hasNext: boolean, params: Record<string, string | undefined>) {
+  function pager(base: string, pg: number, hasNext: boolean, total: number, params: Record<string, string | undefined>) {
     const qs = (p: number) => {
       const u = new URLSearchParams();
       for (const [k, v] of Object.entries(params)) if (v) u.set(k, v);
@@ -39,11 +39,12 @@ export function consoleApp(): App {
       const s = u.toString();
       return s ? `${base}?${s}` : base;
     };
-    if (pg === 0 && !hasNext) return null;
+    if (total === 0) return null;
+    const pages = Math.max(1, Math.ceil(total / PAGE));
     return (
       <div class="pager">
         {pg > 0 ? <a href={qs(pg - 1)}>← Prev</a> : <span class="muted">← Prev</span>}
-        <span class="muted">page {pg + 1}</span>
+        <span class="muted">{total} items · page {pg + 1} of {pages}</span>
         {hasNext ? <a href={qs(pg + 1)}>Next →</a> : <span class="muted">Next →</span>}
       </div>
     );
@@ -250,6 +251,10 @@ export function consoleApp(): App {
     ).results;
     const hasNext = rows.length > PAGE;
     if (hasNext) rows.pop();
+    const total = (await c.env.DB.prepare(
+      `SELECT COUNT(*) n FROM jobs j JOIN companies c ON c.id = j.company_id
+       LEFT JOIN applications a ON a.url_hash = j.url_hash WHERE ${where.join(' AND ')}`,
+    ).bind(...binds).first<{ n: number }>())?.n ?? 0;
 
     const sel = (name: string, opts: string[], current?: string) => (
       <select name={name}>
@@ -287,7 +292,7 @@ export function consoleApp(): App {
             </tr>
           ))}
         </table></div>
-        {pager('/jobs', pg, hasNext, { view, track: q.track, verdict: q.verdict, status: q.status, q: q.q })}
+        {pager('/jobs', pg, hasNext, total, { view, track: q.track, verdict: q.verdict, status: q.status, q: q.q })}
       </>
     ));
   });
@@ -460,6 +465,7 @@ export function consoleApp(): App {
     ).results;
     const hasNext = rows.length > PAGE;
     if (hasNext) rows.pop();
+    const total = (await c.env.DB.prepare('SELECT COUNT(*) n FROM companies').first<{ n: number }>())?.n ?? 0;
 
     return page(c, 'Companies', (
       <>
@@ -496,7 +502,7 @@ export function consoleApp(): App {
             </tr>
           ))}
         </table></div>
-        {pager('/companies', pg, hasNext, {})}
+        {pager('/companies', pg, hasNext, total, {})}
       </>
     ));
   });
@@ -1595,6 +1601,9 @@ export function consoleApp(): App {
     ).results;
     const hasNext = cvs.length > PAGE;
     if (hasNext) cvs.pop();
+    const total = (await c.env.DB.prepare(
+      'SELECT COUNT(*) n FROM cvs v JOIN jobs j ON j.url_hash = v.url_hash JOIN companies co ON co.id = j.company_id',
+    ).first<{ n: number }>())?.n ?? 0;
     const contactSet = await c.env.DB.prepare("SELECT 1 FROM config WHERE key='contact_profile'").first();
     return page(c, 'CV library', (
       <>
@@ -1625,7 +1634,7 @@ export function consoleApp(): App {
             ))}
           </table></div>
         )}
-        {pager('/cvs', pg, hasNext, {})}
+        {pager('/cvs', pg, hasNext, total, {})}
       </>
     ));
   });
@@ -1858,6 +1867,7 @@ export function consoleApp(): App {
     ).results;
     const runsHasNext = runs.length > PAGE;
     if (runsHasNext) runs.pop();
+    const runsTotal = (await c.env.DB.prepare('SELECT COUNT(*) n FROM runs').first<{ n: number }>())?.n ?? 0;
     const events = (
       await c.env.DB.prepare(
         'SELECT ts, type, severity, detail FROM events ORDER BY id DESC LIMIT 30',
@@ -1922,7 +1932,7 @@ export function consoleApp(): App {
             </tr>
           ))}
         </table></div>
-        {pager('/health', pg, runsHasNext, {})}
+        {pager('/health', pg, runsHasNext, runsTotal, {})}
         <h2>Recent events</h2>
         {events.length === 0 ? <p class="muted">no events</p> : (
           <div class="table-wrap"><table>{events.map((e) => (
