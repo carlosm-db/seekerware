@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSlotMap } from '../src/ia/cv_factory';
+import { buildSlotBudget, buildSlotMap } from '../src/ia/cv_factory';
 import type { CatalogBlock, Selection } from '../src/ia/agents';
 
 function blk(id: string, section: string, anchor_id: string | null, skcat: string | null, text: string): CatalogBlock {
@@ -95,5 +95,37 @@ describe('buildSlotMap', () => {
   it('only fills tokens present in the template (does not invent slots)', () => {
     const fill = buildSlotMap(tok('sum_1'), selection, byId, roleCodes, contact);
     expect(Object.keys(fill.map)).toEqual(['{{sum_1}}']);
+  });
+});
+
+describe('buildSlotBudget', () => {
+  it('derives the summary count, skill categories, and per-role slot counts from template tokens', () => {
+    const tokens = tok(
+      'phone', 'location',
+      'sum_1', 'sum_2', 'sum_3',
+      'skills_technical', 'skills_methodologies',
+      'BNS1R1', 'BNS1R2', 'BNS1R3',
+      'DLAB1R1', 'DLAB1R2',
+      'GHOSTR1', // role code not among active roles -> ignored
+      'stray_token',
+    );
+    const roles = [
+      { id: 'BNS1', title: 'Business Solutions Associate' },
+      { id: 'DLAB1', title: 'Tech Consultant' },
+      { id: 'BAC1', title: 'Banking Officer' }, // active but the template has no BAC1 tokens -> not in budget
+    ];
+    const b = buildSlotBudget(tokens, roles);
+    expect(b.summary).toBe(3);
+    expect(b.skillCats.sort()).toEqual(['methodologies', 'technical']);
+    expect(b.roles).toEqual([
+      { code: 'BNS1', title: 'Business Solutions Associate', slots: 3 },
+      { code: 'DLAB1', title: 'Tech Consultant', slots: 2 },
+    ]);
+  });
+
+  it('falls back to the role code as title when the anchor has none; ignores inactive-role tokens', () => {
+    const b = buildSlotBudget(tok('UPS1R1', 'UPS1R2', 'XXXR1'), [{ id: 'UPS1', title: null }]);
+    expect(b.summary).toBe(0);
+    expect(b.roles).toEqual([{ code: 'UPS1', title: 'UPS1', slots: 2 }]);
   });
 });

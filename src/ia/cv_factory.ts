@@ -4,7 +4,7 @@
 // suggests tweaks, NEVER writes CV content.
 
 import type { Env, Job } from '../types';
-import { cvSelector, cvVerifier, type CatalogBlock, type Selection } from './agents';
+import { cvSelector, cvVerifier, type CatalogBlock, type Selection, type SlotBudget } from './agents';
 import { appendDocText, copyTemplate, exportAndArchivePdf, googleAccessToken, readPlaceholders, replacePlaceholders } from '../gdocs';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -115,27 +115,36 @@ export async function generateCv(
       tags: b.tags ?? '', text: (lang === 'es' ? b.text_es : b.text_en) ?? '',
     }));
 
-    // 2) Selection (enum of IDs forced by schema)
-    const sel = await cvSelector(env, job, catalog, doFetch);
+    const byId = new Map(catalog.map((b) => [b.id, b]));
+
+    // 2) Slot budget FIRST: read the template's {{...}} tokens + active roles so
+    //    the selector fills the REAL slots (not arbitrary caps). Reading the
+    //    template directly (not a copy) means a failed selection leaves no orphan
+    //    copy; the copy shares these exact tokens, so this same read also drives
+    //    the fill below — no extra subrequest vs before.
+    if (!env.CV_TEMPLATE_DOC_ID) return { ok: false, gemini_calls: 0, error: 'CV_TEMPLATE_DOC_ID not configured' };
+    const token = await googleAccessToken(env, doFetch);
+    const roles = (await env.DB.prepare(
+      "SELECT id, title FROM anchors WHERE kind = 'role' AND status = 'active'",
+    ).all<{ id: string; title: string | null }>()).results;
+    const roleCodes = roles.map((r) => r.id);
+    const docTokens = await readPlaceholders(token, env.CV_TEMPLATE_DOC_ID, doFetch);
+    const budget = buildSlotBudget(docTokens, roles);
+
+    // 3) Selection (enum of IDs forced by schema), guided by the slot budget
+    const sel = await cvSelector(env, job, catalog, budget, doFetch);
     geminiCalls += sel.calls;
     if (!sel.ok || !sel.data) return { ok: false, gemini_calls: geminiCalls, error: `cv_selector: ${sel.error}` };
     const selection = sel.data;
-
-    // 3) Catalog lookup + valid role codes (active roles only)
-    const byId = new Map(catalog.map((b) => [b.id, b]));
-    const roleCodes = ((await env.DB.prepare(
-      "SELECT id FROM anchors WHERE kind = 'role' AND status = 'active'",
-    ).all<{ id: string }>()).results).map((a) => a.id);
 
     // 4) Verifier (temp 0) over the selected content
     const ver = await cvVerifier(env, job, verifierText(selection, byId), doFetch);
     geminiCalls += ver.calls;
     const tweaks = ver.ok && ver.data ? ver.data.tweaks : [];
 
-    // 5) Google: copy template -> read its {{...}} tokens -> fill every slot
-    //    (contact per track + summary + skills-by-category + responsibilities
-    //    per role) with EXACT block text -> CLEAN PDF -> tweaks appendix.
-    const token = await googleAccessToken(env, doFetch);
+    // 5) Google: copy the template -> fill every slot (contact per track + summary
+    //    + skills-by-category + responsibilities per role) with EXACT block text
+    //    -> CLEAN PDF -> tweaks appendix. docTokens (read above) == the copy's tokens.
     const today = new Date().toISOString().slice(0, 10);
     const name = `${sample ? 'SAMPLE — ' : ''}CV — ${job.company} — ${job.title.slice(0, 60)} — ${today}`;
     const doc = await copyTemplate(env, token, name, doFetch);
@@ -148,7 +157,6 @@ export async function generateCv(
     try { profile = contactRow ? (JSON.parse(contactRow.value) as ContactProfile) : {}; } catch { /* invalid json */ }
     if (!contactRow) contactMissing = true;
 
-    const docTokens = await readPlaceholders(token, doc.id, doFetch);
     const fill = buildSlotMap(docTokens, selection, byId, roleCodes, contactPlaceholders(job.track, profile));
     await replacePlaceholders(token, doc.id, fill.map, doFetch);
 
@@ -284,6 +292,35 @@ export function buildSlotMap(
   const selected = [...selection.summary, ...selection.skills, ...selection.experience];
   const unplaced_blocks = selected.filter((id) => !used.has(id));
   return { map, filled, blanked, unrecognized, unplaced_blocks, used_block_ids: [...used] };
+}
+
+/**
+ * Derive the template's slot budget from its {{...}} tokens + the active roles:
+ * how many sum_N slots, which skills_<cat> categories, and how many <CODE>R<N>
+ * slots each active role has. Runtime-only — the template is the source of truth;
+ * nothing about the owner's CV structure is hardcoded (§4). Token parsing mirrors
+ * template-check.ts (sum_N / skills_<cat> / <CODE>R<N>).
+ */
+export function buildSlotBudget(
+  tokens: Array<{ name: string }>,
+  roles: Array<{ id: string; title: string | null }>,
+): SlotBudget {
+  const names = tokens.map((t) => t.name);
+  const summary = names.filter((n) => /^sum_\d+$/.test(n)).length;
+  const skillCats = names
+    .map((n) => /^skills_(.+)$/.exec(n))
+    .filter((m): m is RegExpExecArray => !!m)
+    .map((m) => m[1]!);
+  const roleTitle = new Map(roles.map((r) => [r.id, r.title ?? r.id]));
+  const roleSlots = new Map<string, number>();
+  for (const n of names) {
+    const m = /^(.+)R(\d+)$/.exec(n);
+    if (m && roleTitle.has(m[1]!)) roleSlots.set(m[1]!, (roleSlots.get(m[1]!) ?? 0) + 1);
+  }
+  const rolesOut = roles
+    .filter((r) => roleSlots.has(r.id))
+    .map((r) => ({ code: r.id, title: roleTitle.get(r.id)!, slots: roleSlots.get(r.id)! }));
+  return { summary, skillCats, roles: rolesOut };
 }
 
 /** Plain-text view of the selection for the verifier (labels help it reason). */
