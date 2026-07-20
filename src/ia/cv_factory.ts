@@ -4,7 +4,7 @@
 // suggests tweaks, NEVER writes CV content.
 
 import type { Env, Job } from '../types';
-import { cvSelector, cvVerifier, type CatalogBlock, type Selection, type SlotBudget } from './agents';
+import { cvSelector, cvVerifier, type CatalogBlock, type RoleAnalysis, type Selection, type SlotBudget } from './agents';
 import { appendDocText, copyTemplate, exportAndArchivePdf, googleAccessToken, readPlaceholders, replacePlaceholders } from '../gdocs';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -130,15 +130,20 @@ export async function generateCv(
     const roleCodes = roles.map((r) => r.id);
     const docTokens = await readPlaceholders(token, env.CV_TEMPLATE_DOC_ID, doFetch);
     const budget = buildSlotBudget(docTokens, roles);
+    // Reuse job_analyst's role analysis stored at notify (null for older jobs → agents use the raw job).
+    const raRow = await env.DB.prepare('SELECT role_analysis FROM jobs WHERE url_hash = ?')
+      .bind(job.url_hash).first<{ role_analysis: string | null }>();
+    let analysis: RoleAnalysis | null = null;
+    try { analysis = raRow?.role_analysis ? (JSON.parse(raRow.role_analysis) as RoleAnalysis) : null; } catch { analysis = null; }
 
-    // 3) Selection (enum of IDs forced by schema), guided by the slot budget
-    const sel = await cvSelector(env, job, catalog, budget, doFetch);
+    // 3) Selection (enum of IDs forced by schema), guided by the slot budget + role analysis
+    const sel = await cvSelector(env, job, catalog, budget, analysis, doFetch);
     geminiCalls += sel.calls;
     if (!sel.ok || !sel.data) return { ok: false, gemini_calls: geminiCalls, error: `cv_selector: ${sel.error}` };
     const selection = sel.data;
 
     // 4) Verifier (temp 0) over the selected content
-    const ver = await cvVerifier(env, job, verifierText(selection, byId), doFetch);
+    const ver = await cvVerifier(env, job, verifierText(selection, byId), analysis, doFetch);
     geminiCalls += ver.calls;
     const tweaks = ver.ok && ver.data ? ver.data.tweaks : [];
 

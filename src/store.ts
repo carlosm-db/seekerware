@@ -102,6 +102,8 @@ export interface JobInsert {
   title_norm: string;
   /** AI provenance: 'rule' (rule-based texts) or the Gemini model that enriched it. */
   enriched_by: string;
+  /** job_analyst's structured role analysis (JSON), reused by the CV agents. Null when unavailable. */
+  role_analysis: string | null;
 }
 
 /** Statement builder for the run's final batch. */
@@ -116,13 +118,13 @@ export class RunBatch {
         `INSERT INTO jobs (url_hash, url, company_id, ats, ext_id, title, location, posted_at,
            freshness_ok, track, score, verdict, status, first_seen, last_seen, notified_at,
            cv_pending, why_it_fits, positioning_lead, description_text, score_breakdown, title_norm,
-           enriched_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           enriched_by, role_analysis)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       ).bind(
         j.url_hash, j.url, j.company_id, j.ats, j.ext_id, j.title, j.location, j.posted_at,
         j.freshness_ok, j.track, j.score, j.verdict, j.status, j.first_seen, j.last_seen,
         j.notified_at, j.cv_pending, j.why_it_fits, j.positioning_lead, j.description_text,
-        j.score_breakdown, j.title_norm, j.enriched_by,
+        j.score_breakdown, j.title_norm, j.enriched_by, j.role_analysis,
       ),
     );
   }

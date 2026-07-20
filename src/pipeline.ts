@@ -8,7 +8,7 @@ import { loadScoringConfig } from './config-store';
 import { normalizeTitle, scoreJob, type ScoringConfig } from './scoring';
 import { checkFreshness } from './freshness';
 import { formatDigest, formatJobMessage, formatMaintenance, ruleBasedTexts, sendTelegram } from './notify';
-import { enricher } from './ia/agents';
+import { enricher, jobAnalyst, type RoleAnalysis } from './ia/agents';
 import { generateCv } from './ia/cv_factory';
 import { RunStats, trackedFetch } from './runstats';
 import { RunBatch, getCompaniesPage, getCompanyJobs, getConfigValue, openRun, type StoredCompany } from './store';
@@ -280,6 +280,7 @@ async function processCompany(
     let notifiedAt: string | null = null;
     let cvPending: 0 | 1 = 0;
     let enrichedBy = 'rule';
+    let roleAnalysis: string | null = null;
     const texts = ruleBasedTexts(result);
 
     if (seeding) {
@@ -304,9 +305,16 @@ async function processCompany(
           // Enricher (survivors only, TRD §4): improves the texts; never the verdict
           let ruleBased = true;
           if (env.GEMINI_API_KEY) {
+            // job_analyst: understand the role ONCE; feeds the enricher now and the CV agents later.
+            let analysis: RoleAnalysis | null = null;
+            const an = await jobAnalyst(env, job, doFetch);
+            stats.geminiCalls += an.calls;
+            if (an.ok && an.data) { analysis = an.data; roleAnalysis = JSON.stringify(an.data); }
+            else stats.event({ type: 'gemini_fail', severity: 'warn', url_hash: hash, detail: `job_analyst: ${an.error}` });
+
             const enriched = await enricher(env, job, {
               why_it_fits: texts.whyItFits, gap_to_address: texts.gapToAddress, positioning_lead: texts.positioningLead,
-            }, doFetch);
+            }, analysis, doFetch);
             stats.geminiCalls += enriched.calls;
             if (enriched.ok && enriched.data) {
               texts.whyItFits = enriched.data.why_it_fits;
@@ -361,7 +369,7 @@ async function processCompany(
       cv_pending: cvPending,
       why_it_fits: texts.whyItFits, positioning_lead: texts.positioningLead,
       description_text: job.description, score_breakdown: JSON.stringify(result),
-      title_norm: normalizeTitle(job.title), enriched_by: enrichedBy,
+      title_norm: normalizeTitle(job.title), enriched_by: enrichedBy, role_analysis: roleAnalysis,
     });
   }
 

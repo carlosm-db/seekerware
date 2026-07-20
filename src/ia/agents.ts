@@ -9,7 +9,7 @@
 
 import type { Env, Job } from '../types';
 import { callGemini, wrapUntrusted, type GeminiResult } from './gemini';
-import { profile } from './knowledge';
+import { profile, domainVocab } from './knowledge';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -37,6 +37,64 @@ export function runAgent<T, S>(
   }, doFetch);
 }
 
+// ---------- job_analyst ----------
+
+/** Structured understanding of ONE role, produced once at notify and reused by
+ * the enricher and the CV agents. This is ANALYSIS of the job, never CV content (§7.1). */
+export interface RoleAnalysis {
+  must_haves: string[];
+  nice_to_haves: string[];
+  seniority: string;
+  domain_signals: string[];
+  positioning_angle: string;
+  screening_topics: string[];
+}
+
+interface AnalystState {
+  job: Job;
+}
+
+const jobAnalystAgent: Agent<AnalystState> = {
+  name: 'job_analyst',
+  models: ['gemini-3.5-flash', 'gemini-3.1-flash-lite'],
+  temperature: 0.2,
+  instruction: () =>
+    'You are the job_analyst. Read a job posting and extract a structured analysis of what the role ' +
+    'really wants, judged for ' + profile() + '. Return: the must-have requirements, the nice-to-haves, ' +
+    'the seniority level, the domain signals present (families like ' + domainVocab() + '), the single ' +
+    'best positioning angle for this candidate, and the likely screening topics. Base everything ONLY ' +
+    'on the posting — do not invent. This is ANALYSIS of the job, not CV content.',
+  buildPrompt: (s) => `JOB (title: ${s.job.title})\n` + wrapUntrusted(s.job.description.slice(0, 6000)),
+  schema: () => ({
+    type: 'OBJECT',
+    required: ['must_haves', 'nice_to_haves', 'seniority', 'domain_signals', 'positioning_angle', 'screening_topics'],
+    properties: {
+      must_haves: { type: 'ARRAY', items: { type: 'STRING' }, maxItems: 12 },
+      nice_to_haves: { type: 'ARRAY', items: { type: 'STRING' }, maxItems: 12 },
+      seniority: { type: 'STRING' },
+      domain_signals: { type: 'ARRAY', items: { type: 'STRING' }, maxItems: 12 },
+      positioning_angle: { type: 'STRING' },
+      screening_topics: { type: 'ARRAY', items: { type: 'STRING' }, maxItems: 12 },
+    },
+  }),
+};
+
+export async function jobAnalyst(
+  env: Env, job: Job, doFetch: Fetcher = fetch,
+): Promise<GeminiResult<RoleAnalysis>> {
+  return runAgent<RoleAnalysis, AnalystState>(env, jobAnalystAgent, { job }, doFetch);
+}
+
+/** Compact analysis context injected into downstream agents (empty when absent → old behavior). */
+function analysisContext(a: RoleAnalysis | null | undefined): string {
+  if (!a) return '';
+  return 'ROLE ANALYSIS (from job_analyst):\n' +
+    `must-haves: ${a.must_haves.join(', ')}\n` +
+    `nice-to-haves: ${a.nice_to_haves.join(', ')}\n` +
+    `seniority: ${a.seniority}\n` +
+    `positioning angle: ${a.positioning_angle}\n\n`;
+}
+
 // ---------- enricher ----------
 
 export interface EnrichedTexts {
@@ -48,6 +106,7 @@ export interface EnrichedTexts {
 interface EnrichState {
   job: Job;
   ruleTexts: EnrichedTexts;
+  analysis?: RoleAnalysis | null;
 }
 
 const enricherAgent: Agent<EnrichState> = {
@@ -60,6 +119,7 @@ const enricherAgent: Agent<EnrichState> = {
     'Rely ONLY on the job and the rule-based drafts. Do not invent experience or figures. ' +
     'Do NOT change verdicts or mention scores.',
   buildPrompt: (s) =>
+    analysisContext(s.analysis) +
     `RULE-BASED DRAFTS:\n${JSON.stringify(s.ruleTexts)}\n\nJOB (title: ${s.job.title})\n` +
     wrapUntrusted(s.job.description.slice(0, 6000)),
   schema: () => ({
@@ -74,9 +134,9 @@ const enricherAgent: Agent<EnrichState> = {
 };
 
 export async function enricher(
-  env: Env, job: Job, ruleTexts: EnrichedTexts, doFetch: Fetcher = fetch,
+  env: Env, job: Job, ruleTexts: EnrichedTexts, analysis: RoleAnalysis | null, doFetch: Fetcher = fetch,
 ): Promise<GeminiResult<EnrichedTexts>> {
-  return runAgent<EnrichedTexts, EnrichState>(env, enricherAgent, { job, ruleTexts }, doFetch);
+  return runAgent<EnrichedTexts, EnrichState>(env, enricherAgent, { job, ruleTexts, analysis }, doFetch);
 }
 
 // ---------- cv_selector ----------
@@ -113,6 +173,7 @@ interface SelectState {
   job: Job;
   catalog: CatalogBlock[];
   budget?: SlotBudget;
+  analysis?: RoleAnalysis | null;
 }
 
 /** Explicit "placeholder -> source" map the selector is told to fill (runtime data, no PII in code). */
@@ -150,7 +211,7 @@ const cvSelectorAgent: Agent<SelectState> = {
       .map((b) => `${b.id} [${b.section}${b.skcat ? '/' + b.skcat : ''}] tags:${b.tags} :: ${b.text.slice(0, 140)}`)
       .join('\n');
     const budgetText = s.budget ? renderBudget(s.budget) : '';
-    return `${budgetText}CATALOG:\n${catalogText}\n\nJOB (title: ${s.job.title})\n` + wrapUntrusted(s.job.description.slice(0, 6000));
+    return `${analysisContext(s.analysis)}${budgetText}CATALOG:\n${catalogText}\n\nJOB (title: ${s.job.title})\n` + wrapUntrusted(s.job.description.slice(0, 6000));
   },
   schema: (s) => {
     const idsBySection = (sec: string) => s.catalog.filter((b) => b.section === sec).map((b) => b.id);
@@ -174,9 +235,10 @@ const cvSelectorAgent: Agent<SelectState> = {
 };
 
 export async function cvSelector(
-  env: Env, job: Job, catalog: CatalogBlock[], budget: SlotBudget | undefined, doFetch: Fetcher = fetch,
+  env: Env, job: Job, catalog: CatalogBlock[], budget: SlotBudget | undefined,
+  analysis: RoleAnalysis | null, doFetch: Fetcher = fetch,
 ): Promise<GeminiResult<Selection>> {
-  return runAgent<Selection, SelectState>(env, cvSelectorAgent, { job, catalog, budget }, doFetch);
+  return runAgent<Selection, SelectState>(env, cvSelectorAgent, { job, catalog, budget, analysis }, doFetch);
 }
 
 // ---------- cv_verifier ----------
@@ -188,6 +250,7 @@ export interface VerifierNotes {
 interface VerifyState {
   job: Job;
   renderedBody: string;
+  analysis?: RoleAnalysis | null;
 }
 
 const cvVerifierAgent: Agent<VerifyState> = {
@@ -199,6 +262,7 @@ const cvVerifierAgent: Agent<VerifyState> = {
     'Return 0-5 SHORT improvement suggestions (reorder, emphasize, visible gap). ' +
     'These are SUGGESTIONS for the owner: do not rewrite the CV or propose literal new text.',
   buildPrompt: (s) =>
+    analysisContext(s.analysis) +
     `RENDERED CV:\n${s.renderedBody.slice(0, 5000)}\n\nJOB (title: ${s.job.title})\n` +
     wrapUntrusted(s.job.description.slice(0, 5000)),
   schema: () => ({
@@ -209,7 +273,7 @@ const cvVerifierAgent: Agent<VerifyState> = {
 };
 
 export async function cvVerifier(
-  env: Env, job: Job, renderedBody: string, doFetch: Fetcher = fetch,
+  env: Env, job: Job, renderedBody: string, analysis: RoleAnalysis | null, doFetch: Fetcher = fetch,
 ): Promise<GeminiResult<VerifierNotes>> {
-  return runAgent<VerifierNotes, VerifyState>(env, cvVerifierAgent, { job, renderedBody }, doFetch);
+  return runAgent<VerifierNotes, VerifyState>(env, cvVerifierAgent, { job, renderedBody, analysis }, doFetch);
 }
