@@ -278,6 +278,16 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
   .twoup > .card { margin-bottom:0 }
   .filterbar input[type=text] { flex:1 1 240px }
 }
+/* Prepare progress modal (client island in the job page) */
+.modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; z-index:50 }
+.modal-backdrop[hidden] { display:none }
+.modal { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:22px 26px; max-width:440px; width:90% }
+.modal h3 { margin:0 0 12px }
+.steps { list-style:none; margin:0; padding:0 }
+.steps li { padding:5px 0; display:flex; align-items:center; gap:8px }
+.sm { font-size:.85em }
+.spin { display:inline-block; width:13px; height:13px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite }
+@keyframes spin { to { transform:rotate(360deg) } }
 `;
 
 export interface FooterStatus {

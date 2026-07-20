@@ -89,6 +89,7 @@ export async function generateCv(
   lang: 'en' | 'es',
   sample: boolean,
   doFetch: Fetcher = fetch,
+  onProgress?: (step: string) => void | Promise<void>,
 ): Promise<FactoryResult> {
   let geminiCalls = 0;
   try {
@@ -123,6 +124,7 @@ export async function generateCv(
     //    copy; the copy shares these exact tokens, so this same read also drives
     //    the fill below — no extra subrequest vs before.
     if (!env.CV_TEMPLATE_DOC_ID) return { ok: false, gemini_calls: 0, error: 'CV_TEMPLATE_DOC_ID not configured' };
+    await onProgress?.('Reading the CV template…');
     const token = await googleAccessToken(env, doFetch);
     const roles = (await env.DB.prepare(
       "SELECT id, title FROM anchors WHERE kind = 'role' AND status = 'active'",
@@ -137,12 +139,14 @@ export async function generateCv(
     try { analysis = raRow?.role_analysis ? (JSON.parse(raRow.role_analysis) as RoleAnalysis) : null; } catch { analysis = null; }
 
     // 3) Selection (enum of IDs forced by schema), guided by the slot budget + role analysis
+    await onProgress?.('Selecting CV blocks (AI)…');
     const sel = await cvSelector(env, job, catalog, budget, analysis, doFetch);
     geminiCalls += sel.calls;
     if (!sel.ok || !sel.data) return { ok: false, gemini_calls: geminiCalls, error: `cv_selector: ${sel.error}` };
     const selection = sel.data;
 
     // 4) Verifier (temp 0) over the selected content
+    await onProgress?.('Verifying the CV (AI)…');
     const ver = await cvVerifier(env, job, verifierText(selection, byId), analysis, doFetch);
     geminiCalls += ver.calls;
     const tweaks = ver.ok && ver.data ? ver.data.tweaks : [];
@@ -150,6 +154,7 @@ export async function generateCv(
     // 5) Google: copy the template -> fill every slot (contact per track + summary
     //    + skills-by-category + responsibilities per role) with EXACT block text
     //    -> CLEAN PDF -> tweaks appendix. docTokens (read above) == the copy's tokens.
+    await onProgress?.('Rendering the Doc + PDF…');
     const today = new Date().toISOString().slice(0, 10);
     const name = `${sample ? 'SAMPLE — ' : ''}CV — ${job.company} — ${job.title.slice(0, 60)} — ${today}`;
     const doc = await copyTemplate(env, token, name, doFetch);

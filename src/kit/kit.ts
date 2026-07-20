@@ -129,6 +129,7 @@ export async function polishAnswers(
  */
 export async function prepareJob(
   env: Env, urlHash: string, doFetch: Fetcher = fetch,
+  onProgress?: (step: string) => void | Promise<void>,
 ): Promise<{ ok: boolean; kit: KitResult; cv: { ok: boolean; doc_url?: string; error?: string }; error?: string }> {
   const nowIso = new Date().toISOString();
   await env.DB.batch([
@@ -140,6 +141,7 @@ export async function prepareJob(
       .bind(urlHash, nowIso, 'user', 'stage:prepared', 'prepare (kit + CV)'),
   ]);
 
+  await onProgress?.('Building your kit (matching approved Q&A)…');
   const kit = await buildKit(env, urlHash, doFetch);
 
   const j = await env.DB.prepare(
@@ -154,7 +156,7 @@ export async function prepareJob(
       location: String(j.location ?? ''), url: String(j.url), description: String(j.description_text ?? ''),
       posted_at: null, ats: (j.ats ?? 'greenhouse') as Ats, raw: null,
       url_hash: String(j.url_hash), track: j.track ?? null,
-    }, 'en', false, doFetch);
+    }, 'en', false, doFetch, onProgress);
     cv = { ok: fx.ok, doc_url: fx.doc_url, error: fx.error };
     // Fallback: a failed on-the-spot build re-queues for the next burst's CV factory.
     if (!fx.ok) await env.DB.prepare('UPDATE jobs SET cv_pending = 1 WHERE url_hash = ?').bind(urlHash).run();
