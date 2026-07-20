@@ -46,6 +46,7 @@ and `isLive(job) -> Promise<boolean>`. Normalized Job:
 | Greenhouse | `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | `first_published` (preferred over `updated_at`, which some boards touch constantly) | GET `/boards/{token}/jobs/{id}` -> 404 = closed |
 | Lever | `api.lever.co/v0/postings/{token}?mode=json` | `createdAt` (epoch ms) | GET of the individual posting in JSON mode |
 | Ashby | `api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=true` | `publishedDate` | re-fetch the board and look up the `id`. The HTML page is a SPA: it returns 200 even when the job is dead — NEVER verify against HTML |
+| Workable | `apply.workable.com/api/v1/widget/accounts/{token}?details=true` (public, no token) | `published_on` | re-fetch the widget and look up the `shortcode` (SPA HTML, never verify against it). Form not public → kit `detectable:false` |
 
 Common rules:
 

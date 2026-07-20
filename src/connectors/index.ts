@@ -6,6 +6,7 @@ import * as lever from './lever';
 import * as ashby from './ashby';
 import * as successfactors from './successfactors';
 import * as workday from './workday';
+import * as workable from './workable';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -21,4 +22,4 @@ export interface Connector {
   fetchDetail?(company: Company, job: Job, doFetch?: Fetcher): Promise<Partial<Job>>;
 }
 
-export const connectors: Record<Ats, Connector> = { greenhouse, lever, ashby, successfactors, workday };
+export const connectors: Record<Ats, Connector> = { greenhouse, lever, ashby, successfactors, workday, workable };

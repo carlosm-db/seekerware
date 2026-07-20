@@ -65,7 +65,8 @@ export function stripHtml(html: string): string {
  * is not a supported ATS board. Powers the console "add by URL" bulk flow.
  * Recognized: Greenhouse (boards/job-boards.greenhouse.io/{token} or
  * {token}.greenhouse.io), Lever (jobs.lever.co/{token}), Ashby
- * (jobs.ashbyhq.com/{token}).
+ * (jobs.ashbyhq.com/{token}), Workable (apply.workable.com/{token} or
+ * {token}.workable.com).
  */
 export function parseAtsUrl(input: string): { ats: Ats; token: string } | null {
   let u: URL;
@@ -92,6 +93,14 @@ export function parseAtsUrl(input: string): { ats: Ats; token: string } | null {
   }
   if (host === 'jobs.ashbyhq.com' || host === 'ashbyhq.com') {
     return first ? { ats: 'ashby', token: first } : null;
+  }
+  // Workable: apply.workable.com/{account} or {account}.workable.com -> token '{account}'.
+  if (host === 'apply.workable.com') {
+    return first ? { ats: 'workable', token: first } : null;
+  }
+  if (host.endsWith('.workable.com')) {
+    const sub = host.slice(0, -'.workable.com'.length);
+    if (sub && !['apply', 'www'].includes(sub)) return { ats: 'workable', token: sub };
   }
   // SuccessFactors / RMK: jobs2web.com subdomains are detectable; custom-domain SF
   // career sites (e.g. empleo.grupobancolombia.com) are added via the single-add form.

@@ -1,6 +1,6 @@
 // Canonical glossary types (docs/CONVENTIONS.md §1).
 
-export type Ats = 'greenhouse' | 'lever' | 'ashby' | 'successfactors' | 'workday';
+export type Ats = 'greenhouse' | 'lever' | 'ashby' | 'successfactors' | 'workday' | 'workable';
 
 export type Verdict = 'Apply' | 'Stretch-worth-it' | 'Skip';
 
