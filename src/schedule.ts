@@ -1,66 +1,82 @@
-// Pipeline schedule (owner request 2026-07-18: cron editable from the console,
-// no deploys). The Cloudflare cron is a dumb hourly 24/7 tick; whether a tick
-// RUNS is decided here from the D1 config `schedule`. Pure + unit-tested.
+// Pipeline schedule (owner request 2026-07-20: BURST runs). The Cloudflare cron
+// is a dumb 15-min 24/7 tick; whether a tick RUNS is decided here from the D1
+// config `schedule`. Model: a few "bursts" per day (e.g. 07:00 and 17:00). Each
+// burst fires one company batch every `batch_every_min` minutes for `batchesNeeded`
+// ticks — one full cursor rotation, so every company is covered once per burst —
+// then idles until the next burst. `batchesNeeded` is derived at run time from the
+// active company count (not stored), so coverage self-adjusts as companies grow.
+// Pure + unit-tested.
 
 export interface ScheduleCfg {
-  /** Run every N hours within the window (1 = hourly). */
-  every_hours: number;
-  /** First active hour (0-23) in the configured timezone, inclusive. */
-  start_hour: number;
-  /** Last active hour (0-23), inclusive. */
-  end_hour: number;
-  /** IANA timezone the window is expressed in (DST-aware). */
+  /** Hours of day (0-23, in `timezone`) at which a burst starts. */
+  burst_hours: number[];
+  /** Minutes between batches within a burst (should match the cron tick, e.g. 15). */
+  batch_every_min: number;
+  /** IANA timezone the burst hours are expressed in (DST-aware). */
   timezone: string;
 }
 
 export const DEFAULT_SCHEDULE: ScheduleCfg = {
-  every_hours: 1, start_hour: 9, end_hour: 19, timezone: 'America/New_York',
+  burst_hours: [7, 17], batch_every_min: 15, timezone: 'America/Bogota',
 };
 
 export const SCHEDULE_TIMEZONES = [
-  'America/New_York', 'America/Bogota', 'America/Vancouver', 'UTC',
+  'America/Bogota', 'America/New_York', 'America/Vancouver', 'UTC',
 ] as const;
 
-/** Hour of day (0-23) in the given timezone, DST-aware. */
-export function hourIn(timezone: string, d: Date): number {
-  const h = Number(new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour: 'numeric', hour12: false }).format(d));
-  return h === 24 ? 0 : h;
+/** Minute-of-day (0-1439) in the given timezone, DST-aware. */
+export function minuteOfDay(timezone: string, d: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone, hour: 'numeric', minute: 'numeric', hour12: false,
+  }).formatToParts(d);
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0') % 24;
+  const min = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+  return hour * 60 + min;
 }
 
-/** Coerces arbitrary stored JSON into a safe ScheduleCfg (bad values -> defaults). */
+/** Coerces arbitrary stored JSON into a safe ScheduleCfg (bad OR legacy shapes -> defaults). */
 export function normalizeSchedule(raw: unknown): ScheduleCfg {
   const r = (raw ?? {}) as Partial<ScheduleCfg>;
-  const int = (v: unknown, lo: number, hi: number, dflt: number) => {
-    const n = Math.floor(Number(v));
-    return Number.isFinite(n) && n >= lo && n <= hi ? n : dflt;
-  };
   const tz = typeof r.timezone === 'string' && (SCHEDULE_TIMEZONES as readonly string[]).includes(r.timezone)
     ? r.timezone : DEFAULT_SCHEDULE.timezone;
-  const start = int(r.start_hour, 0, 23, DEFAULT_SCHEDULE.start_hour);
-  const end = int(r.end_hour, 0, 23, DEFAULT_SCHEDULE.end_hour);
+  const hours = Array.isArray(r.burst_hours)
+    ? [...new Set(
+        r.burst_hours.map((h) => Math.floor(Number(h))).filter((h) => Number.isInteger(h) && h >= 0 && h <= 23),
+      )].sort((a, b) => a - b)
+    : [];
+  const every = Math.floor(Number(r.batch_every_min));
   return {
-    every_hours: int(r.every_hours, 1, 12, DEFAULT_SCHEDULE.every_hours),
-    start_hour: start,
-    // end below start clamps TO start (a one-hour window), never silently jumps.
-    end_hour: Math.max(start, end),
+    burst_hours: hours.length ? hours : DEFAULT_SCHEDULE.burst_hours,
+    batch_every_min: Number.isFinite(every) && every >= 5 && every <= 60 ? every : DEFAULT_SCHEDULE.batch_every_min,
     timezone: tz,
   };
 }
 
-/** Should a tick at instant `d` actually run the pipeline? */
-export function shouldRunAt(d: Date, cfg: ScheduleCfg): boolean {
-  const h = hourIn(cfg.timezone, d);
-  if (h < cfg.start_hour || h > cfg.end_hour) return false;
-  return (h - cfg.start_hour) % Math.max(1, cfg.every_hours) === 0;
+/**
+ * Should a tick at instant `d` run a batch? True at `burst_hour + k*batch_every_min`
+ * for k in [0, batchesNeeded) — one full company rotation per burst, then idle.
+ */
+export function shouldRunAt(d: Date, cfg: ScheduleCfg, batchesNeeded: number): boolean {
+  if (batchesNeeded < 1) return false;
+  const mod = minuteOfDay(cfg.timezone, d);
+  const span = cfg.batch_every_min * batchesNeeded;
+  for (const h of cfg.burst_hours) {
+    const delta = mod - h * 60;
+    if (delta >= 0 && delta < span && delta % cfg.batch_every_min === 0) return true;
+  }
+  return false;
 }
 
-/** Next instant (top of hour) at/after `d` that would run; null if none in 48h. */
-export function nextRunAfter(d: Date, cfg: ScheduleCfg): Date | null {
+/** Next instant (aligned to the batch grid) at/after `d` that would run; null if none in 48h. */
+export function nextRunAfter(d: Date, cfg: ScheduleCfg, batchesNeeded: number): Date | null {
+  const step = cfg.batch_every_min * 60_000;
   const probe = new Date(d);
-  probe.setMinutes(0, 0, 0);
-  for (let i = 0; i < 49; i++) {
-    const t = new Date(probe.getTime() + i * 3600_000);
-    if (t > d && shouldRunAt(t, cfg)) return t;
+  probe.setUTCSeconds(0, 0);
+  probe.setUTCMinutes(Math.ceil(probe.getUTCMinutes() / cfg.batch_every_min) * cfg.batch_every_min);
+  const ticks = Math.ceil((48 * 60) / cfg.batch_every_min) + 1;
+  for (let i = 0; i < ticks; i++) {
+    const t = new Date(probe.getTime() + i * step);
+    if (t > d && shouldRunAt(t, cfg, batchesNeeded)) return t;
   }
   return null;
 }

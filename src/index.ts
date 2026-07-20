@@ -128,8 +128,9 @@ export default {
   fetch: app.fetch,
 
   async scheduled(_controller: ScheduledController, env: ConsoleEnv, ctx: ExecutionContext): Promise<void> {
-    // The cron is a dumb hourly 24/7 tick; the owner-editable D1 config
-    // `schedule` (console /health panel) decides which ticks actually run.
+    // The cron is a dumb 15-min 24/7 tick; the owner-editable D1 config `schedule`
+    // (console /health panel) decides which ticks run a batch. batchesNeeded = one
+    // full company rotation, so each burst covers every active company once.
     const { normalizeSchedule, shouldRunAt } = await import('./schedule');
     let raw: unknown = null;
     try {
@@ -137,8 +138,16 @@ export default {
       if (row) raw = JSON.parse(row.value);
     } catch { /* fall back to defaults */ }
     const sched = normalizeSchedule(raw);
-    if (!shouldRunAt(new Date(), sched)) {
-      console.log(`cron tick skipped: outside the ${sched.start_hour}-${sched.end_hour} ${sched.timezone} window`);
+
+    const [countRow, pageRow] = await Promise.all([
+      env.DB.prepare('SELECT COUNT(*) n FROM companies WHERE active = 1').first<{ n: number }>(),
+      env.DB.prepare("SELECT value FROM config WHERE key='poll_page_size'").first<{ value: string }>(),
+    ]);
+    const pageSize = Math.max(1, Number(pageRow?.value ?? '25') || 25);
+    const batchesNeeded = Math.max(1, Math.ceil((countRow?.n ?? 0) / pageSize));
+
+    if (!shouldRunAt(new Date(), sched, batchesNeeded)) {
+      console.log(`cron tick skipped: outside bursts [${sched.burst_hours.join(',')}] ${sched.timezone}`);
       return;
     }
     ctx.waitUntil(

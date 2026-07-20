@@ -1904,9 +1904,10 @@ export function consoleApp(): App {
     let schedRaw: unknown = null;
     try { if (schedRow) schedRaw = JSON.parse(schedRow.value); } catch { /* defaults */ }
     const sched = normalizeSchedule(schedRaw ?? DEFAULT_SCHEDULE);
+    const activeCompanies = (await c.env.DB.prepare('SELECT COUNT(*) n FROM companies WHERE active = 1').first<{ n: number }>())?.n ?? 0;
+    const batchesNeeded = Math.max(1, Math.ceil(activeCompanies / 25));
     const lastRun = runs[0]?.started_at ? fmt(String(runs[0].started_at)) : '—';
-    const next = nextRunAfter(new Date(), sched);
-    const hourOpts = Array.from({ length: 24 }, (_, h) => h);
+    const next = nextRunAfter(new Date(), sched, batchesNeeded);
 
     return page(c, 'Health', (
       <>
@@ -1917,27 +1918,23 @@ export function consoleApp(): App {
           <div class="stat"><div class="n">{today?.reads ?? 0}</div><div class="l">D1 reads today (limit 5M)</div></div>
         </div>
         <form method="post" action="/health/schedule" class="card actions">
-          <strong>Schedule</strong>
-          <label>run every{' '}
-            <select name="every_hours">
-              {[1, 2, 3, 4, 6, 12].map((h) => <option value={String(h)} selected={h === sched.every_hours}>{h}h</option>)}
-            </select>
+          <strong>Schedule (bursts)</strong>
+          <label>burst hours{' '}
+            <input type="text" name="burst_hours" value={sched.burst_hours.join(', ')} placeholder="7, 17" class="w-md" />
           </label>
-          <label>from{' '}
-            <select name="start_hour">
-              {hourOpts.map((h) => <option value={String(h)} selected={h === sched.start_hour}>{h}:00</option>)}
-            </select>
-          </label>
-          <label>to{' '}
-            <select name="end_hour">
-              {hourOpts.map((h) => <option value={String(h)} selected={h === sched.end_hour}>{h}:00</option>)}
+          <label>batch every{' '}
+            <select name="batch_every_min">
+              {[15, 20, 30].map((m) => <option value={String(m)} selected={m === sched.batch_every_min}>{m}m</option>)}
             </select>
           </label>
           <select name="timezone">
             {SCHEDULE_TIMEZONES.map((tz) => <option value={tz} selected={tz === sched.timezone}>{tz}</option>)}
           </select>
           <button type="submit" class="primary">Save schedule</button>
-          <span class="muted">last run {lastRun} UTC · next expected {next ? fmt(next.toISOString()) : '—'} UTC</span>
+          <span class="muted">
+            last run {lastRun} UTC · next {next ? fmt(next.toISOString()) : '—'} UTC ·
+            {' '}covers {activeCompanies} companies in {batchesNeeded} batch(es)/burst
+          </span>
         </form>
         <div class="table-wrap"><table>
           <tr><th>run</th><th>start</th><th>status</th><th class="hide-sm">ms</th><th>companies</th><th class="hide-sm">seen</th><th class="hide-sm">new</th><th>surv.</th><th>notif.</th><th class="hide-sm">closed</th><th class="hide-sm">subreq</th><th>errors</th></tr>
@@ -1968,14 +1965,15 @@ export function consoleApp(): App {
   app.post('/health/schedule', async (c) => {
     const b = await c.req.parseBody();
     const { normalizeSchedule } = await import('../schedule');
+    const burst_hours = String(b.burst_hours ?? '')
+      .split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n));
     const sched = normalizeSchedule({
-      every_hours: Number(b.every_hours), start_hour: Number(b.start_hour),
-      end_hour: Number(b.end_hour), timezone: String(b.timezone ?? ''),
+      burst_hours, batch_every_min: Number(b.batch_every_min), timezone: String(b.timezone ?? ''),
     });
     await c.env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('schedule', ?)")
       .bind(JSON.stringify(sched)).run();
     return c.redirect(`/health?m=${encodeURIComponent(
-      `schedule saved: every ${sched.every_hours}h, ${sched.start_hour}:00–${sched.end_hour}:00 ${sched.timezone}`,
+      `schedule saved: bursts at ${sched.burst_hours.map((h) => h + ':00').join(', ')} every ${sched.batch_every_min}m (${sched.timezone})`,
     )}`);
   });
 

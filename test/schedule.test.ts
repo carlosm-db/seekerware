@@ -1,68 +1,65 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SCHEDULE, hourIn, nextRunAfter, normalizeSchedule, shouldRunAt } from '../src/schedule';
+import { DEFAULT_SCHEDULE, minuteOfDay, nextRunAfter, normalizeSchedule, shouldRunAt } from '../src/schedule';
 
-// 2026-07-18 is EDT (UTC-4); 2026-01-15 is EST (UTC-5).
-const summer = (utcHour: number) => new Date(Date.UTC(2026, 6, 18, utcHour, 0, 0));
-const winter = (utcHour: number) => new Date(Date.UTC(2026, 0, 15, utcHour, 0, 0));
+// Bogota is UTC-5 year-round (no DST). Bogota hour H = UTC H+5.
+const bog = (h: number, m = 0) => new Date(Date.UTC(2026, 6, 18, h + 5, m, 0));
+const N = 3; // batchesNeeded (e.g. 70 companies / 25 per batch -> 3 batches = one rotation)
 
-describe('shouldRunAt (default 9-19 America/New_York hourly)', () => {
-  it('runs 9am-7pm EDT in summer', () => {
-    expect(shouldRunAt(summer(13), DEFAULT_SCHEDULE)).toBe(true); // 9am EDT
-    expect(shouldRunAt(summer(23), DEFAULT_SCHEDULE)).toBe(true); // 7pm EDT
-    expect(shouldRunAt(summer(12), DEFAULT_SCHEDULE)).toBe(false); // 8am EDT
-    expect(shouldRunAt(summer(0), DEFAULT_SCHEDULE)).toBe(false); // 8pm EDT
+describe('shouldRunAt — bursts (default [7,17] Bogota, every 15m)', () => {
+  it('runs the first N ticks of each burst, then idles', () => {
+    expect(shouldRunAt(bog(7, 0), DEFAULT_SCHEDULE, N)).toBe(true);
+    expect(shouldRunAt(bog(7, 15), DEFAULT_SCHEDULE, N)).toBe(true);
+    expect(shouldRunAt(bog(7, 30), DEFAULT_SCHEDULE, N)).toBe(true);
+    expect(shouldRunAt(bog(7, 45), DEFAULT_SCHEDULE, N)).toBe(false); // 4th tick, > N
+    expect(shouldRunAt(bog(17, 0), DEFAULT_SCHEDULE, N)).toBe(true); // afternoon burst
+    expect(shouldRunAt(bog(17, 30), DEFAULT_SCHEDULE, N)).toBe(true);
   });
 
-  it('is DST-proof: same ET window in winter (EST)', () => {
-    expect(shouldRunAt(winter(14), DEFAULT_SCHEDULE)).toBe(true); // 9am EST
-    expect(shouldRunAt(winter(0), DEFAULT_SCHEDULE)).toBe(true); // 7pm EST (midnight UTC)
-    expect(shouldRunAt(winter(13), DEFAULT_SCHEDULE)).toBe(false); // 8am EST
+  it('does not run outside a burst or off the batch grid', () => {
+    expect(shouldRunAt(bog(6, 45), DEFAULT_SCHEDULE, N)).toBe(false);
+    expect(shouldRunAt(bog(8, 0), DEFAULT_SCHEDULE, N)).toBe(false);
+    expect(shouldRunAt(bog(12, 15), DEFAULT_SCHEDULE, N)).toBe(false);
+    expect(shouldRunAt(bog(7, 7), DEFAULT_SCHEDULE, N)).toBe(false); // not a 15m multiple
   });
 
-  it('honors every_hours cadence anchored at start_hour', () => {
-    const cfg = { ...DEFAULT_SCHEDULE, every_hours: 3 }; // 9, 12, 15, 18 ET
-    expect(shouldRunAt(summer(13), cfg)).toBe(true); // 9am
-    expect(shouldRunAt(summer(14), cfg)).toBe(false); // 10am
-    expect(shouldRunAt(summer(16), cfg)).toBe(true); // 12pm
-    expect(shouldRunAt(summer(22), cfg)).toBe(true); // 6pm
-    expect(shouldRunAt(summer(23), cfg)).toBe(false); // 7pm (not on the 3h grid)
-  });
-
-  it('supports other timezones', () => {
-    const bogota = { ...DEFAULT_SCHEDULE, timezone: 'America/Bogota' }; // UTC-5 year-round
-    expect(shouldRunAt(summer(14), bogota)).toBe(true); // 9am Bogota
-    expect(shouldRunAt(summer(13), bogota)).toBe(false); // 8am Bogota
+  it('batchesNeeded scales the burst length', () => {
+    expect(shouldRunAt(bog(7, 45), DEFAULT_SCHEDULE, 4)).toBe(true); // 4th tick now covered
+    expect(shouldRunAt(bog(7, 15), DEFAULT_SCHEDULE, 1)).toBe(false); // only the :00 tick
+    expect(shouldRunAt(bog(7, 0), DEFAULT_SCHEDULE, 0)).toBe(false); // no companies -> never
   });
 });
 
 describe('normalizeSchedule', () => {
-  it('falls back to defaults on garbage', () => {
+  it('falls back to defaults on garbage and on the legacy window shape', () => {
     expect(normalizeSchedule(null)).toEqual(DEFAULT_SCHEDULE);
-    expect(normalizeSchedule({ every_hours: 99, start_hour: -1, end_hour: 99, timezone: 'Mars/Olympus' }))
-      .toEqual(DEFAULT_SCHEDULE);
+    // legacy shape (every_hours/start/end) has no burst_hours -> defaults, tz kept if valid
+    expect(normalizeSchedule({ every_hours: 3, start_hour: 9, end_hour: 19, timezone: 'America/New_York' }))
+      .toEqual({ ...DEFAULT_SCHEDULE, timezone: 'America/New_York' });
   });
 
-  it('keeps valid values and clamps end below start TO start', () => {
-    expect(normalizeSchedule({ every_hours: 2, start_hour: 8, end_hour: 6, timezone: 'UTC' }))
-      .toEqual({ every_hours: 2, start_hour: 8, end_hour: 8, timezone: 'UTC' });
+  it('dedups + sorts + range-filters burst hours; clamps the interval', () => {
+    expect(normalizeSchedule({ burst_hours: [17, 7, 7, 25, -1], batch_every_min: 30, timezone: 'UTC' }))
+      .toEqual({ burst_hours: [7, 17], batch_every_min: 30, timezone: 'UTC' });
+    expect(normalizeSchedule({ burst_hours: [6], batch_every_min: 999, timezone: 'UTC' }).batch_every_min)
+      .toBe(DEFAULT_SCHEDULE.batch_every_min);
   });
 });
 
 describe('nextRunAfter', () => {
-  it('finds the next active top-of-hour', () => {
-    const at = new Date(Date.UTC(2026, 6, 18, 2, 30, 0)); // 10:30pm EDT July 17
-    const next = nextRunAfter(at, DEFAULT_SCHEDULE);
-    expect(next?.toISOString()).toBe('2026-07-18T13:00:00.000Z'); // 9am EDT
+  it('finds the next burst start', () => {
+    expect(nextRunAfter(bog(6, 40), DEFAULT_SCHEDULE, N)?.toISOString()).toBe(bog(7, 0).toISOString());
   });
-
-  it('returns the following hour inside the window', () => {
-    const at = new Date(Date.UTC(2026, 6, 18, 15, 10, 0)); // 11:10am EDT
-    expect(nextRunAfter(at, DEFAULT_SCHEDULE)?.toISOString()).toBe('2026-07-18T16:00:00.000Z'); // 12pm EDT
+  it('advances within a burst', () => {
+    expect(nextRunAfter(bog(7, 2), DEFAULT_SCHEDULE, N)?.toISOString()).toBe(bog(7, 15).toISOString());
+  });
+  it('jumps to the afternoon burst once the morning one is done', () => {
+    expect(nextRunAfter(bog(7, 50), DEFAULT_SCHEDULE, N)?.toISOString()).toBe(bog(17, 0).toISOString());
   });
 });
 
-describe('hourIn', () => {
-  it('maps midnight correctly (hour 24 -> 0)', () => {
-    expect(hourIn('UTC', new Date(Date.UTC(2026, 6, 18, 0, 5, 0)))).toBe(0);
+describe('minuteOfDay', () => {
+  it('maps a UTC instant to the timezone minute-of-day', () => {
+    expect(minuteOfDay('America/Bogota', bog(7, 15))).toBe(7 * 60 + 15);
+    expect(minuteOfDay('UTC', new Date(Date.UTC(2026, 6, 18, 0, 5, 0)))).toBe(5);
   });
 });
