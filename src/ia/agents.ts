@@ -20,6 +20,7 @@ export async function enricher(
   env: Env, job: Job, ruleTexts: EnrichedTexts, doFetch: Fetcher = fetch,
 ): Promise<GeminiResult<EnrichedTexts>> {
   return callGemini<EnrichedTexts>(env, {
+    models: ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'],
     temperature: 0.4,
     instruction:
       'You are the enricher of a job-discovery engine. Improve the wording of three short ' +
@@ -72,6 +73,7 @@ export async function cvSelector(
     .map((b) => `${b.id} [${b.section}${b.skcat ? '/' + b.skcat : ''}] tags:${b.tags} :: ${b.text.slice(0, 140)}`)
     .join('\n');
   return callGemini<Selection>(env, {
+    models: ['gemini-3.5-flash', 'gemini-3.1-flash-lite'],
     temperature: 0.3,
     instruction:
       'You are the cv_selector. Choose the most relevant block IDs for this job, prioritizing what ' +
@@ -107,6 +109,7 @@ export async function cvVerifier(
   env: Env, job: Job, renderedBody: string, doFetch: Fetcher = fetch,
 ): Promise<GeminiResult<VerifierNotes>> {
   return callGemini<VerifierNotes>(env, {
+    models: ['gemini-3.5-flash', 'gemini-2.5-flash'],
     temperature: 0,
     instruction:
       'You are the cv_verifier (temperature 0). Compare the rendered CV against the job. ' +

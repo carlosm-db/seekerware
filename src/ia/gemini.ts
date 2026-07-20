@@ -5,7 +5,7 @@
 
 import type { Env } from '../types';
 
-const MODELS = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'];
+const DEFAULT_MODELS = ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'];
 const BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -15,6 +15,8 @@ export interface GeminiCall {
   input: string;
   responseSchema: object;
   temperature?: number;
+  /** Ordered model list to try (primary first, then fallbacks). Defaults to DEFAULT_MODELS. */
+  models?: string[];
 }
 
 export interface GeminiResult<T> {
@@ -45,7 +47,7 @@ export async function callGemini<T>(
   let calls = 0;
   let lastError = '';
 
-  for (const model of MODELS) {
+  for (const model of call.models ?? DEFAULT_MODELS) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       calls++;
       try {
