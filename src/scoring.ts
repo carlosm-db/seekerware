@@ -14,9 +14,6 @@ export interface Keyword {
   lang?: 'es';
   /** Pair id linking the EN/ES twins of one concept (console matrix, 2026-07-18). Matching ignores it. */
   pair?: string;
-  /** Display-only: the concept reads the SAME word in both languages (e.g. sql), so it is
-   * stored as ONE entry (storing it twice would double-count). Matching ignores it. */
-  same?: true;
 }
 
 export interface Gate {
