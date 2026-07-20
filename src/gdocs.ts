@@ -45,9 +45,11 @@ export async function copyTemplate(
 ): Promise<{ id: string; url: string }> {
   if (!env.CV_TEMPLATE_DOC_ID) throw new Error('CV_TEMPLATE_DOC_ID not configured');
   if (!env.DRIVE_FOLDER_ID) throw new Error('DRIVE_FOLDER_ID not configured');
+  // Doc lands in archive/ alongside the exported PDF (owner: "todo a archive").
+  const archiveId = await ensureArchiveFolder(env, token, doFetch);
   const res = await gapi(token, doFetch,
     `https://www.googleapis.com/drive/v3/files/${env.CV_TEMPLATE_DOC_ID}/copy?supportsAllDrives=true`,
-    { method: 'POST', body: JSON.stringify({ name, parents: [env.DRIVE_FOLDER_ID] }) },
+    { method: 'POST', body: JSON.stringify({ name, parents: [archiveId] }) },
   );
   const body = (await res.json()) as { id: string };
   return { id: body.id, url: `https://docs.google.com/document/d/${body.id}/edit` };

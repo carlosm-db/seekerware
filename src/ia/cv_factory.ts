@@ -83,6 +83,16 @@ interface BlockRow {
   status: string;
 }
 
+/** Bogotá/COT timestamp for CV file names, e.g. "2026-07-20 1435 COT". */
+function cotStamp(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const g = (t: string): string => parts.find((p) => p.type === t)?.value ?? '';
+  return `${g('year')}-${g('month')}-${g('day')} ${g('hour')}${g('minute')} COT`;
+}
+
 export async function generateCv(
   env: Env,
   job: Job & { url_hash: string; track: string | null },
@@ -155,8 +165,8 @@ export async function generateCv(
     //    + skills-by-category + responsibilities per role) with EXACT block text
     //    -> CLEAN PDF -> tweaks appendix. docTokens (read above) == the copy's tokens.
     await onProgress?.('Crear Doc + rellenar');
-    const today = new Date().toISOString().slice(0, 10);
-    const name = `${sample ? 'SAMPLE — ' : ''}CV — ${job.company} — ${job.title.slice(0, 60)} — ${today}`;
+    const stamp = cotStamp(); // Bogotá/COT time in the file name (Doc + PDF share it)
+    const name = `${sample ? 'SAMPLE — ' : ''}CV — ${job.company} — ${job.title.slice(0, 60)} — ${stamp}`;
     const doc = await copyTemplate(env, token, name, doFetch);
 
     // Private contact profile (empty when unset -> slot resolves to '', never a
@@ -171,7 +181,6 @@ export async function generateCv(
     await replacePlaceholders(token, doc.id, fill.map, doFetch);
 
     await onProgress?.('Exportar PDF + archivar');
-    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').slice(0, 12);
     const pdfId = await exportAndArchivePdf(env, token, doc.id, `${stamp} — ${job.company} — generated.pdf`, doFetch);
     // The Doc stays CLEAN — the verifier tweaks + selection rationale live only in
     // the cvs table / console (/cvs), never appended into the CV (they contaminated it).

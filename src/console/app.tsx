@@ -14,7 +14,7 @@ import {
 } from './matrix';
 import { connectors } from '../connectors';
 import { parseAtsUrl } from '../connectors/common';
-import type { Ats, Company } from '../types';
+import type { Ats, Company, Verdict } from '../types';
 import { CATEGORIES, type Category, type ScoreResult } from '../scoring';
 
 // Client island for the Prepare modal (INFORMATIONAL only): intercepts the Prepare form,
@@ -73,7 +73,18 @@ export function consoleApp(): App {
 
   // ---------- helpers ----------
   const now = () => new Date().toISOString();
-  const fmt = (iso: string | null | undefined) => (iso ? iso.slice(5, 16).replace('T', ' ') : '—');
+  // Show UTC (as stored) with Bogotá/COT in parentheses — the owner operates in COT (UTC−5).
+  const fmt = (iso: string | null | undefined) => {
+    if (!iso) return '—';
+    const utc = iso.slice(5, 16).replace('T', ' '); // MM-DD HH:MM (UTC, as stored)
+    let cot = '';
+    try {
+      cot = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).format(new Date(iso));
+    } catch { /* invalid date → UTC only */ }
+    return cot ? `${utc} UTC (${cot} COT)` : `${utc} UTC`;
+  };
 
   // Pagination: 30/page. Query with `LIMIT PAGE+1 OFFSET pg*PAGE`, then if
   // more than PAGE rows came back there's a next page (drop the extra row).
@@ -318,6 +329,35 @@ export function consoleApp(): App {
     return c.json(row ? JSON.parse(row.value) : { plan: [], current: 0, qdetail: null, done: false });
   });
 
+  // Send (or resend) the job to Telegram on demand — the SAME notify action, rebuilt from
+  // stored fields (no AI re-run): the pipeline's formatJobMessage + kitButtons + sendTelegram.
+  app.post('/jobs/:hash/telegram', async (c) => {
+    const hash = c.req.param('hash');
+    const j = await c.env.DB.prepare(
+      'SELECT j.*, c.name company FROM jobs j JOIN companies c ON c.id = j.company_id WHERE j.url_hash = ?',
+    ).bind(hash).first<Record<string, string | number | null>>();
+    if (!j) return c.notFound();
+    const { formatJobMessage, ruleBasedTexts, sendTelegram } = await import('../notify');
+    const { kitButtons } = await import('../tg');
+    let gap = '—';
+    try { gap = ruleBasedTexts(JSON.parse(String(j.score_breakdown ?? '{}')) as ScoreResult).gapToAddress; } catch { /* keep '—' */ }
+    const posted = j.posted_at ?? j.first_seen;
+    const ageDays = posted ? Math.max(0, (Date.now() - Date.parse(String(posted))) / 86400000) : 0;
+    const msg = formatJobMessage({
+      job: {
+        id: String(j.ext_id ?? ''), company: String(j.company), title: String(j.title),
+        location: String(j.location ?? ''), url: String(j.url), description: '',
+        posted_at: null, ats: (j.ats ?? 'greenhouse') as Ats, raw: null,
+      },
+      verdict: (j.verdict ?? 'Skip') as Verdict, track: String(j.track ?? '—'),
+      score: Number(j.score ?? 0), ageDays,
+      whyItFits: String(j.why_it_fits ?? 'general profile match'),
+      gapToAddress: gap, positioningLead: String(j.positioning_lead ?? ''), ruleBased: false,
+    });
+    const sent = await sendTelegram(c.env, msg, fetch, kitButtons(hash));
+    return c.redirect(`/jobs/${hash}?m=${encodeURIComponent(sent.ok ? 'enviado a Telegram' : `Telegram falló: ${sent.error ?? 'error'}`)}`);
+  });
+
   // ---------- Jobs ----------
   app.get('/jobs', async (c) => {
     const q = c.req.query();
@@ -447,30 +487,17 @@ export function consoleApp(): App {
             <div><span class="k">Status:</span><span class={`s-${j.status}`}>● {j.status}</span></div>
           </div>
           <div class="actions mt-1">
-            <a class="btnlike" href={String(j.url)} target="_blank" rel="noreferrer">Open job ↗</a>
-            <form class="inline" method="post" action={`/jobs/${hash}/prepare`} data-prepare>
+            <a class="btnlike" href={String(j.url)} target="_blank" rel="noreferrer">Open Job ↗</a>
+            <form class="inline" method="post" action="/triage">
               <input type="hidden" name="hash" value={hash} />
-              <button type="submit" class={currentStage === 'prepared' ? 'primary' : ''}>Prepare</button>
+              <input type="hidden" name="stage" value="dismissed" />
+              <button type="submit" class={currentStage === 'dismissed' ? 'primary' : ''}>Dismiss</button>
             </form>
-            {(['applied|I applied ✓', 'dismissed|Dismiss'] as const).map((x) => {
-              const [stage, label] = x.split('|');
-              return (
-                <form class="inline" method="post" action="/triage">
-                  <input type="hidden" name="hash" value={hash} />
-                  <input type="hidden" name="stage" value={stage} />
-                  <button type="submit" class={stage === currentStage ? 'primary' : ''}>{label}</button>
-                </form>
-              );
-            })}
+            <form class="inline" method="post" action={`/jobs/${hash}/telegram`}>
+              <input type="hidden" name="hash" value={hash} />
+              <button type="submit">Telegram</button>
+            </form>
           </div>
-          <div id="prep-modal" class="modal-backdrop" hidden>
-            <div class="modal" role="dialog" aria-label="Preparing">
-              <h3>Preparando kit + CV…</h3>
-              <ol id="prep-steps" class="steps"></ol>
-              <p class="muted sm">Puede tardar un momento; no cierres esta pestaña.</p>
-            </div>
-          </div>
-          <script dangerouslySetInnerHTML={{ __html: prepJs }} />
         </div>
         {j.why_it_fits ? (
           <div class="card">
@@ -481,14 +508,31 @@ export function consoleApp(): App {
         <div class="card">
           <h2>Application kit</h2>
           <div class="actions">
+            <form class="inline" method="post" action={`/jobs/${hash}/prepare`} data-prepare>
+              <input type="hidden" name="hash" value={hash} />
+              <button type="submit" class={currentStage === 'prepared' ? 'primary' : ''}>Prepare</button>
+            </form>
             {hasKit ? (
               <form class="inline" method="post" action={`/jobs/${hash}/polish`}>
                 <button type="submit">✨ Polish answers</button>
               </form>
             ) : null}
-            {j.cv_doc_url ? <a class="btnlike" href={String(j.cv_doc_url)} target="_blank" rel="noreferrer">CV Doc ↗</a>
-              : j.cv_pending ? <span class="muted">CV build failed — retrying next burst</span> : null}
+            {j.cv_pdf_key ? <a class="btnlike" href={`https://drive.google.com/file/d/${String(j.cv_pdf_key)}/view`} target="_blank" rel="noreferrer">CV ↗ (PDF)</a>
+              : j.cv_pending ? <span class="muted">CV en cola — se arma en ~15 min</span> : null}
+            <form class="inline" method="post" action="/triage">
+              <input type="hidden" name="hash" value={hash} />
+              <input type="hidden" name="stage" value="applied" />
+              <button type="submit" class={currentStage === 'applied' ? 'primary' : ''}>I applied ✓</button>
+            </form>
           </div>
+          <div id="prep-modal" class="modal-backdrop" hidden>
+            <div class="modal" role="dialog" aria-label="Preparing">
+              <h3>Preparando kit + CV…</h3>
+              <ol id="prep-steps" class="steps"></ol>
+              <p class="muted sm">Puede tardar un momento; no cierres esta pestaña.</p>
+            </div>
+          </div>
+          <script dangerouslySetInnerHTML={{ __html: prepJs }} />
           {hasKit ? (
             <div class="mt-1">
               {formDetectable ? (
@@ -2026,7 +2070,7 @@ export function consoleApp(): App {
           </select>
           <button type="submit" class="primary">Save schedule</button>
           <span class="muted">
-            last run {lastRun} UTC · next {next ? fmt(next.toISOString()) : '—'} UTC ·
+            last run {lastRun} · next {next ? fmt(next.toISOString()) : '—'} ·
             {' '}covers {activeCompanies} companies in {batchesNeeded} batch(es)/burst
           </span>
         </form>
