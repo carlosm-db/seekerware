@@ -129,6 +129,7 @@ export async function polishAnswers(
  */
 export async function prepareJob(
   env: Env, urlHash: string, doFetch: Fetcher = fetch,
+  onProgress?: (step: string) => void | Promise<void>,
 ): Promise<{ ok: boolean; kit: KitResult; cv: { ok: boolean; doc_url?: string; error?: string }; error?: string }> {
   const nowIso = new Date().toISOString();
   await env.DB.batch([
@@ -140,7 +141,13 @@ export async function prepareJob(
       .bind(urlHash, nowIso, 'user', 'stage:prepared', 'prepare (kit + CV)'),
   ]);
 
+  await onProgress?.('Revisando preguntas del formulario…');
   const kit = await buildKit(env, urlHash, doFetch);
+  // Real question-review state (detected = matched + red). This is the part the popup must
+  // surface — not just "agents running". No new work: read from the KitResult buildKit returns.
+  await onProgress?.(kit.detectable
+    ? `${kit.matched + kit.red} preguntas · ${kit.matched} con respuesta · ${kit.red} 🔴 · ${kit.eeoc} EEOC`
+    : 'Formulario no legible por API — se abre a mano');
 
   const j = await env.DB.prepare(
     `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, c.name company
@@ -154,7 +161,7 @@ export async function prepareJob(
       location: String(j.location ?? ''), url: String(j.url), description: String(j.description_text ?? ''),
       posted_at: null, ats: (j.ats ?? 'greenhouse') as Ats, raw: null,
       url_hash: String(j.url_hash), track: j.track ?? null,
-    }, 'en', false, doFetch);
+    }, 'en', false, doFetch, onProgress);
     cv = { ok: fx.ok, doc_url: fx.doc_url, error: fx.error };
     // Fallback: a failed on-the-spot build re-queues for the next burst's CV factory.
     if (!fx.ok) await env.DB.prepare('UPDATE jobs SET cv_pending = 1 WHERE url_hash = ?').bind(urlHash).run();

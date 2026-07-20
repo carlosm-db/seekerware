@@ -17,6 +17,53 @@ import { parseAtsUrl } from '../connectors/common';
 import type { Ats, Company } from '../types';
 import { CATEGORIES, type Category, type ScoreResult } from '../scoring';
 
+// Client island for the Prepare modal (INFORMATIONAL only): intercepts the Prepare form,
+// POSTs with x-progress:1 (server runs prepareJob BLOCKING in-request and writes each step
+// to the config KV), polls prepare-progress, renders the full step list live, redirects on
+// done. No-JS falls back to the plain blocking form POST. It changes nothing about Prepare.
+const prepJs = `
+(function () {
+  var form = document.querySelector('form[data-prepare]');
+  if (!form) return;
+  var modal = document.getElementById('prep-modal');
+  var stepsEl = document.getElementById('prep-steps');
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var hash = form.querySelector('input[name=hash]').value;
+    modal.hidden = false;
+    var tries = 0;
+    function render(steps, done) {
+      stepsEl.innerHTML = (steps || []).map(function (s, i) {
+        var last = i === steps.length - 1;
+        var mark = (done || !last) ? '\\u2713' : '<span class="spin"></span>';
+        return '<li>' + mark + ' ' + s + '</li>';
+      }).join('');
+    }
+    fetch('/jobs/' + hash + '/prepare', { method: 'POST', headers: { 'x-progress': '1' } }).catch(function () {});
+    function poll() {
+      if (++tries > 120) { stepsEl.innerHTML += '<li class="muted">Sigue trabajando — refresca en un momento.</li>'; return; }
+      fetch('/jobs/' + hash + '/prepare-progress', { headers: { accept: 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (p) {
+          render(p.steps, !!p.done);
+          if (p.done) {
+            if (p.error) {
+              stepsEl.innerHTML += '<li class="warn">\\u2717 ' + p.error + '</li>';
+              setTimeout(function () { location.href = '/jobs/' + hash + '?m=' + encodeURIComponent('prepare failed: ' + p.error); }, 2500);
+            } else {
+              location.href = '/jobs/' + hash + '?m=' + encodeURIComponent(p.msg || 'prepared');
+            }
+            return;
+          }
+          setTimeout(poll, 1000);
+        })
+        .catch(function () { setTimeout(poll, 1500); });
+    }
+    setTimeout(poll, 500);
+  });
+})();
+`;
+
 type App = Hono<{ Bindings: ConsoleEnv }>;
 
 export function consoleApp(): App {
@@ -201,15 +248,8 @@ export function consoleApp(): App {
     const action = String(b.stage ?? '');
     const ts = now();
     if (!hash || !action) return c.redirect('/?m=invalid action');
-    if (action === 'prepared') {
-      // Prepare = "get me ready to apply": build the kit (Q&A) AND the CV on the spot.
-      const { prepareJob } = await import('../kit/kit');
-      const r = await prepareJob(c.env, hash);
-      const msg = r.ok
-        ? `prepared: kit ready${r.cv?.ok ? ' + CV built' : r.cv?.error ? ` · CV retry queued (${r.cv.error})` : ''}`
-        : `prepare failed: ${r.error ?? 'unknown'}`;
-      return c.redirect(`/jobs/${hash}?m=${encodeURIComponent(msg)}`);
-    }
+    // 'prepared' has its own route (/jobs/:hash/prepare) — it builds kit + CV (blocking)
+    // and reports progress. /triage only moves the stage for applied/dismissed/etc.
     const appliedAt = action === 'applied' ? ts : null;
     await c.env.DB.prepare(
       `INSERT INTO applications (url_hash, stage, applied_at, updated_at) VALUES (?, ?, ?, ?)
@@ -217,6 +257,47 @@ export function consoleApp(): App {
     ).bind(hash, action, appliedAt, ts, action, appliedAt, ts).run();
     await jobEvent(c.env, hash, `stage:${action}`);
     return c.redirect(`/jobs/${hash}?m=${encodeURIComponent(action)}`);
+  });
+
+  // Prepare = build the kit (Q&A) AND the CV, ON THE SPOT and BLOCKING (owner's settled
+  // decision — never waitUntil; the request stays alive until the PDF finishes). The work
+  // runs IN the request; when called with x-progress it also streams step-by-step state to
+  // the config KV (read by /prepare-progress) so the console modal can inform live.
+  app.post('/jobs/:hash/prepare', async (c) => {
+    const hash = c.req.param('hash');
+    const { prepareJob } = await import('../kit/kit');
+    const doneMsg = (r: Awaited<ReturnType<typeof prepareJob>>) => (r.ok
+      ? `prepared: kit ready${r.cv?.ok ? ' + CV built' : r.cv?.error ? ` · CV retry queued (${r.cv.error})` : ''}`
+      : `prepare failed: ${r.error ?? 'unknown'}`);
+
+    if (c.req.header('x-progress') === '1') {
+      const key = `prepare_progress:${hash}`;
+      const steps: string[] = [];
+      const write = (extra: Record<string, unknown>) => c.env.DB.prepare(
+        'INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      ).bind(key, JSON.stringify({ steps, ...extra })).run();
+      await write({ done: false });
+      try {
+        const r = await prepareJob(c.env, hash, fetch, async (step) => { steps.push(step); await write({ done: false }); });
+        steps.push('Listo');
+        await write({ done: true, msg: doneMsg(r), doc_url: r.cv?.doc_url ?? null });
+        return c.json({ ok: true });
+      } catch (e) {
+        await write({ done: true, error: e instanceof Error ? e.message : 'prepare failed' });
+        return c.json({ ok: false });
+      }
+    }
+
+    // No-JS fallback: run synchronously and redirect (exactly the prior behavior).
+    const r = await prepareJob(c.env, hash);
+    return c.redirect(`/jobs/${hash}?m=${encodeURIComponent(doneMsg(r))}`);
+  });
+
+  // Progress poll for the Prepare modal (JS path).
+  app.get('/jobs/:hash/prepare-progress', async (c) => {
+    const row = await c.env.DB.prepare('SELECT value FROM config WHERE key = ?')
+      .bind(`prepare_progress:${c.req.param('hash')}`).first<{ value: string }>();
+    return c.json(row ? JSON.parse(row.value) : { steps: [], done: false });
   });
 
   // ---------- Jobs ----------
@@ -349,7 +430,11 @@ export function consoleApp(): App {
           </div>
           <div class="actions mt-1">
             <a class="btnlike" href={String(j.url)} target="_blank" rel="noreferrer">Open job ↗</a>
-            {(['prepared|Prepare', 'applied|I applied ✓', 'dismissed|Dismiss'] as const).map((x) => {
+            <form class="inline" method="post" action={`/jobs/${hash}/prepare`} data-prepare>
+              <input type="hidden" name="hash" value={hash} />
+              <button type="submit" class={currentStage === 'prepared' ? 'primary' : ''}>Prepare</button>
+            </form>
+            {(['applied|I applied ✓', 'dismissed|Dismiss'] as const).map((x) => {
               const [stage, label] = x.split('|');
               return (
                 <form class="inline" method="post" action="/triage">
@@ -360,6 +445,14 @@ export function consoleApp(): App {
               );
             })}
           </div>
+          <div id="prep-modal" class="modal-backdrop" hidden>
+            <div class="modal" role="dialog" aria-label="Preparing">
+              <h3>Preparando kit + CV…</h3>
+              <ol id="prep-steps" class="steps"></ol>
+              <p class="muted sm">Puede tardar; no cierres esta pestaña. (El submit está siempre en tus manos.)</p>
+            </div>
+          </div>
+          <script dangerouslySetInnerHTML={{ __html: prepJs }} />
         </div>
         {j.why_it_fits ? (
           <div class="card">
@@ -1644,7 +1737,7 @@ export function consoleApp(): App {
     ));
   });
 
-  // (CV is built by Prepare — /jobs/:hash/prepare via /triage — on the spot; the
+  // (CV is built by Prepare — POST /jobs/:hash/prepare, blocking, on the spot; the
   // cron CV-factory only retries failed builds via cv_pending. No manual queue route.)
 
   // ---------- Applications (step 8: kit queue + Q&A) ----------
