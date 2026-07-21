@@ -1187,8 +1187,6 @@ export function consoleApp(): App {
     ).results;
     const capped = rows.length > 300;
     if (capped) rows.pop();
-    const daysIn = (iso: string | number | null | undefined) =>
-      iso ? Math.floor((Date.now() - new Date(String(iso)).getTime()) / 86400000) : 0;
 
     return page(c, 'Tracker', (
       <>
@@ -1207,7 +1205,7 @@ export function consoleApp(): App {
                   <div class="b-row">
                     <div class="b-text">
                       <a href={`/jobs/${r.url_hash}`}><strong>{r.title}</strong></a>
-                      <div class="muted">{r.company} · <span class="chip">{r.track}</span> · {daysIn(r.updated_at)}d in stage</div>
+                      <div class="muted">{r.company} · <span class="chip">{r.track}</span> · desde {r.updated_at ? String(r.updated_at).slice(0, 10) : '—'}</div>
                       {r.notes ? <div class="muted">📝 {String(r.notes).slice(0, 80)}</div> : null}
                     </div>
                     <form method="post" action="/tracker/update" class="inline">
