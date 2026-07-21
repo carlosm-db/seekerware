@@ -1050,10 +1050,9 @@ export function consoleApp(): App {
           </form>
         </div>
 
-        <div class="card">
-          <h2>Keyword impact &amp; recommendations <span class="muted">(last {sample.length} jobs)</span></h2>
-          <p class="muted my-1">How often each favor-keyword matched and how many of those jobs survived — the signal behind the scores.</p>
-          <div class="matrix-groups">
+        <h2 class="mt-3">Keyword impact &amp; recommendations <span class="muted">(last {sample.length} jobs)</span></h2>
+        <p class="muted mb-2">How often each favor-keyword matched and how many of those jobs survived — the signal behind the scores.</p>
+        <div class="matrix-groups">
             <details class="rc" open>
               <summary class="rc-head"><span class="caret" /><span class="rc-title">Impact</span><span class="rc-sub">favor keywords by matches</span><span class="rc-meta">{topImpact.length}</span></summary>
               <div class="rc-body">
@@ -1102,7 +1101,6 @@ export function consoleApp(): App {
               </div>
             </details>
           </div>
-        </div>
 
         <script dangerouslySetInnerHTML={{ __html: `
 (() => {
