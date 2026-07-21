@@ -2008,91 +2008,96 @@ export function consoleApp(): App {
 
     return page(c, 'Intelligence', (
       <>
-        <div class="card">
-          <h2>ML — keyword intelligence</h2>
-          <p class="muted my-1">The job market is an attention market — the edge is knowing which words employers reward. This reads your Blocks Bank (your CV) and the newest {sample.length} scored jobs: it surfaces vocabulary you have but haven't calibrated, and shows which calibrated words are actually pulling weight. Suggestions only — you approve, nothing auto-applies.</p>
-
-          <h3 class="mt-2">Suggested keywords <span class="muted">— in your profile, not yet calibrated ({mined.length})</span></h3>
-          {mined.length === 0 ? <p class="muted">nothing new — every recurring profile word is already calibrated</p> : (
-            <div class="table-wrap"><table>
-              <tr><th>keyword</th><th>in blocks</th><th>add as</th></tr>
-              {mined.map((m) => (
-                <tr>
-                  <td>{m.term}</td>
-                  <td class="muted">{m.blocks}</td>
-                  <td>
-                    <form method="post" action="/calibration/word-add" class="actions">
-                      <input type="hidden" name="term_en" value={m.term} />
-                      <input type="hidden" name="term_es" value={m.term} />
-                      <input type="hidden" name="dir" value="favor" />
-                      <input type="hidden" name="back" value="/intelligence" />
-                      <select name="category" aria-label="category">
-                        {MATRIX_CATEGORIES.filter((cat) => cat !== 'location').map((cat) => <option value={cat}>{MATRIX_LABELS[cat][0]}</option>)}
-                      </select>
-                      <select name="weight" aria-label="strength">
-                        <option value="1">+1</option>
-                        <option value="2" selected>+2</option>
-                        <option value="3">+3</option>
-                      </select>
-                      <button type="submit" class="primary">Add</button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </table></div>
-          )}
-
-          <div class="matrix-groups mt-2">
-            <details class="rc">
-              <summary class="rc-head"><span class="caret" /><span class="rc-title">Keyword impact</span><span class="rc-sub">favor keywords by matches</span><span class="rc-meta">{topImpact.length}</span></summary>
-              <div class="rc-body">
-                <div class="table-wrap"><table>
-                  <tr><th>keyword</th><th>category</th><th>matches</th><th>in survivors</th><th>survivor rate</th></tr>
-                  {topImpact.map(([term, e]) => (
-                    <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.hits}</td><td>{e.surv}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
-                  ))}
-                </table></div>
-              </div>
-            </details>
-            <details class="rc">
-              <summary class="rc-head"><span class="caret" /><span class="rc-title">Strong signals</span><span class="rc-sub">≥3 matches, ≥50% in survivors</span><span class="rc-meta">{strong.length}</span></summary>
-              <div class="rc-body">
-                {strong.length === 0 ? <p class="muted">none yet in the sample</p> : (
-                  <div class="table-wrap"><table>
-                    <tr><th>keyword</th><th>category</th><th>survivors / matches</th><th>rate</th></tr>
-                    {strong.map(([term, e]) => (
-                      <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.surv} / {e.hits}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
+        <h2>ML — keyword intelligence</h2>
+        <p class="muted my-1">The job market is an attention market — the edge is knowing which words employers reward. This reads your Blocks Bank (your CV) and the newest {sample.length} scored jobs: it surfaces vocabulary you have but haven't calibrated, and shows which calibrated words are actually pulling weight. Suggestions only — you approve, nothing auto-applies.</p>
+        <div class="matrix-groups mt-2">
+          <details class="rc" open>
+            <summary class="rc-head"><span class="caret" /><span class="rc-title">Suggested keywords</span><span class="rc-sub">in your profile, not yet calibrated</span><span class="rc-meta">{mined.length}</span></summary>
+            <div class="rc-body">
+              {mined.length === 0 ? <p class="muted">nothing new — every recurring profile word is already calibrated</p> : (
+                <>
+                  <div class="table-wrap"><table class="kwadd">
+                    <tr><th>In blocks</th><th>English</th><th>Español</th><th>Category</th><th>Strength</th><th /></tr>
+                    {mined.map((m, i) => (
+                      <tr>
+                        <td class="muted">{m.blocks}
+                          <form id={`sk${i}`} method="post" action="/calibration/word-add">
+                            <input type="hidden" name="dir" value="favor" />
+                            <input type="hidden" name="back" value="/intelligence" />
+                          </form>
+                        </td>
+                        <td><input form={`sk${i}`} type="text" name="term_en" required value={m.term} aria-label="English" /></td>
+                        <td><input form={`sk${i}`} type="text" name="term_es" required value={m.term} aria-label="Español" /></td>
+                        <td>
+                          <select form={`sk${i}`} name="category" aria-label="category">
+                            {MATRIX_CATEGORIES.filter((cat) => cat !== 'location').map((cat) => <option value={cat}>{MATRIX_LABELS[cat][0]}</option>)}
+                          </select>
+                        </td>
+                        <td>
+                          <select form={`sk${i}`} name="weight" aria-label="strength">
+                            <option value="1">+1</option>
+                            <option value="2" selected>+2</option>
+                            <option value="3">+3</option>
+                          </select>
+                        </td>
+                        <td><button form={`sk${i}`} type="submit" class="primary">Add</button></td>
+                      </tr>
                     ))}
                   </table></div>
-                )}
-              </div>
-            </details>
-            <details class="rc">
-              <summary class="rc-head"><span class="caret" /><span class="rc-title">Dead keywords</span><span class="rc-sub">favor words with 0 matches — consider removing</span><span class="rc-meta">{dead.length}</span></summary>
-              <div class="rc-body">
-                {dead.length === 0 ? <p class="muted">none — every favor keyword matched at least once</p> : (
-                  <div class="table-wrap"><table>
-                    <tr><th>keyword</th><th>category</th></tr>
-                    {dead.map((d) => <tr><td>{d.en}</td><td class="muted">{d.cat}</td></tr>)}
-                  </table></div>
-                )}
-                <p class="muted mt-1">Favor keywords only, over the newest {sample.length} jobs. Against-words and location gates aren't measured here.</p>
-              </div>
-            </details>
-            <details class="rc">
-              <summary class="rc-head"><span class="caret" /><span class="rc-title">Near-miss</span><span class="rc-sub">Skipped jobs closest to the bar</span><span class="rc-meta">{topNear.length}</span></summary>
-              <div class="rc-body">
-                {topNear.length === 0 ? <p class="muted">no near-misses in the sample</p> : topNear.map((n) => (
-                  <div class="bullet">
-                    <a href={`/jobs/${n.hash}`}>{n.title}</a> @ {n.company} · <strong>{n.score}</strong>
-                    <div class="muted">{n.reason}</div>
-                  </div>
+                  <p class="muted mt-1">English is pre-filled from your profile; edit <em>Español</em> when the word translates (e.g. <code>banking</code> → <code>banca</code>). Leave them identical for language-neutral terms (<code>sql</code>, <code>python</code>). Both languages are stored.</p>
+                </>
+              )}
+            </div>
+          </details>
+          <details class="rc">
+            <summary class="rc-head"><span class="caret" /><span class="rc-title">Keyword impact</span><span class="rc-sub">favor keywords by matches</span><span class="rc-meta">{topImpact.length}</span></summary>
+            <div class="rc-body">
+              <div class="table-wrap"><table>
+                <tr><th>keyword</th><th>category</th><th>matches</th><th>in survivors</th><th>survivor rate</th></tr>
+                {topImpact.map(([term, e]) => (
+                  <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.hits}</td><td>{e.surv}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
                 ))}
-              </div>
-            </details>
-          </div>
-          <p class="muted mt-2">The miner reads your Blocks Bank now; as your applied / dismissed history grows it will weight by that too. A statistical decision model (log-odds over outcomes) is the documented next step — not built yet.</p>
+              </table></div>
+            </div>
+          </details>
+          <details class="rc">
+            <summary class="rc-head"><span class="caret" /><span class="rc-title">Strong signals</span><span class="rc-sub">≥3 matches, ≥50% in survivors</span><span class="rc-meta">{strong.length}</span></summary>
+            <div class="rc-body">
+              {strong.length === 0 ? <p class="muted">none yet in the sample</p> : (
+                <div class="table-wrap"><table>
+                  <tr><th>keyword</th><th>category</th><th>survivors / matches</th><th>rate</th></tr>
+                  {strong.map(([term, e]) => (
+                    <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.surv} / {e.hits}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
+                  ))}
+                </table></div>
+              )}
+            </div>
+          </details>
+          <details class="rc">
+            <summary class="rc-head"><span class="caret" /><span class="rc-title">Dead keywords</span><span class="rc-sub">favor words with 0 matches — consider removing</span><span class="rc-meta">{dead.length}</span></summary>
+            <div class="rc-body">
+              {dead.length === 0 ? <p class="muted">none — every favor keyword matched at least once</p> : (
+                <div class="table-wrap"><table>
+                  <tr><th>keyword</th><th>category</th></tr>
+                  {dead.map((d) => <tr><td>{d.en}</td><td class="muted">{d.cat}</td></tr>)}
+                </table></div>
+              )}
+              <p class="muted mt-1">Favor keywords only, over the newest {sample.length} jobs. Against-words and location gates aren't measured here.</p>
+            </div>
+          </details>
+          <details class="rc">
+            <summary class="rc-head"><span class="caret" /><span class="rc-title">Near-miss</span><span class="rc-sub">Skipped jobs closest to the bar</span><span class="rc-meta">{topNear.length}</span></summary>
+            <div class="rc-body">
+              {topNear.length === 0 ? <p class="muted">no near-misses in the sample</p> : topNear.map((n) => (
+                <div class="bullet">
+                  <a href={`/jobs/${n.hash}`}>{n.title}</a> @ {n.company} · <strong>{n.score}</strong>
+                  <div class="muted">{n.reason}</div>
+                </div>
+              ))}
+            </div>
+          </details>
         </div>
+        <p class="muted mt-2">The miner reads your Blocks Bank now; as your applied / dismissed history grows it will weight by that too. A statistical decision model (log-odds over outcomes) is the documented next step — not built yet.</p>
         <div class="card">
           <h2>IA — live enrichment pipeline</h2>
           <div class="kv">

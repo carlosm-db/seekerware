@@ -199,6 +199,8 @@ textarea { width:100%; font-family:ui-monospace, monospace; font-size:13px; min-
 .field { display:block; margin-bottom:10px }
 .field label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px }
 .field select, .field input, .field textarea { width:100% }
+/* keyword-miner "Suggested keywords" add table: text inputs fill their column */
+.kwadd td { vertical-align:middle } .kwadd input[type=text] { width:100% }
 
 /* ---- responsive grids: single column on phone, multi on desktop ---- */
 .statgrid, .cardgrid { display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:16px }
