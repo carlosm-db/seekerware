@@ -1052,30 +1052,56 @@ export function consoleApp(): App {
 
         <div class="card">
           <h2>Keyword impact &amp; recommendations <span class="muted">(last {sample.length} jobs)</span></h2>
-          <p class="muted my-1">How often each favor-keyword matched, and how many of those jobs survived — the signal behind the scores. Prune dead words, trust strong ones.</p>
-          <div class="table-wrap"><table>
-            <tr><th>keyword</th><th>category</th><th>matches</th><th>in survivors</th><th>survivor rate</th></tr>
-            {topImpact.map(([term, e]) => (
-              <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.hits}</td><td>{e.surv}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
-            ))}
-          </table></div>
-          <p class="mt-2"><strong>Strong signals</strong> <span class="muted">(≥3 matches, ≥50% in survivors)</span></p>
-          {strong.length === 0 ? <p class="muted">none yet in the sample</p> : (
-            <div class="actions">{strong.map(([term, e]) => <span class="chip">{term} · {e.surv}/{e.hits}</span>)}</div>
-          )}
-          <p class="mt-2"><strong>Dead keywords</strong> <span class="muted">(favor words with 0 matches in the sample — consider removing)</span></p>
-          {dead.length === 0 ? <p class="muted">none — every favor keyword matched at least once</p> : (
-            <div class="actions">{dead.map((d) => <span class="chip">{d.en} <span class="muted">({d.cat})</span></span>)}</div>
-          )}
-          <p class="muted mt-1">Dead / strong use favor keywords only, over the newest 400 jobs. Against-words and location gates are not measured here.</p>
-          <h2 class="mt-2">Near-miss mining <span class="muted">({topNear.length})</span></h2>
-          <p class="muted my-1">Skipped jobs closest to the threshold — candidates for a calibration tweak.</p>
-          {topNear.length === 0 ? <p class="muted">no near-misses in the sample</p> : topNear.map((n) => (
-            <div class="bullet">
-              <a href={`/jobs/${n.hash}`}>{n.title}</a> @ {n.company} · <strong>{n.score}</strong>
-              <div class="muted">{n.reason}</div>
-            </div>
-          ))}
+          <p class="muted my-1">How often each favor-keyword matched and how many of those jobs survived — the signal behind the scores.</p>
+          <div class="matrix-groups">
+            <details class="rc" open>
+              <summary class="rc-head"><span class="caret" /><span class="rc-title">Impact</span><span class="rc-sub">favor keywords by matches</span><span class="rc-meta">{topImpact.length}</span></summary>
+              <div class="rc-body">
+                <div class="table-wrap"><table>
+                  <tr><th>keyword</th><th>category</th><th>matches</th><th>in survivors</th><th>survivor rate</th></tr>
+                  {topImpact.map(([term, e]) => (
+                    <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.hits}</td><td>{e.surv}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
+                  ))}
+                </table></div>
+              </div>
+            </details>
+            <details class="rc">
+              <summary class="rc-head"><span class="caret" /><span class="rc-title">Strong signals</span><span class="rc-sub">≥3 matches, ≥50% in survivors</span><span class="rc-meta">{strong.length}</span></summary>
+              <div class="rc-body">
+                {strong.length === 0 ? <p class="muted">none yet in the sample</p> : (
+                  <div class="table-wrap"><table>
+                    <tr><th>keyword</th><th>category</th><th>survivors / matches</th><th>rate</th></tr>
+                    {strong.map(([term, e]) => (
+                      <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.surv} / {e.hits}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
+                    ))}
+                  </table></div>
+                )}
+              </div>
+            </details>
+            <details class="rc">
+              <summary class="rc-head"><span class="caret" /><span class="rc-title">Dead keywords</span><span class="rc-sub">favor words with 0 matches — consider removing</span><span class="rc-meta">{dead.length}</span></summary>
+              <div class="rc-body">
+                {dead.length === 0 ? <p class="muted">none — every favor keyword matched at least once</p> : (
+                  <div class="table-wrap"><table>
+                    <tr><th>keyword</th><th>category</th></tr>
+                    {dead.map((d) => <tr><td>{d.en}</td><td class="muted">{d.cat}</td></tr>)}
+                  </table></div>
+                )}
+                <p class="muted mt-1">Favor keywords only, over the newest {sample.length} jobs. Against-words and location gates aren't measured here.</p>
+              </div>
+            </details>
+            <details class="rc">
+              <summary class="rc-head"><span class="caret" /><span class="rc-title">Near-miss</span><span class="rc-sub">Skipped jobs closest to the bar</span><span class="rc-meta">{topNear.length}</span></summary>
+              <div class="rc-body">
+                {topNear.length === 0 ? <p class="muted">no near-misses in the sample</p> : topNear.map((n) => (
+                  <div class="bullet">
+                    <a href={`/jobs/${n.hash}`}>{n.title}</a> @ {n.company} · <strong>{n.score}</strong>
+                    <div class="muted">{n.reason}</div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
         </div>
 
         <script dangerouslySetInnerHTML={{ __html: `
