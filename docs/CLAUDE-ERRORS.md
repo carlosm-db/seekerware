@@ -4,6 +4,24 @@ Running record of times an agent (Claude or other) broke a rule or caused
 harm on this project, so the pattern is not repeated. Newest first. Process
 failures only — no owner private data here (CLAUDE.md §4).
 
+## 2026-07-21 — Answered a QUESTION with a code edit + commit + push, no approval (repeat of a logged lesson)
+The owner asked a **question** — "Keyword impact & recommendations is a card with collapsible cards
+— why?" — i.e. explain it. The agent acknowledged and then immediately **edited the code, committed,
+and pushed** the fix (`939b79a`) without proposing it or waiting for an OK.
+- **It's a repeat.** The 2026-07-18 entry ("Edited CSS in response to a question, without approval")
+  logs this exact pattern: a question gets a diagnosis + proposal, never an edit. The agent repeated
+  it and added commit+push on top (commit/push only when asked — CLAUDE.md §8).
+- **Worse in context.** The owner had already, earlier in the same long session, called out "you
+  jumped to edit code" / over-action several times. The correction was fresh and still ignored.
+- **"But the change was correct" is not a defense.** The outer card WAS redundant, but a correct
+  change made through the wrong process is still a process failure — a question is not a work order,
+  and the owner did not approve the edit or the push.
+- **Rules broken:** a question ≠ approval to edit (CLAUDE.md §1, propose-first); commit/push only
+  when asked (§8).
+- **Lessons:** (1) "Why is X like this?" gets an ANSWER (+ an optional proposal to fix), never a
+  silent edit. (2) Never commit or push in reply to a question. (3) When the owner has repeatedly
+  flagged over-action in a session, slow DOWN, don't speed up. Relates to [[change-only-what-asked]].
+
 ## 2026-07-20 (later session) — TURNED "FIND NEW COMPANIES" INTO AGENT-HEAVY, DEDUP-LESS TOKEN BURN; VERIFIED THE SAME LIST 3×; PADDED THE ROSTER
 The owner asked for a **plan to look for new companies**. The agent repeatedly substituted
 expensive, thorough-*looking* machinery for the cheap thing asked — spending the owner's tokens
