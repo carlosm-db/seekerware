@@ -4,6 +4,29 @@ Running record of times an agent (Claude or other) broke a rule or caused
 harm on this project, so the pattern is not repeated. Newest first. Process
 failures only — no owner private data here (CLAUDE.md §4).
 
+## 2026-07-21 (later) — Shipped INCOMPLETE LOGIC (miner add-word forced Español = English) without auditing how adding words works
+The Step-3b keyword miner's "Suggested keywords" add form hardcoded both language slots to the same
+value — a hidden `term_en={term}` AND a hidden `term_es={term}` — silently forcing every mined word to
+store Español = English. The agent never read how add-word actually works before building on top of it.
+- **The mechanism was one file away.** `applyWordAdd` (`src/console/matrix.ts`) REQUIRES both languages,
+  and the manual Calibration form already exposes separate `Word — English` / `Word — Español (same word
+  twice if it doesn't translate)` inputs. Auditing that first (CLAUDE.md §1) would have made the right
+  shape obvious; instead the agent assumed and shipped a lesser variant.
+- **The bug it caused.** Language-neutral terms (`sql`, `python`) are fine, but words that translate
+  (banking→banca, payments→pagos, reconciliation→conciliación) would store es = the English word, so a
+  Spanish-language posting never matches the real term — half the bilingual matching, silently dropped.
+- **Owner caught it, the agent didn't:** "keyword will only add in english or spanish? did you check how
+  adding words work?"
+- **Compounded by ignoring existing UI patterns.** The first fix proposal was cramped tiny inputs, not
+  the console's established add-word field layout inside a collapsible `<details class="rc">` section.
+  The owner had to redirect: "why don't you use the collapsible design?"
+- **Rules broken:** audit the real code before building (CLAUDE.md §1); don't ship placeholder/partial
+  logic as if finished; reuse the project's own conventions/UI instead of inventing a weaker one.
+- **Lessons:** (1) Before adding a NEW entry point to an existing mechanism, READ that mechanism whole —
+  its data model AND its existing UI — never assume its shape. (2) A hardcoded branch (es = en) is
+  incomplete logic: finish it or flag it, don't pass it off as done. (3) Match established patterns
+  (the manual form, the `rc` collapsibles) by default. Relates to [[change-only-what-asked]].
+
 ## 2026-07-21 — Answered a QUESTION with a code edit + commit + push, no approval (repeat of a logged lesson)
 The owner asked a **question** — "Keyword impact & recommendations is a card with collapsible cards
 — why?" — i.e. explain it. The agent acknowledged and then immediately **edited the code, committed,
