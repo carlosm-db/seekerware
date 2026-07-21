@@ -76,22 +76,30 @@ export async function openRun(env: Env, trigger: 'cron' | 'manual', nowIso: stri
   ).results;
   if (stuck.length) {
     const ids = stuck.map((r) => r.id);
+    const ph = ids.map(() => '?').join(',');
     await env.DB.prepare(
-      `UPDATE runs SET status = 'crashed', finished_at = ? WHERE id IN (${ids.map(() => '?').join(',')})`,
+      `UPDATE runs SET status = 'crashed', finished_at = ? WHERE id IN (${ph})`,
     ).bind(nowIso, ...ids).run();
-    // Attribute the last breadcrumb to the run it belongs to: a permanent, queryable crash record
-    // (which company/connector it died on; the ts separates a hang from a fast CPU death).
-    const cp = await env.DB.prepare("SELECT value FROM config WHERE key = 'run_checkpoint'").first<{ value: string }>();
-    if (cp) {
+    // Each crashed run kept its OWN breadcrumb (run_step:<id>), untouched by later runs. Turn each
+    // into a permanent run_crash event (which company/connector it died on; the ts separates a hang
+    // from a fast CPU death), then delete the key.
+    const keys = ids.map((id) => `run_step:${id}`);
+    const crumbs = (
+      await env.DB.prepare(`SELECT key, value FROM config WHERE key IN (${keys.map(() => '?').join(',')})`)
+        .bind(...keys).all<{ key: string; value: string }>()
+    ).results;
+    for (const row of crumbs) {
       try {
-        const c = JSON.parse(cp.value) as { run_id?: number; company?: string; ats?: string; i?: number; total?: number; ts?: string };
-        if (typeof c.run_id === 'number' && ids.includes(c.run_id)) {
-          await env.DB.prepare(
-            'INSERT INTO events (run_id, ts, type, severity, company_id, url_hash, detail) VALUES (?,?,?,?,?,?,?)',
-          ).bind(c.run_id, nowIso, 'run_crash', 'error', null, null,
-            `died at ${c.company ?? '?'} (${c.ats ?? '?'}) ${c.i ?? '?'}/${c.total ?? '?'} @ ${c.ts ?? '?'}`).run();
-        }
-      } catch { /* checkpoint unparseable — skip the attribution */ }
+        const c = JSON.parse(row.value) as { run_id?: number; company?: string; ats?: string; i?: number; total?: number; ts?: string };
+        await env.DB.prepare(
+          'INSERT INTO events (run_id, ts, type, severity, company_id, url_hash, detail) VALUES (?,?,?,?,?,?,?)',
+        ).bind(c.run_id ?? null, nowIso, 'run_crash', 'error', null, null,
+          `died at ${c.company ?? '?'} (${c.ats ?? '?'}) ${c.i ?? '?'}/${c.total ?? '?'} @ ${c.ts ?? '?'}`).run();
+      } catch { /* unparseable — skip this one */ }
+    }
+    if (crumbs.length) {
+      await env.DB.prepare(`DELETE FROM config WHERE key IN (${crumbs.map(() => '?').join(',')})`)
+        .bind(...crumbs.map((r) => r.key)).run();
     }
   }
   const row = await env.DB.prepare('INSERT INTO runs (started_at, trigger) VALUES (?, ?) RETURNING id')
@@ -111,8 +119,11 @@ export async function writeCheckpoint(
   cp: { run_id: number; i: number; total: number; company: string; ats: string; ts: string },
 ): Promise<void> {
   try {
-    await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('run_checkpoint', ?)")
-      .bind(JSON.stringify(cp)).run();
+    // Per-run key: each run owns its trail, so a dead run's breadcrumb is never overwritten by a
+    // later run (the shared-key v1 lost it within seconds). flush() deletes it on a clean finish;
+    // openRun reads + deletes it when it marks the run crashed.
+    await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('run_step:' || ?, ?)")
+      .bind(cp.run_id, JSON.stringify(cp)).run();
   } catch { /* never fail a run over a breadcrumb */ }
 }
 
@@ -232,6 +243,11 @@ export class RunBatch {
         ).bind(runId, n.url_hash ?? null, n.kind, nowIso, n.status, n.tg_message_id ?? null, n.error ?? null),
       );
     }
+    // Reaching flush() = this run finished (ok/partial/fail), not a hard kill: drop its own
+    // breadcrumb. Only a killed run leaves run_step:<id> behind for openRun's sweep to record.
+    this.statements.push(
+      this.env.DB.prepare("DELETE FROM config WHERE key = 'run_step:' || ?").bind(runId),
+    );
     // 1) Run the run's work and accumulate the exact D1 accounting from its metas
     if (this.statements.length) {
       const results = await this.env.DB.batch(this.statements);

@@ -2171,7 +2171,9 @@ export function consoleApp(): App {
     // Live breadcrumb of where the pipeline is/was (written per company by runPipeline). Reveals a
     // crashed run's death point at a glance; the run_crash event records it permanently.
     let checkpointLine: string | null = null;
-    const cpRaw = (await c.env.DB.prepare("SELECT value FROM config WHERE key='run_checkpoint'").first<{ value: string }>())?.value;
+    const cpRaw = (await c.env.DB.prepare(
+      "SELECT value FROM config WHERE key LIKE 'run_step:%' ORDER BY CAST(substr(key,10) AS INTEGER) DESC LIMIT 1",
+    ).first<{ value: string }>())?.value;
     if (cpRaw) {
       try {
         const cp = JSON.parse(cpRaw) as { run_id: number; i: number; total: number; company: string; ats: string; ts: string };
