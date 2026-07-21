@@ -837,6 +837,50 @@ export function consoleApp(): App {
     const freshness = rows.find((r) => r.key === 'FRESHNESS_MAX_DAYS')?.value ?? '3';
     const cfg = await loadLive(c.env);
     const matrix = buildMatrix(cfg);
+    // Keyword impact & recommendations: scan the newest 400 stored breakdowns (bounded CPU).
+    // Moved here from /intelligence — this is calibration input, not AI telemetry.
+    const sample = (
+      await c.env.DB.prepare(
+        `SELECT j.url_hash, j.title, j.verdict, j.score, j.score_breakdown, c.name company
+         FROM jobs j JOIN companies c ON c.id = j.company_id
+         ORDER BY j.first_seen DESC LIMIT 400`,
+      ).all<Record<string, string | number | null>>()
+    ).results;
+    const impact = new Map<string, { hits: number; surv: number; cat: string }>();
+    const nearMiss: Array<{ hash: string; title: string; company: string; score: number; reason: string }> = [];
+    for (const r of sample) {
+      let b: ScoreResult | null = null;
+      try { b = JSON.parse(String(r.score_breakdown ?? '')) as ScoreResult; } catch { continue; }
+      if (!b?.breakdown) continue;
+      const surv = r.verdict !== 'Skip';
+      for (const [cat, cb] of Object.entries(b.breakdown)) {
+        for (const m of cb.matches) {
+          if (m.weight <= 0) continue;
+          const e = impact.get(m.term) ?? { hits: 0, surv: 0, cat };
+          e.hits++; if (surv) e.surv++;
+          impact.set(m.term, e);
+        }
+      }
+      if (r.verdict === 'Skip' && b.near_miss_reason) {
+        nearMiss.push({ hash: String(r.url_hash), title: String(r.title), company: String(r.company), score: Number(r.score), reason: b.near_miss_reason });
+      }
+    }
+    const topImpact = [...impact.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 20);
+    nearMiss.sort((a, b) => b.score - a.score);
+    const topNear = nearMiss.slice(0, 15);
+    // dead = configured FAVOR keywords with zero matches in the sample (favor-only;
+    // gates/location carry no hit data here). "dead" = unmatched in the window, not forever.
+    const dead: Array<{ en: string; cat: Category }> = [];
+    for (const cat of CATEGORIES) {
+      for (const k of cfg.keywords[cat]) {
+        if (k.weight > 0 && !impact.has(k.en)) dead.push({ en: k.en, cat });
+      }
+    }
+    // strong = frequently matched AND mostly landing in survivors.
+    const strong = [...impact.entries()]
+      .filter(([, e]) => e.hits >= 3 && e.surv / e.hits >= 0.5)
+      .sort((a, b) => (b[1].surv / b[1].hits) - (a[1].surv / a[1].hits))
+      .slice(0, 12);
     const trackLabel = (t: string) => TRACK_LABELS[t] ?? t;
     const pathClass = (t: string) => `path p-${Math.max(0, cfg.tracks.findIndex((x) => x.id === t))}`;
     const isLocation = (cat: MatrixCategory) => cat === 'location';
@@ -988,6 +1032,34 @@ export function consoleApp(): App {
             </div>
             <p class="muted mt-2">Location words REQUIRE a path (they are the track gates; weight does not apply there).</p>
           </form>
+        </div>
+
+        <div class="card">
+          <h2>Keyword impact &amp; recommendations <span class="muted">(last {sample.length} jobs)</span></h2>
+          <p class="muted my-1">How often each favor-keyword matched, and how many of those jobs survived — the signal behind the scores. Prune dead words, trust strong ones.</p>
+          <div class="table-wrap"><table>
+            <tr><th>keyword</th><th>category</th><th>matches</th><th>in survivors</th><th>survivor rate</th></tr>
+            {topImpact.map(([term, e]) => (
+              <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.hits}</td><td>{e.surv}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
+            ))}
+          </table></div>
+          <p class="mt-2"><strong>Strong signals</strong> <span class="muted">(≥3 matches, ≥50% in survivors)</span></p>
+          {strong.length === 0 ? <p class="muted">none yet in the sample</p> : (
+            <div class="actions">{strong.map(([term, e]) => <span class="chip">{term} · {e.surv}/{e.hits}</span>)}</div>
+          )}
+          <p class="mt-2"><strong>Dead keywords</strong> <span class="muted">(favor words with 0 matches in the sample — consider removing)</span></p>
+          {dead.length === 0 ? <p class="muted">none — every favor keyword matched at least once</p> : (
+            <div class="actions">{dead.map((d) => <span class="chip">{d.en} <span class="muted">({d.cat})</span></span>)}</div>
+          )}
+          <p class="muted mt-1">Dead / strong use favor keywords only, over the newest 400 jobs. Against-words and location gates are not measured here.</p>
+          <h2 class="mt-2">Near-miss mining <span class="muted">({topNear.length})</span></h2>
+          <p class="muted my-1">Skipped jobs closest to the threshold — candidates for a calibration tweak.</p>
+          {topNear.length === 0 ? <p class="muted">no near-misses in the sample</p> : topNear.map((n) => (
+            <div class="bullet">
+              <a href={`/jobs/${n.hash}`}>{n.title}</a> @ {n.company} · <strong>{n.score}</strong>
+              <div class="muted">{n.reason}</div>
+            </div>
+          ))}
         </div>
 
         <script dangerouslySetInnerHTML={{ __html: `
@@ -1909,7 +1981,7 @@ export function consoleApp(): App {
     return c.redirect('/qa?m=answer deleted');
   });
 
-  // ---------- Intelligence (enrichment pipeline visibility + ML tooling over stored data) ----------
+  // ---------- Intelligence (IA: live enrichment pipeline · ML: roadmap card, not built) ----------
   app.get('/intelligence', async (c) => {
     const enabled = !!c.env.GEMINI_API_KEY;
     const calls = await c.env.DB.prepare(
@@ -1922,56 +1994,39 @@ export function consoleApp(): App {
     ).results;
     const aiEvents = (
       await c.env.DB.prepare(
-        "SELECT ts, type, severity, url_hash, detail FROM events WHERE type IN ('gemini_fail','gemini_fallback') ORDER BY id DESC LIMIT 20",
+        "SELECT ts, type, severity, url_hash, detail FROM events WHERE type IN ('gemini_fail','gemini_fallback','gdocs_fail') ORDER BY id DESC LIMIT 20",
       ).all<Record<string, string | null>>()
     ).results;
 
-    // ML tooling over the last 400 stored breakdowns (bounded CPU).
-    const rows = (
-      await c.env.DB.prepare(
-        `SELECT j.url_hash, j.title, j.verdict, j.score, j.score_breakdown, c.name company
-         FROM jobs j JOIN companies c ON c.id = j.company_id
-         ORDER BY j.first_seen DESC LIMIT 400`,
-      ).all<Record<string, string | number | null>>()
-    ).results;
-    const impact = new Map<string, { hits: number; surv: number; cat: string }>();
-    const nearMiss: Array<{ hash: string; title: string; company: string; score: number; reason: string }> = [];
-    for (const r of rows) {
-      let b: ScoreResult | null = null;
-      try { b = JSON.parse(String(r.score_breakdown ?? '')) as ScoreResult; } catch { continue; }
-      if (!b?.breakdown) continue;
-      const surv = r.verdict !== 'Skip';
-      for (const [cat, cb] of Object.entries(b.breakdown)) {
-        for (const m of cb.matches) {
-          if (m.weight <= 0) continue;
-          const e = impact.get(m.term) ?? { hits: 0, surv: 0, cat };
-          e.hits++; if (surv) e.surv++;
-          impact.set(m.term, e);
-        }
-      }
-      if (r.verdict === 'Skip' && b.near_miss_reason) {
-        nearMiss.push({ hash: String(r.url_hash), title: String(r.title), company: String(r.company), score: Number(r.score), reason: b.near_miss_reason });
-      }
-    }
-    const topImpact = [...impact.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 20);
-    nearMiss.sort((a, b) => b.score - a.score);
-    const topNear = nearMiss.slice(0, 15);
+    const IA_PIPELINE: Array<{ agent: string; when: string; model: string; out: string }> = [
+      { agent: 'job_analyst', when: 'at notify', model: 'gemini-3.5-flash → 3.1-flash-lite', out: 'structured role analysis (must-haves, seniority, positioning) — understood once, reused downstream' },
+      { agent: 'enricher', when: 'at notify', model: 'gemini-3.1-flash-lite → 2.5-flash-lite', out: 'why-it-fits / gap / positioning wording — never verdicts or gates' },
+      { agent: 'cv_selector', when: 'CV build (Prepare)', model: 'gemini-3.5-flash → 3.1-flash-lite', out: 'selects approved block IDs only (enum-forced — no free text)' },
+      { agent: 'cv_verifier', when: 'CV build (Prepare)', model: 'gemini-3.5-flash → 2.5-flash', out: '0-5 tweak suggestions — never edits the CV' },
+      { agent: 'answer_polisher', when: 'on demand (kit)', model: 'gemini-3.5-flash → 3.1-flash-lite', out: 'tailors approved Q&A answers — suggestions only, EEOC never touched' },
+    ];
 
     return page(c, 'Intelligence', (
       <>
         <div class="card">
-          <h2>Enrichment pipeline</h2>
+          <h2>IA — live enrichment pipeline</h2>
           <div class="kv">
             <div><span class="k">Enricher:</span>{enabled ? <span class="ok">enabled</span> : <span class="warn">disabled (no GEMINI_API_KEY)</span>}</div>
             <div><span class="k">Gemini calls (7d):</span>{calls?.n ?? 0}</div>
           </div>
+          <p class="muted mt-2">Five Gemini agents, all forced-JSON with retry + model fallback. They enrich and assist — they never set verdicts, gates, or write CV / answer content.</p>
+          <div class="table-wrap"><table>
+            <tr><th>agent</th><th>runs</th><th>model (primary → fallback)</th><th>output</th></tr>
+            {IA_PIPELINE.map((a) => (
+              <tr><td>{a.agent}</td><td class="muted">{a.when}</td><td class="muted">{a.model}</td><td>{a.out}</td></tr>
+            ))}
+          </table></div>
           <p class="muted mt-2">Provenance of stored jobs — who wrote the why-it-fits / positioning text:</p>
           <div class="actions">{prov.map((p) => <span class="chip">{p.src}: {p.n}</span>)}</div>
-          <p class="muted mt-2">The enricher only improves survivor wording — it never changes verdicts or gates.</p>
         </div>
         <div class="card">
           <h2>Recent AI events</h2>
-          {aiEvents.length === 0 ? <p class="muted">no Gemini failures or fallbacks recorded</p> : (
+          {aiEvents.length === 0 ? <p class="muted">no Gemini or CV-build failures recorded</p> : (
             <div class="table-wrap"><table>
               <tr><th>when</th><th>type</th><th>job</th><th>detail</th></tr>
               {aiEvents.map((e) => (
@@ -1986,24 +2041,9 @@ export function consoleApp(): App {
           )}
         </div>
         <div class="card">
-          <h2>Keyword impact <span class="muted">(last {rows.length} jobs)</span></h2>
-          <p class="muted my-1">How often each favor-keyword matches, and in how many survivors — the signal behind the scores. Tune these in <a href="/calibration">Calibration</a>.</p>
-          <div class="table-wrap"><table>
-            <tr><th>keyword</th><th>category</th><th>matches</th><th>in survivors</th></tr>
-            {topImpact.map(([term, e]) => (
-              <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.hits}</td><td>{e.surv}</td></tr>
-            ))}
-          </table></div>
-        </div>
-        <div class="card">
-          <h2>Near-miss mining <span class="muted">({topNear.length})</span></h2>
-          <p class="muted my-1">Skipped jobs closest to the threshold — candidates for a calibration tweak.</p>
-          {topNear.length === 0 ? <p class="muted">no near-misses in the sample</p> : topNear.map((n) => (
-            <div class="bullet">
-              <a href={`/jobs/${n.hash}`}>{n.title}</a> @ {n.company} · <strong>{n.score}</strong>
-              <div class="muted">{n.reason}</div>
-            </div>
-          ))}
+          <h2>ML — role-signal model <span class="muted">(roadmap · not built)</span></h2>
+          <p class="muted my-1">The job market is an attention market — the edge is knowing which words employers reward. A future statistical model would learn that from outcomes (survivor / applied signals) and feed calibration automatically, instead of hand-tuning weights.</p>
+          <p class="muted my-1">This does not exist yet. Scoring today is 100% hand-tuned keyword weights + gates (see <a href="/calibration">Calibration</a>); the IA above is what actually runs. This card is a placeholder for the roadmap.</p>
         </div>
       </>
     ));
