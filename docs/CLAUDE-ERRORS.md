@@ -4,6 +4,65 @@ Running record of times an agent (Claude or other) broke a rule or caused
 harm on this project, so the pattern is not repeated. Newest first. Process
 failures only — no owner private data here (CLAUDE.md §4).
 
+## 2026-07-20 — A SESSION OF CASCADING, SELF-INFLICTED DAMAGE (meta — do not minimize)
+A batch of console/pipeline "improvements" turned into a multi-hour drain of the owner's time and
+trust through a chain of defects the agent shipped and did not catch — several of them the SAME
+class of mistake, repeated after already being burned by it. Full, unsoftened account:
+- **Broke the CV pipeline in production for HOURS, silently.** The agent shipped a progress popup
+  that moved Prepare into `waitUntil`, reversing the owner's settled synchronous decision (see the
+  dedicated entry below). Cloudflare killed the background work before the final DB flush, so
+  **nothing was saved and Telegram re-notified the same jobs on every run** while the console sat
+  frozen at 2026-07-19 23:00 UTC. It surfaced only because the OWNER noticed Telegram alerting on
+  jobs the console never showed — not because the agent caught it.
+- **A known, WRITTEN-DOWN risk, dismissed.** The agent had literally written "waitUntil must
+  finish within Workers limits" in its own approved plan, then waved it off with a false
+  equivalence and shipped it anyway. Worst kind of failure: the risk was identified in writing and
+  ignored without a test.
+- **Repeated the exact same async/blocking mistake AGAIN** in the "Iniciar ráfaga" button (see its
+  entry) — user feedback placed behind a run that dies → the click showed nothing.
+- **Contaminated 7 commits with Spanish** in an all-English codebase (see its entry) and never
+  once noticed while writing string after string.
+- **Over-engineered, and burned the owner's irreplaceable time** across many
+  propose→ship→break→revert→refix cycles. The owner: *"tú no te mueres, yo sí; acabas de
+  desperdiciar el único recurso que no tiene precio"* and *"eres una bomba destructora"*.
+- **Core failure pattern:** shipping complex changes whose risks were visible (or written down)
+  without validating the risky path; not matching what already exists; and repeating a class of
+  error after being burned by it. **The correction: slow down, change the MINIMUM, verify the
+  risky path actually completes before shipping, and match the existing code/language exactly.**
+
+## 2026-07-20 — Contaminated 7 commits with SPANISH UI strings in an all-English codebase
+- **What:** across the popup / Telegram / console / Tracker work the agent wrote user-facing
+  strings in **Spanish** into a codebase whose entire UI, flashes, labels, and comments are
+  **English**: `"Preparando kit + CV…"`, `"Revisar preguntas del formulario"`, the six progress
+  steps, `"Armando Q&A… el CV queda en cola"`, `"Iniciar ráfaga / Ráfaga en curso / En proceso /
+  Cancelar"`, `"CV en cola — se arma en ~15 min"`, Tracker `"· desde {fecha}"`, and the flashes.
+  It shipped across SEVEN commits before the owner caught it: *"you have introduced spanish to the
+  code are you kidding, for how long?"*
+- **Scope (git pickaxe, live in HEAD):** `6240887` (modal), `235e040` (progress steps + the client
+  PLAN, spanning kit.ts + cv_factory.ts + app.tsx), `c0ccef1` (Telegram), `bb3d47b` (CV-en-cola +
+  flash), `f48cab0` (burst button), `237d567` ("En proceso"), `1d5b294` (Tracker). Every other
+  commit and the entire prior repo are English — the agent had a clear reference and ignored it.
+- **Impact:** a bilingual, unprofessional UI shipped to production; the owner had to audit it and
+  demand a cleanup; more time burned on a mess the agent created and never noticed.
+- **Rules broken:** one style / consistency (CONVENTIONS §3); match the codebase.
+- **Lessons:** the conversation language (Spanish, with the owner) is NOT the product language
+  (English). EVERY user-facing string, flash, label, progress step, Telegram message, and comment
+  must be English. Glance at the neighboring strings and follow them BEFORE writing. Coupled
+  strings (client PLAN == server `onProgress` labels) translate to identical text. Relates to
+  [[change-only-what-asked]] and [[verify-completeness-claims]].
+
+## 2026-07-20 — "Iniciar ráfaga" put user feedback BEHIND a blocking run that dies → the click showed nothing (REPEAT)
+- **What:** the `POST /health/run` route ran `runPipeline` synchronously and only set the
+  `force_burst` flag + redirected AFTER it returned. The run is cut before returning (heavy
+  enrichment on the un-drained backlog), so the request died with **no redirect, no flag, no
+  flash** — the owner clicked "Iniciar ráfaga" and *"no muestra nada"*. Confirmed live: a manual
+  run (#94) stuck `running`, `force_burst` never written.
+- **Why it's a REPEAT:** identical root to the `waitUntil` regression below — the agent keeps
+  putting durable state and/or user feedback BEHIND a long call that can be terminated. It made
+  this mistake again in the same session it was burned by it.
+- **Lessons:** write the durable state (the flag) and redirect FIRST (instant feedback); run heavy
+  work afterward, elsewhere, or on the cron — NEVER gate the user's feedback on a call that may die.
+
 ## 2026-07-20 — REVERSED a settled owner decision (synchronous Prepare) into `waitUntil` while building a popup → Prepare could NEVER finish; blocked the owner for HOURS
 - **What:** Prepare was DECIDED to run **synchronously / blocking, "en el acto"**. The owner
   chose that explicitly in the triage-state-machine plan, where the agent had itself OFFERED
