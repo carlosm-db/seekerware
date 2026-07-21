@@ -124,9 +124,9 @@ export function consoleApp(): App {
 
   async function footer(env: ConsoleEnv): Promise<FooterStatus> {
     const r = await env.DB.prepare(
-      'SELECT finished_at, companies_ok, errors FROM runs ORDER BY id DESC LIMIT 1',
-    ).first<{ finished_at: string | null; companies_ok: number; errors: number }>();
-    return { lastRun: r?.finished_at ? fmt(r.finished_at) : null, companiesOk: r?.companies_ok ?? 0, errors: r?.errors ?? 0 };
+      'SELECT started_at, status FROM runs ORDER BY id DESC LIMIT 1',
+    ).first<{ started_at: string | null; status: string | null }>();
+    return { lastRun: r?.started_at ? fmt(r.started_at) : null, status: r?.status ?? null };
   }
 
   async function pendingTriage(env: ConsoleEnv): Promise<number> {
@@ -2009,6 +2009,11 @@ export function consoleApp(): App {
     return page(c, 'Intelligence', (
       <>
         <div class="card">
+          <h2>ML — role-signal model <span class="muted">(roadmap · not built)</span></h2>
+          <p class="muted my-1">The job market is an attention market — the edge is knowing which words employers reward. A future statistical model would learn that from outcomes (survivor / applied signals) and feed calibration automatically, instead of hand-tuning weights.</p>
+          <p class="muted my-1">This does not exist yet. Scoring today is 100% hand-tuned keyword weights + gates (see <a href="/calibration">Calibration</a>); the IA below is what actually runs. This card is a placeholder for the roadmap.</p>
+        </div>
+        <div class="card">
           <h2>IA — live enrichment pipeline</h2>
           <div class="kv">
             <div><span class="k">Enricher:</span>{enabled ? <span class="ok">enabled</span> : <span class="warn">disabled (no GEMINI_API_KEY)</span>}</div>
@@ -2039,11 +2044,6 @@ export function consoleApp(): App {
               ))}
             </table></div>
           )}
-        </div>
-        <div class="card">
-          <h2>ML — role-signal model <span class="muted">(roadmap · not built)</span></h2>
-          <p class="muted my-1">The job market is an attention market — the edge is knowing which words employers reward. A future statistical model would learn that from outcomes (survivor / applied signals) and feed calibration automatically, instead of hand-tuning weights.</p>
-          <p class="muted my-1">This does not exist yet. Scoring today is 100% hand-tuned keyword weights + gates (see <a href="/calibration">Calibration</a>); the IA above is what actually runs. This card is a placeholder for the roadmap.</p>
         </div>
       </>
     ));

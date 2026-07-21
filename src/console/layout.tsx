@@ -298,8 +298,7 @@ footer { padding:14px 16px; color:var(--muted); font-size:13px; border-top:1px s
 
 export interface FooterStatus {
   lastRun: string | null;
-  companiesOk: number;
-  errors: number;
+  status: string | null;
 }
 
 const NAV_GROUPS: Array<[string, Array<[string, string]>]> = [
@@ -361,7 +360,7 @@ export const Layout: FC<{
       </main>
       <footer>
         last run:{' '}
-        {footer.lastRun ? `${footer.lastRun} UTC · ${footer.companiesOk} companies OK · ${footer.errors} errors` : 'no runs yet'}
+        {footer.lastRun ? `${footer.lastRun} UTC · ${footer.status ?? '—'}` : 'no runs yet'}
       </footer>
     </body>
   </html>
