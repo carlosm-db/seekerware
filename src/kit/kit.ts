@@ -141,14 +141,14 @@ export async function prepareJob(
       .bind(urlHash, nowIso, 'user', 'stage:prepared', 'prepare (kit + CV)'),
   ]);
 
-  await onProgress?.('Revisar preguntas del formulario');
+  await onProgress?.('Review form questions');
   const kit = await buildKit(env, urlHash, doFetch);
   // Attach the real question-review state as the DETAIL of the SAME fixed step (detected =
   // matched + red) — the popup shows it under that step; it is not a new step. Read straight
   // from the KitResult buildKit returns (no extra work).
-  await onProgress?.('Revisar preguntas del formulario', kit.detectable
-    ? `${kit.matched + kit.red} preguntas · ${kit.matched} con respuesta · ${kit.red} 🔴 · ${kit.eeoc} EEOC`
-    : 'Formulario no legible por API — se abre a mano');
+  await onProgress?.('Review form questions', kit.detectable
+    ? `${kit.matched + kit.red} questions · ${kit.matched} answered · ${kit.red} 🔴 · ${kit.eeoc} EEOC`
+    : 'Form not API-readable — open it manually');
 
   const j = await env.DB.prepare(
     `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, c.name company

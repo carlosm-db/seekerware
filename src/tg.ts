@@ -143,7 +143,7 @@ export async function handleTelegramUpdate(
       // regression reverted in the console). Instead mark cv_pending=1 ("the order") and the
       // 15-min tick builds it reliably. The kit build is fast + safe in waitUntil. Submit stays
       // the owner's (§7.8).
-      await answerCallback(env, cb.id, 'Armando Q&A… el CV queda en cola ⏳', doFetch);
+      await answerCallback(env, cb.id, 'Building Q&A… CV queued ⏳', doFetch);
       const finish = (async () => {
         const { buildKit } = await import('./kit/kit');
         const preparedIso = new Date().toISOString();

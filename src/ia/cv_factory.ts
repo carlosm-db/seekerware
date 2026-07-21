@@ -134,7 +134,7 @@ export async function generateCv(
     //    copy; the copy shares these exact tokens, so this same read also drives
     //    the fill below — no extra subrequest vs before.
     if (!env.CV_TEMPLATE_DOC_ID) return { ok: false, gemini_calls: 0, error: 'CV_TEMPLATE_DOC_ID not configured' };
-    await onProgress?.('Leer plantilla + Blocks Bank');
+    await onProgress?.('Read template + Blocks Bank');
     const token = await googleAccessToken(env, doFetch);
     const roles = (await env.DB.prepare(
       "SELECT id, title FROM anchors WHERE kind = 'role' AND status = 'active'",
@@ -149,14 +149,14 @@ export async function generateCv(
     try { analysis = raRow?.role_analysis ? (JSON.parse(raRow.role_analysis) as RoleAnalysis) : null; } catch { analysis = null; }
 
     // 3) Selection (enum of IDs forced by schema), guided by the slot budget + role analysis
-    await onProgress?.('Seleccionar bloques (IA)');
+    await onProgress?.('Select blocks (AI)');
     const sel = await cvSelector(env, job, catalog, budget, analysis, doFetch);
     geminiCalls += sel.calls;
     if (!sel.ok || !sel.data) return { ok: false, gemini_calls: geminiCalls, error: `cv_selector: ${sel.error}` };
     const selection = sel.data;
 
     // 4) Verifier (temp 0) over the selected content
-    await onProgress?.('Verificar el CV (IA)');
+    await onProgress?.('Verify the CV (AI)');
     const ver = await cvVerifier(env, job, verifierText(selection, byId), analysis, doFetch);
     geminiCalls += ver.calls;
     const tweaks = ver.ok && ver.data ? ver.data.tweaks : [];
@@ -164,7 +164,7 @@ export async function generateCv(
     // 5) Google: copy the template -> fill every slot (contact per track + summary
     //    + skills-by-category + responsibilities per role) with EXACT block text
     //    -> CLEAN PDF -> tweaks appendix. docTokens (read above) == the copy's tokens.
-    await onProgress?.('Crear Doc + rellenar');
+    await onProgress?.('Create Doc + fill');
     const stamp = cotStamp(); // Bogotá/COT time in the file name (Doc + PDF share it)
     const name = `${sample ? 'SAMPLE — ' : ''}CV — ${job.company} — ${job.title.slice(0, 60)} — ${stamp}`;
     const doc = await copyTemplate(env, token, name, doFetch);
@@ -180,7 +180,7 @@ export async function generateCv(
     const fill = buildSlotMap(docTokens, selection, byId, roleCodes, contactPlaceholders(job.track, profile));
     await replacePlaceholders(token, doc.id, fill.map, doFetch);
 
-    await onProgress?.('Exportar PDF + archivar');
+    await onProgress?.('Export PDF + archive');
     const pdfId = await exportAndArchivePdf(env, token, doc.id, `${stamp} — ${job.company} — generated.pdf`, doFetch);
     // The Doc stays CLEAN — the verifier tweaks + selection rationale live only in
     // the cvs table / console (/cvs), never appended into the CV (they contaminated it).

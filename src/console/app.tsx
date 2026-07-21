@@ -42,7 +42,7 @@ const prepJs = `
     }
     fetch('/jobs/' + hash + '/prepare', { method: 'POST', headers: { 'x-progress': '1' } }).catch(function () {});
     function poll() {
-      if (++tries > 120) { stepsEl.innerHTML += '<li class="muted">Sigue trabajando — refresca en un momento.</li>'; return; }
+      if (++tries > 120) { stepsEl.innerHTML += '<li class="muted">Still working — refresh in a moment.</li>'; return; }
       fetch('/jobs/' + hash + '/prepare-progress', { headers: { accept: 'application/json' } })
         .then(function (r) { return r.json(); })
         .then(function (p) {
@@ -288,12 +288,12 @@ export function consoleApp(): App {
       // question-review counts attach as `qdetail` on step 0. No step appears/disappears —
       // each just goes pending → in-progress → done.
       const PLAN = [
-        'Revisar preguntas del formulario',
-        'Leer plantilla + Blocks Bank',
-        'Seleccionar bloques (IA)',
-        'Verificar el CV (IA)',
-        'Crear Doc + rellenar',
-        'Exportar PDF + archivar',
+        'Review form questions',
+        'Read template + Blocks Bank',
+        'Select blocks (AI)',
+        'Verify the CV (AI)',
+        'Create Doc + fill',
+        'Export PDF + archive',
       ];
       let current = 0;
       let qdetail: string | null = null;
@@ -355,7 +355,7 @@ export function consoleApp(): App {
       gapToAddress: gap, positioningLead: String(j.positioning_lead ?? ''), ruleBased: false,
     });
     const sent = await sendTelegram(c.env, msg, fetch, kitButtons(hash));
-    return c.redirect(`/jobs/${hash}?m=${encodeURIComponent(sent.ok ? 'enviado a Telegram' : `Telegram falló: ${sent.error ?? 'error'}`)}`);
+    return c.redirect(`/jobs/${hash}?m=${encodeURIComponent(sent.ok ? 'sent to Telegram' : `Telegram failed: ${sent.error ?? 'error'}`)}`);
   });
 
   // ---------- Jobs ----------
@@ -518,7 +518,7 @@ export function consoleApp(): App {
               </form>
             ) : null}
             {j.cv_pdf_key ? <a class="btnlike" href={`https://drive.google.com/file/d/${String(j.cv_pdf_key)}/view`} target="_blank" rel="noreferrer">CV ↗ (PDF)</a>
-              : j.cv_pending ? <span class="muted">CV en cola — se arma en ~15 min</span> : null}
+              : j.cv_pending ? <span class="muted">CV queued — builds in ~15 min</span> : null}
             <form class="inline" method="post" action="/triage">
               <input type="hidden" name="hash" value={hash} />
               <input type="hidden" name="stage" value="applied" />
@@ -527,9 +527,9 @@ export function consoleApp(): App {
           </div>
           <div id="prep-modal" class="modal-backdrop" hidden>
             <div class="modal" role="dialog" aria-label="Preparing">
-              <h3>Preparando kit + CV…</h3>
+              <h3>Preparing kit + CV…</h3>
               <ol id="prep-steps" class="steps"></ol>
-              <p class="muted sm">Puede tardar un momento; no cierres esta pestaña.</p>
+              <p class="muted sm">This can take a moment; don't close this tab.</p>
             </div>
           </div>
           <script dangerouslySetInnerHTML={{ __html: prepJs }} />
@@ -1205,7 +1205,7 @@ export function consoleApp(): App {
                   <div class="b-row">
                     <div class="b-text">
                       <a href={`/jobs/${r.url_hash}`}><strong>{r.title}</strong></a>
-                      <div class="muted">{r.company} · <span class="chip">{r.track}</span> · desde {r.updated_at ? String(r.updated_at).slice(0, 10) : '—'}</div>
+                      <div class="muted">{r.company} · <span class="chip">{r.track}</span> · since {r.updated_at ? String(r.updated_at).slice(0, 10) : '—'}</div>
                       {r.notes ? <div class="muted">📝 {String(r.notes).slice(0, 80)}</div> : null}
                     </div>
                     <form method="post" action="/tracker/update" class="inline">
@@ -2038,7 +2038,7 @@ export function consoleApp(): App {
     const batchesNeeded = Math.max(1, Math.ceil(activeCompanies / 25));
     const lastRun = runs[0]?.started_at ? fmt(String(runs[0].started_at)) : '—';
     const next = nextRunAfter(new Date(), sched, batchesNeeded);
-    // On-demand burst counter (batches still to run), set by "Iniciar ráfaga".
+    // On-demand burst counter (batches still to run), set by "Start burst".
     const forceBurst = Math.max(0, Number(
       (await c.env.DB.prepare("SELECT value FROM config WHERE key='force_burst'").first<{ value: string }>())?.value ?? '0',
     ) || 0);
@@ -2071,23 +2071,23 @@ export function consoleApp(): App {
           </span>
         </form>
         <form method="post" action="/health/run" class="card actions" data-burst>
-          <strong>Ráfaga manual</strong>
+          <strong>Manual burst</strong>
           {forceBurst > 0 ? (
             <>
-              <span>⏳ Ráfaga en curso — {forceBurst} lote(s) restante(s) · siguiente en ≤{sched.batch_every_min} min</span>
-              <button type="submit" formAction="/health/run-cancel">Cancelar</button>
+              <span>⏳ Burst in progress — {forceBurst} batch(es) left · next in ≤{sched.batch_every_min} min</span>
+              <button type="submit" formAction="/health/run-cancel">Cancel</button>
             </>
           ) : (
             <>
-              <button type="submit" class="primary">▶ Iniciar ráfaga</button>
-              <span class="muted">corre todas las empresas activas ahora, por lotes; se completa sola.</span>
+              <button type="submit" class="primary">▶ Start burst</button>
+              <span class="muted">runs all active companies now, in batches; completes on its own.</span>
             </>
           )}
         </form>
         <script dangerouslySetInnerHTML={{ __html:
           "(function(){var f=document.querySelector('form[data-burst]');if(!f)return;" +
           "f.addEventListener('submit',function(e){var b=e.submitter||f.querySelector('button[type=submit]');" +
-          "if(b){b.disabled=true;if(b.classList.contains('primary'))b.textContent='\\u23f3 En proceso\\u2026';}});})();"
+          "if(b){b.disabled=true;if(b.classList.contains('primary'))b.textContent='\\u23f3 Working\\u2026';}});})();"
         }} />
         <div class="table-wrap"><table>
           <tr><th>run</th><th>start</th><th>status</th><th class="hide-sm">ms</th><th>companies</th><th class="hide-sm">seen</th><th class="hide-sm">new</th><th>surv.</th><th>notif.</th><th class="hide-sm">closed</th><th class="hide-sm">subreq</th><th>errors</th></tr>
@@ -2130,7 +2130,7 @@ export function consoleApp(): App {
     )}`);
   });
 
-  // "Iniciar ráfaga": run batch 1 NOW (one page, foreground) + queue the rest via force_burst;
+  // "Start burst": run batch 1 NOW (one page, foreground) + queue the rest via force_burst;
   // the cron finishes the rotation over its ticks (one page each, respecting the subrequest cap).
   app.post('/health/run', async (c) => {
     const [countRow, pageRow] = await Promise.all([
@@ -2142,15 +2142,15 @@ export function consoleApp(): App {
     // Non-blocking: just QUEUE the burst (force_burst = N batches). The cron runs one page per
     // tick until it hits 0. We do NOT run the pipeline in this request — a blocking run can be
     // cut before it returns, leaving the click with no redirect/feedback. Redirect instantly;
-    // the "⏳ Ráfaga en curso" state renders on the reload.
+    // the "⏳ Burst in progress" state renders on the reload.
     await c.env.DB.prepare("INSERT INTO config (key, value) VALUES ('force_burst', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .bind(String(batchesNeeded)).run();
-    return c.redirect(`/health?m=${encodeURIComponent(`ráfaga iniciada: ${batchesNeeded} lote(s) en cola`)}`);
+    return c.redirect(`/health?m=${encodeURIComponent(`burst started: ${batchesNeeded} batch(es) queued`)}`);
   });
 
   app.post('/health/run-cancel', async (c) => {
     await c.env.DB.prepare("DELETE FROM config WHERE key='force_burst'").run();
-    return c.redirect(`/health?m=${encodeURIComponent('ráfaga cancelada')}`);
+    return c.redirect(`/health?m=${encodeURIComponent('burst canceled')}`);
   });
 
   return app;
