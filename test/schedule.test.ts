@@ -43,6 +43,10 @@ describe('normalizeSchedule', () => {
     expect(normalizeSchedule({ burst_hours: [6], batch_every_min: 999, timezone: 'UTC' }).batch_every_min)
       .toBe(DEFAULT_SCHEDULE.batch_every_min);
   });
+
+  it('accepts a 5-minute cadence (the /health dropdown now offers it)', () => {
+    expect(normalizeSchedule({ burst_hours: [7], batch_every_min: 5, timezone: 'UTC' }).batch_every_min).toBe(5);
+  });
 });
 
 describe('nextRunAfter', () => {

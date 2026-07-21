@@ -8,7 +8,7 @@
   // Dumb hourly tick, 24/7. Whether a tick RUNS is decided by the owner-editable
   // D1 config `schedule` (console /health panel) — window/cadence changes need
   // no deploy. Skipped ticks exit immediately (near-zero cost).
-  "triggers": { "crons": ["*/15 * * * *"] },
+  "triggers": { "crons": ["*/5 * * * *"] },
   "d1_databases": [
     {
       "binding": "DB",

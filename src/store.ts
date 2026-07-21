@@ -65,16 +65,55 @@ export async function getCompanyJobs(
 
 /** Opens the run row (immediate INSERT: a crash must be data, not silence) and stamps orphans. */
 export async function openRun(env: Env, trigger: 'cron' | 'manual', nowIso: string): Promise<number> {
-  await env.DB.prepare(
-    "UPDATE runs SET status = 'crashed', finished_at = ? WHERE status = 'running' AND started_at < datetime(?, '-10 minutes')",
-  )
-    .bind(nowIso, nowIso)
-    .run();
+  // Stamp orphans: a prior run still 'running' after 10 min never flushed = crashed. Compare via
+  // julianday() (it parses the ISO 'T'). A plain `started_at < datetime(?, '-10 minutes')` silently
+  // matched NOTHING — datetime() returns a SPACE-separated string and 'T' (84) > ' ' (32) in string
+  // order, so the `<` was never true (that dead sweep is why stuck 'running' rows piled up).
+  const stuck = (
+    await env.DB.prepare(
+      "SELECT id FROM runs WHERE status = 'running' AND (julianday(?) - julianday(started_at)) > 10.0/1440",
+    ).bind(nowIso).all<{ id: number }>()
+  ).results;
+  if (stuck.length) {
+    const ids = stuck.map((r) => r.id);
+    await env.DB.prepare(
+      `UPDATE runs SET status = 'crashed', finished_at = ? WHERE id IN (${ids.map(() => '?').join(',')})`,
+    ).bind(nowIso, ...ids).run();
+    // Attribute the last breadcrumb to the run it belongs to: a permanent, queryable crash record
+    // (which company/connector it died on; the ts separates a hang from a fast CPU death).
+    const cp = await env.DB.prepare("SELECT value FROM config WHERE key = 'run_checkpoint'").first<{ value: string }>();
+    if (cp) {
+      try {
+        const c = JSON.parse(cp.value) as { run_id?: number; company?: string; ats?: string; i?: number; total?: number; ts?: string };
+        if (typeof c.run_id === 'number' && ids.includes(c.run_id)) {
+          await env.DB.prepare(
+            'INSERT INTO events (run_id, ts, type, severity, company_id, url_hash, detail) VALUES (?,?,?,?,?,?,?)',
+          ).bind(c.run_id, nowIso, 'run_crash', 'error', null, null,
+            `died at ${c.company ?? '?'} (${c.ats ?? '?'}) ${c.i ?? '?'}/${c.total ?? '?'} @ ${c.ts ?? '?'}`).run();
+        }
+      } catch { /* checkpoint unparseable — skip the attribution */ }
+    }
+  }
   const row = await env.DB.prepare('INSERT INTO runs (started_at, trigger) VALUES (?, ?) RETURNING id')
     .bind(nowIso, trigger)
     .first<{ id: number }>();
   if (!row) throw new Error('could not open run row');
   return row.id;
+}
+
+/**
+ * Immediate best-effort breadcrumb of where a run is, written BEFORE each company. The buffered
+ * RunBatch flushes only at the end, so a hard-killed run would leave no trace; this survives the
+ * kill because it was already written. openRun reads it to attribute a crash to its company.
+ */
+export async function writeCheckpoint(
+  env: Env,
+  cp: { run_id: number; i: number; total: number; company: string; ats: string; ts: string },
+): Promise<void> {
+  try {
+    await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('run_checkpoint', ?)")
+      .bind(JSON.stringify(cp)).run();
+  } catch { /* never fail a run over a breadcrumb */ }
 }
 
 export interface JobInsert {

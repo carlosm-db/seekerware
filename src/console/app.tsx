@@ -2168,6 +2168,18 @@ export function consoleApp(): App {
       (await c.env.DB.prepare("SELECT value FROM config WHERE key='force_burst'").first<{ value: string }>())?.value ?? '0',
     ) || 0);
 
+    // Live breadcrumb of where the pipeline is/was (written per company by runPipeline). Reveals a
+    // crashed run's death point at a glance; the run_crash event records it permanently.
+    let checkpointLine: string | null = null;
+    const cpRaw = (await c.env.DB.prepare("SELECT value FROM config WHERE key='run_checkpoint'").first<{ value: string }>())?.value;
+    if (cpRaw) {
+      try {
+        const cp = JSON.parse(cpRaw) as { run_id: number; i: number; total: number; company: string; ats: string; ts: string };
+        const ageS = Math.max(0, Math.round((Date.now() - new Date(cp.ts).getTime()) / 1000));
+        checkpointLine = `run ${cp.run_id}: ${cp.company} (${cp.ats}) ${cp.i}/${cp.total} · ${ageS}s ago`;
+      } catch { /* ignore malformed */ }
+    }
+
     return page(c, 'Health', (
       <>
         <div class="statgrid">
@@ -2183,7 +2195,7 @@ export function consoleApp(): App {
           </label>
           <label>batch every{' '}
             <select name="batch_every_min">
-              {[15, 20, 30].map((m) => <option value={String(m)} selected={m === sched.batch_every_min}>{m}m</option>)}
+              {[5, 10, 15, 20, 30].map((m) => <option value={String(m)} selected={m === sched.batch_every_min}>{m}m</option>)}
             </select>
           </label>
           <select name="timezone">
@@ -2194,6 +2206,7 @@ export function consoleApp(): App {
             last run {lastRun} · next {next ? fmt(next.toISOString()) : '—'} ·
             {' '}covers {activeCompanies} companies in {batchesNeeded} batch(es)/burst
           </span>
+          {checkpointLine && <span class="muted">checkpoint · {checkpointLine}</span>}
         </form>
         <form method="post" action="/health/run" class="card actions" data-burst>
           <strong>Manual burst</strong>

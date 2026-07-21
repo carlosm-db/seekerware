@@ -10,7 +10,7 @@ import { checkFreshness, reliablyStale } from './freshness';
 import { formatDigest, formatJobMessage, formatMaintenance, ruleBasedTexts, sendTelegram } from './notify';
 import { generateCv } from './ia/cv_factory';
 import { RunStats, trackedFetch } from './runstats';
-import { RunBatch, getCompaniesPage, getCompanyJobs, getConfigValue, openRun, type StoredCompany } from './store';
+import { RunBatch, getCompaniesPage, getCompanyJobs, getConfigValue, openRun, writeCheckpoint, type StoredCompany } from './store';
 
 /**
  * Drains the CV queue: builds ONE queued CV (oldest cv_pending job) per call. Standalone so the
@@ -93,7 +93,14 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
     const { companies, nextCursor } = await getCompaniesPage(env, stats);
     stats.companiesTotal = companies.length;
 
-    for (const company of companies) {
+    for (let i = 0; i < companies.length; i++) {
+      const company = companies[i]!;
+      // Breadcrumb BEFORE the work: if this company hard-kills the run, openRun on the next run
+      // reads this to record where it died. Immediate write, best-effort (never fails the run).
+      await writeCheckpoint(env, {
+        run_id: runId, i: i + 1, total: companies.length,
+        company: company.name, ats: company.ats, ts: new Date().toISOString(),
+      });
       try {
         await processCompany(env, company, config, maxDays, maxNewPerRun, maxDetailPerRun, nowIso, stats, batch, doFetch);
         stats.companiesOk++;
