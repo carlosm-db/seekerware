@@ -8,7 +8,6 @@ import { loadScoringConfig } from './config-store';
 import { normalizeTitle, scoreJob, type ScoringConfig } from './scoring';
 import { checkFreshness } from './freshness';
 import { formatDigest, formatJobMessage, formatMaintenance, ruleBasedTexts, sendTelegram } from './notify';
-import { enricher, jobAnalyst, type RoleAnalysis } from './ia/agents';
 import { generateCv } from './ia/cv_factory';
 import { RunStats, trackedFetch } from './runstats';
 import { RunBatch, getCompaniesPage, getCompanyJobs, getConfigValue, openRun, type StoredCompany } from './store';
@@ -317,33 +316,11 @@ async function processCompany(
           status = 'closed';
           stats.event({ type: 'verify_dead', severity: 'info', company_id: company.id, url_hash: hash });
         } else if (alive === true) {
-          // Enricher (survivors only, TRD §4): improves the texts; never the verdict
-          let ruleBased = true;
-          if (env.GEMINI_API_KEY) {
-            // job_analyst: understand the role ONCE; feeds the enricher now and the CV agents later.
-            let analysis: RoleAnalysis | null = null;
-            const an = await jobAnalyst(env, job, doFetch);
-            stats.geminiCalls += an.calls;
-            if (an.ok && an.data) { analysis = an.data; roleAnalysis = JSON.stringify(an.data); }
-            else stats.event({ type: 'gemini_fail', severity: 'warn', url_hash: hash, detail: `job_analyst: ${an.error}` });
-
-            const enriched = await enricher(env, job, {
-              why_it_fits: texts.whyItFits, gap_to_address: texts.gapToAddress, positioning_lead: texts.positioningLead,
-            }, analysis, doFetch);
-            stats.geminiCalls += enriched.calls;
-            if (enriched.ok && enriched.data) {
-              texts.whyItFits = enriched.data.why_it_fits;
-              texts.gapToAddress = enriched.data.gap_to_address;
-              texts.positioningLead = enriched.data.positioning_lead;
-              ruleBased = false;
-              enrichedBy = enriched.modelUsed ?? 'gemini';
-              if (enriched.modelUsed !== 'gemini-3.1-flash-lite') {
-                stats.event({ type: 'gemini_fallback', severity: 'info', url_hash: hash, detail: enriched.modelUsed });
-              }
-            } else {
-              stats.event({ type: 'gemini_fail', severity: 'warn', url_hash: hash, detail: enriched.error });
-            }
-          }
+          // Enrichment (job_analyst + enricher) is intentionally OUT of the burst: 2 sequential
+          // Gemini calls per survivor inflated wall-clock and hard-killed runs before flush.
+          // The notification uses the deterministic rule-based texts; role_analysis stays null
+          // here (the CV factory handles a null analysis at Prepare — cv_factory.ts:145-149).
+          const ruleBased = true;
           const msg = formatJobMessage({
             job, verdict: result.best.verdict, track: result.best.track ?? '—',
             score: result.best.adjusted_score, ageDays: freshness.age_days,
