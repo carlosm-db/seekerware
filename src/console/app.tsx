@@ -2012,37 +2012,43 @@ export function consoleApp(): App {
           <h2>ML — keyword intelligence</h2>
           <p class="muted my-1">The job market is an attention market — the edge is knowing which words employers reward. This reads your Blocks Bank (your CV) and the newest {sample.length} scored jobs: it surfaces vocabulary you have but haven't calibrated, and shows which calibrated words are actually pulling weight. Suggestions only — you approve, nothing auto-applies.</p>
 
-          <h3 class="mt-2">Suggested keywords <span class="muted">— in your profile, not yet calibrated ({mined.length})</span></h3>
-          {mined.length === 0 ? <p class="muted">nothing new — every recurring profile word is already calibrated</p> : (
-            <div class="table-wrap"><table>
-              <tr><th>keyword</th><th>in blocks</th><th>add as</th></tr>
-              {mined.map((m) => (
-                <tr>
-                  <td>{m.term}</td>
-                  <td class="muted">{m.blocks}</td>
-                  <td>
-                    <form method="post" action="/calibration/word-add" class="actions">
-                      <input type="hidden" name="term_en" value={m.term} />
-                      <input type="hidden" name="term_es" value={m.term} />
-                      <input type="hidden" name="dir" value="favor" />
-                      <input type="hidden" name="back" value="/intelligence" />
-                      <select name="category" aria-label="category">
-                        {MATRIX_CATEGORIES.filter((cat) => cat !== 'location').map((cat) => <option value={cat}>{MATRIX_LABELS[cat][0]}</option>)}
-                      </select>
-                      <select name="weight" aria-label="strength">
-                        <option value="1">+1</option>
-                        <option value="2" selected>+2</option>
-                        <option value="3">+3</option>
-                      </select>
-                      <button type="submit" class="primary">Add</button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </table></div>
-          )}
-
           <div class="matrix-groups mt-2">
+            <details class="rc" open>
+              <summary class="rc-head"><span class="caret" /><span class="rc-title">Suggested keywords</span><span class="rc-sub">in your profile, not yet calibrated</span><span class="rc-meta">{mined.length}</span></summary>
+              <div class="rc-body">
+                {mined.length === 0 ? <p class="muted">nothing new — every recurring profile word is already calibrated</p> : (
+                  <>
+                    {mined.map((m) => (
+                      <form method="post" action="/calibration/word-add" class="mt-2">
+                        <div class="formgrid">
+                          <div class="field f-en"><label>Word — English (required)</label>
+                            <input type="text" name="term_en" required value={m.term} /></div>
+                          <div class="field f-es"><label>Word — Español (required; same word twice if it doesn’t translate)</label>
+                            <input type="text" name="term_es" required value={m.term} /></div>
+                        </div>
+                        <div class="actions">
+                          <label class="muted">Category{' '}
+                            <select name="category">
+                              {MATRIX_CATEGORIES.filter((cat) => cat !== 'location').map((cat) => <option value={cat}>{MATRIX_LABELS[cat][0]}</option>)}
+                            </select></label>
+                          <label class="muted">Strength{' '}
+                            <select name="weight">
+                              <option value="3">+3 strong</option>
+                              <option value="2" selected>+2 medium</option>
+                              <option value="1">+1 light</option>
+                            </select></label>
+                          <span class="muted">in {m.blocks} blocks</span>
+                          <input type="hidden" name="dir" value="favor" />
+                          <input type="hidden" name="back" value="/intelligence" />
+                          <button type="submit" class="primary">Add</button>
+                        </div>
+                      </form>
+                    ))}
+                    <p class="muted mt-2">Both languages are stored. English is pre-filled from your profile; edit <em>Español</em> when the word translates (e.g. <code>banking</code> → <code>banca</code>). Leave them identical for language-neutral terms (<code>sql</code>, <code>python</code>).</p>
+                  </>
+                )}
+              </div>
+            </details>
             <details class="rc">
               <summary class="rc-head"><span class="caret" /><span class="rc-title">Keyword impact</span><span class="rc-sub">favor keywords by matches</span><span class="rc-meta">{topImpact.length}</span></summary>
               <div class="rc-body">
