@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ScoringConfig } from '../src/scoring';
 import {
-  applyPairRemove, applyWordAdd, applyWordEdit, buildMatrix, type MatrixGroup,
+  applyPairRemove, applyWordAdd, applyWordEdit, buildMatrix, mineProfileKeywords, type MatrixGroup,
 } from '../src/console/matrix';
 
 /** Miniature config in the {en, es} shape (mirrors the seed structure). */
@@ -51,6 +51,28 @@ const makeCfg = (): ScoringConfig => ({
 
 const row = (rows: MatrixGroup[], cat: string) => rows.find((r) => r.category === cat)!;
 const ens = (rows: { en: string }[]) => rows.map((r) => r.en);
+
+describe('mineProfileKeywords', () => {
+  it('suggests recurring profile terms not already calibrated; excludes calibrated + stopwords; ranks by block count; bigrams work', () => {
+    const blocks = [
+      { text_en: 'Led reconciliation and forecasting for banking clients' },
+      { text_en: 'Banking reconciliation with Python and dashboards' },
+      { text_en: 'Payments and SQL for a business analyst team' },
+      { text_en: 'Forecasting dashboards for banking business intelligence' },
+      { text_en: 'Business intelligence reporting for the business analyst' },
+    ];
+    const res = mineProfileKeywords(makeCfg(), blocks);
+    const terms = res.map((r) => r.term);
+    expect(terms).toContain('banking');               // 3 blocks, not calibrated
+    expect(terms).toContain('reconciliation');        // 2 blocks
+    expect(terms).toContain('business intelligence');  // bigram, 2 blocks
+    expect(terms).not.toContain('payments');          // calibrated keyword
+    expect(terms).not.toContain('sql');               // calibrated keyword
+    expect(terms).not.toContain('business analyst');   // calibrated bigram
+    expect(terms).not.toContain('and');               // stopword
+    expect(res[0]!.term).toBe('banking');             // highest block count
+  });
+});
 
 describe('buildMatrix', () => {
   const rows = buildMatrix(makeCfg());

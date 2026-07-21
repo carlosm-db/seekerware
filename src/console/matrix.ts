@@ -5,7 +5,7 @@
 // In favor / Against, rows = English | Español | Strength | Path. Gates keep
 // owning verdicts (domain rule 2). DB-free so it can be unit-tested.
 
-import { CATEGORIES, type Category, type ScoringConfig } from '../scoring';
+import { CATEGORIES, normalizeText, type Category, type ScoringConfig } from '../scoring';
 
 export type MatrixCategory = Category | 'location';
 /** Row order per the owner's sketch: Location, Role titles, Seniority, Industry, Tools. */
@@ -111,6 +111,70 @@ export function buildMatrix(cfg: ScoringConfig): MatrixGroup[] {
     const against = sortRows(g.against);
     return { category: cat, favor, against, count: favor.length + against.length };
   });
+}
+
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'you', 'are', 'will', 'our', 'not', 'has', 'have', 'had', 'was', 'were', 'been', 'their', 'they', 'them', 'its', 'this', 'that', 'these', 'those', 'from', 'into', 'over', 'than', 'then', 'when', 'where', 'which', 'while', 'who', 'whose', 'what', 'your', 'ours', 'of', 'in', 'on', 'at', 'by', 'as', 'is', 'be', 'or', 'to', 'it', 'we', 'us', 'all', 'any', 'can', 'may', 'per', 'via', 'etc', 'job', 'jobs', 'role', 'roles', 'team', 'teams', 'work', 'working', 'experience', 'years', 'year', 'including', 'across', 'using', 'use', 'used', 'within', 'strong', 'ability', 'able', 'plus', 'new', 'high', 'level', 'skills',
+  'los', 'las', 'del', 'con', 'para', 'por', 'que', 'una', 'uno', 'unos', 'unas', 'como', 'mas', 'muy', 'sus', 'este', 'esta', 'estos', 'estas', 'entre', 'sobre', 'desde', 'hasta', 'experiencia', 'anos', 'trabajo', 'equipo', 'habilidad', 'fuerte', 'nivel', 'usando',
+]);
+
+/**
+ * Mine candidate keywords from the owner's profile (Blocks Bank text): terms that recur across
+ * blocks but are NOT already in the calibration. Unigrams + adjacent bigrams; stopwords, short
+ * tokens, and terms already calibrated (keyword or gate, either language) are dropped. Ranked by
+ * how many distinct blocks each term appears in. Suggestions only — the caller shows them for owner
+ * approval. Profile-based v1; a decision log-odds re-rank can be layered on later.
+ */
+export function mineProfileKeywords(
+  cfg: ScoringConfig,
+  blocks: Array<{ text_en?: string | null; text_es?: string | null }>,
+  limit = 15,
+): Array<{ term: string; blocks: number }> {
+  const calibrated = new Set<string>();
+  for (const cat of CATEGORIES) {
+    for (const k of cfg.keywords[cat] ?? []) {
+      calibrated.add(normalizeText(k.en));
+      if (k.es) calibrated.add(normalizeText(k.es));
+    }
+  }
+  for (const t of cfg.tracks) {
+    for (const g of t.gates) {
+      for (const list of ['require', 'reject'] as const) {
+        for (const term of g[list] ?? []) {
+          calibrated.add(normalizeText(term.en));
+          if (term.es) calibrated.add(normalizeText(term.es));
+        }
+      }
+    }
+  }
+
+  const blockCount = new Map<string, number>();
+  for (const b of blocks) {
+    const terms = new Set<string>();
+    for (const field of [b.text_en, b.text_es]) {
+      if (!field) continue;
+      const words = normalizeText(field)
+        .replace(/[^\p{L}\p{N}\s-]+/gu, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 3 && !STOPWORDS.has(w) && !/^[\d-]+$/.test(w));
+      for (let i = 0; i < words.length; i++) {
+        const w = words[i]!;
+        terms.add(w);
+        const next = words[i + 1];
+        if (next) terms.add(w + ' ' + next);
+      }
+    }
+    for (const term of terms) {
+      if (calibrated.has(term) || STOPWORDS.has(term)) continue;
+      blockCount.set(term, (blockCount.get(term) ?? 0) + 1);
+    }
+  }
+
+  return [...blockCount.entries()]
+    .filter(([, n]) => n >= 2)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([term, n]) => ({ term, blocks: n }));
 }
 
 // ---------- Mutations (draft-side; the caller persists) ----------

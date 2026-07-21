@@ -9,7 +9,7 @@ import { normalizeScoringConfig, validateScoringConfig } from '../config-store';
 import { SKCATS, newBlockId, parseBulletEdits } from './blocks-form';
 import { fmtDates, normalizeMonth, tokensOfRole, validateRoleCode } from './roles';
 import {
-  applyPairRemove, applyWordAdd, applyWordEdit, buildMatrix, MATRIX_CATEGORIES,
+  applyPairRemove, applyWordAdd, applyWordEdit, buildMatrix, MATRIX_CATEGORIES, mineProfileKeywords,
   type ConceptRow, type EditTarget, type MatrixCategory, type MatrixGroup, type RemoveTarget,
 } from './matrix';
 import { connectors } from '../connectors';
@@ -853,50 +853,6 @@ export function consoleApp(): App {
     const freshness = rows.find((r) => r.key === 'FRESHNESS_MAX_DAYS')?.value ?? '3';
     const cfg = await loadLive(c.env);
     const matrix = buildMatrix(cfg);
-    // Keyword impact & recommendations: scan the newest 400 stored breakdowns (bounded CPU).
-    // Moved here from /intelligence — this is calibration input, not AI telemetry.
-    const sample = (
-      await c.env.DB.prepare(
-        `SELECT j.url_hash, j.title, j.verdict, j.score, j.score_breakdown, c.name company
-         FROM jobs j JOIN companies c ON c.id = j.company_id
-         ORDER BY j.first_seen DESC LIMIT 400`,
-      ).all<Record<string, string | number | null>>()
-    ).results;
-    const impact = new Map<string, { hits: number; surv: number; cat: string }>();
-    const nearMiss: Array<{ hash: string; title: string; company: string; score: number; reason: string }> = [];
-    for (const r of sample) {
-      let b: ScoreResult | null = null;
-      try { b = JSON.parse(String(r.score_breakdown ?? '')) as ScoreResult; } catch { continue; }
-      if (!b?.breakdown) continue;
-      const surv = r.verdict !== 'Skip';
-      for (const [cat, cb] of Object.entries(b.breakdown)) {
-        for (const m of cb.matches) {
-          if (m.weight <= 0) continue;
-          const e = impact.get(m.term) ?? { hits: 0, surv: 0, cat };
-          e.hits++; if (surv) e.surv++;
-          impact.set(m.term, e);
-        }
-      }
-      if (r.verdict === 'Skip' && b.near_miss_reason) {
-        nearMiss.push({ hash: String(r.url_hash), title: String(r.title), company: String(r.company), score: Number(r.score), reason: b.near_miss_reason });
-      }
-    }
-    const topImpact = [...impact.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 20);
-    nearMiss.sort((a, b) => b.score - a.score);
-    const topNear = nearMiss.slice(0, 15);
-    // dead = configured FAVOR keywords with zero matches in the sample (favor-only;
-    // gates/location carry no hit data here). "dead" = unmatched in the window, not forever.
-    const dead: Array<{ en: string; cat: Category }> = [];
-    for (const cat of CATEGORIES) {
-      for (const k of cfg.keywords[cat]) {
-        if (k.weight > 0 && !impact.has(k.en)) dead.push({ en: k.en, cat });
-      }
-    }
-    // strong = frequently matched AND mostly landing in survivors.
-    const strong = [...impact.entries()]
-      .filter(([, e]) => e.hits >= 3 && e.surv / e.hits >= 0.5)
-      .sort((a, b) => (b[1].surv / b[1].hits) - (a[1].surv / a[1].hits))
-      .slice(0, 12);
     const trackLabel = (t: string) => TRACK_LABELS[t] ?? t;
     const pathClass = (t: string) => `path p-${Math.max(0, cfg.tracks.findIndex((x) => x.id === t))}`;
     const isLocation = (cat: MatrixCategory) => cat === 'location';
@@ -1050,58 +1006,6 @@ export function consoleApp(): App {
           </form>
         </div>
 
-        <h2 class="mt-3">Keyword impact &amp; recommendations <span class="muted">(last {sample.length} jobs)</span></h2>
-        <p class="muted mb-2">How often each favor-keyword matched and how many of those jobs survived — the signal behind the scores.</p>
-        <div class="matrix-groups">
-            <details class="rc" open>
-              <summary class="rc-head"><span class="caret" /><span class="rc-title">Impact</span><span class="rc-sub">favor keywords by matches</span><span class="rc-meta">{topImpact.length}</span></summary>
-              <div class="rc-body">
-                <div class="table-wrap"><table>
-                  <tr><th>keyword</th><th>category</th><th>matches</th><th>in survivors</th><th>survivor rate</th></tr>
-                  {topImpact.map(([term, e]) => (
-                    <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.hits}</td><td>{e.surv}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
-                  ))}
-                </table></div>
-              </div>
-            </details>
-            <details class="rc">
-              <summary class="rc-head"><span class="caret" /><span class="rc-title">Strong signals</span><span class="rc-sub">≥3 matches, ≥50% in survivors</span><span class="rc-meta">{strong.length}</span></summary>
-              <div class="rc-body">
-                {strong.length === 0 ? <p class="muted">none yet in the sample</p> : (
-                  <div class="table-wrap"><table>
-                    <tr><th>keyword</th><th>category</th><th>survivors / matches</th><th>rate</th></tr>
-                    {strong.map(([term, e]) => (
-                      <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.surv} / {e.hits}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
-                    ))}
-                  </table></div>
-                )}
-              </div>
-            </details>
-            <details class="rc">
-              <summary class="rc-head"><span class="caret" /><span class="rc-title">Dead keywords</span><span class="rc-sub">favor words with 0 matches — consider removing</span><span class="rc-meta">{dead.length}</span></summary>
-              <div class="rc-body">
-                {dead.length === 0 ? <p class="muted">none — every favor keyword matched at least once</p> : (
-                  <div class="table-wrap"><table>
-                    <tr><th>keyword</th><th>category</th></tr>
-                    {dead.map((d) => <tr><td>{d.en}</td><td class="muted">{d.cat}</td></tr>)}
-                  </table></div>
-                )}
-                <p class="muted mt-1">Favor keywords only, over the newest {sample.length} jobs. Against-words and location gates aren't measured here.</p>
-              </div>
-            </details>
-            <details class="rc">
-              <summary class="rc-head"><span class="caret" /><span class="rc-title">Near-miss</span><span class="rc-sub">Skipped jobs closest to the bar</span><span class="rc-meta">{topNear.length}</span></summary>
-              <div class="rc-body">
-                {topNear.length === 0 ? <p class="muted">no near-misses in the sample</p> : topNear.map((n) => (
-                  <div class="bullet">
-                    <a href={`/jobs/${n.hash}`}>{n.title}</a> @ {n.company} · <strong>{n.score}</strong>
-                    <div class="muted">{n.reason}</div>
-                  </div>
-                ))}
-              </div>
-            </details>
-          </div>
-
         <script dangerouslySetInnerHTML={{ __html: `
 (() => {
   const q = document.getElementById('calsearch-input');
@@ -1136,8 +1040,12 @@ export function consoleApp(): App {
   // The matrix maps each concept to keywords and/or gate lists (src/console/matrix.ts).
   app.post('/calibration/word-add', async (c) => {
     const b = await c.req.parseBody();
+    // Where to return: the miner (Intelligence) posts back='/intelligence' so its list refreshes;
+    // everything else lands on Calibration. Whitelisted to avoid an open redirect.
+    const back = String(b.back ?? '') === '/intelligence' ? '/intelligence' : '/calibration';
+    const done = (m: string) => c.redirect(`${back}?m=${encodeURIComponent(m)}`);
     const category = String(b.category ?? '') as MatrixCategory;
-    if (!MATRIX_CATEGORIES.includes(category)) return c.redirect('/calibration?m=invalid category');
+    if (!MATRIX_CATEGORIES.includes(category)) return done('invalid category');
     const cfg = await loadLive(c.env);
     const err = applyWordAdd(cfg, {
       en: String(b.term_en ?? ''),
@@ -1147,12 +1055,12 @@ export function consoleApp(): App {
       weight: Number(b.weight ?? 2),
       path: String(b.path ?? '') || undefined,
     });
-    if (err) return c.redirect(`/calibration?m=${encodeURIComponent(`rejected: ${err.error}`)}`);
+    if (err) return done(`rejected: ${err.error}`);
     try { validateScoringConfig(cfg); } catch (e) {
-      return c.redirect(`/calibration?m=${encodeURIComponent(`rejected: ${e instanceof Error ? e.message : 'invalid'}`)}`);
+      return done(`rejected: ${e instanceof Error ? e.message : 'invalid'}`);
     }
     await saveLive(c.env, cfg);
-    return c.redirect(`/calibration?m=${encodeURIComponent(`✓ Added "${String(b.term_en).trim().toLowerCase()}"`)}`);
+    return done(`✓ Added "${String(b.term_en).trim().toLowerCase()}"`);
   });
 
   app.post('/calibration/word-remove', async (c) => {
@@ -2038,6 +1946,58 @@ export function consoleApp(): App {
       ).all<Record<string, string | null>>()
     ).results;
 
+    // Keyword intelligence: descriptive stats over the newest 400 stored breakdowns (bounded CPU)
+    // + the profile miner. This is scoring INSIGHT and the ML piece — it lives here, not in
+    // Calibration (which is pure keyword tuning).
+    const cfg = await loadLive(c.env);
+    const sample = (
+      await c.env.DB.prepare(
+        `SELECT j.url_hash, j.title, j.verdict, j.score, j.score_breakdown, c.name company
+         FROM jobs j JOIN companies c ON c.id = j.company_id
+         ORDER BY j.first_seen DESC LIMIT 400`,
+      ).all<Record<string, string | number | null>>()
+    ).results;
+    const impact = new Map<string, { hits: number; surv: number; cat: string }>();
+    const nearMiss: Array<{ hash: string; title: string; company: string; score: number; reason: string }> = [];
+    for (const r of sample) {
+      let bd: ScoreResult | null = null;
+      try { bd = JSON.parse(String(r.score_breakdown ?? '')) as ScoreResult; } catch { continue; }
+      if (!bd?.breakdown) continue;
+      const surv = r.verdict !== 'Skip';
+      for (const [cat, cb] of Object.entries(bd.breakdown)) {
+        for (const m of cb.matches) {
+          if (m.weight <= 0) continue;
+          const e = impact.get(m.term) ?? { hits: 0, surv: 0, cat };
+          e.hits++; if (surv) e.surv++;
+          impact.set(m.term, e);
+        }
+      }
+      if (r.verdict === 'Skip' && bd.near_miss_reason) {
+        nearMiss.push({ hash: String(r.url_hash), title: String(r.title), company: String(r.company), score: Number(r.score), reason: bd.near_miss_reason });
+      }
+    }
+    const topImpact = [...impact.entries()].sort((a, b) => b[1].hits - a[1].hits).slice(0, 20);
+    nearMiss.sort((a, b) => b.score - a.score);
+    const topNear = nearMiss.slice(0, 15);
+    // dead = configured FAVOR keywords with zero matches in the sample (favor-only; gates/location
+    // carry no hit data here). "dead" = unmatched in the window, not forever.
+    const dead: Array<{ en: string; cat: Category }> = [];
+    for (const cat of CATEGORIES) {
+      for (const k of cfg.keywords[cat]) {
+        if (k.weight > 0 && !impact.has(k.en)) dead.push({ en: k.en, cat });
+      }
+    }
+    // strong = frequently matched AND mostly landing in survivors.
+    const strong = [...impact.entries()]
+      .filter(([, e]) => e.hits >= 3 && e.surv / e.hits >= 0.5)
+      .sort((a, b) => (b[1].surv / b[1].hits) - (a[1].surv / a[1].hits))
+      .slice(0, 12);
+    // Profile miner (ML v1): words that recur in the Blocks Bank (my CV) but aren't calibrated yet.
+    const blocks = (
+      await c.env.DB.prepare('SELECT text_en, text_es FROM blocks').all<{ text_en: string | null; text_es: string | null }>()
+    ).results;
+    const mined = mineProfileKeywords(cfg, blocks);
+
     const IA_PIPELINE: Array<{ agent: string; when: string; model: string; out: string }> = [
       { agent: 'job_analyst', when: 'at notify', model: 'gemini-3.5-flash → 3.1-flash-lite', out: 'structured role analysis (must-haves, seniority, positioning) — understood once, reused downstream' },
       { agent: 'enricher', when: 'at notify', model: 'gemini-3.1-flash-lite → 2.5-flash-lite', out: 'why-it-fits / gap / positioning wording — never verdicts or gates' },
@@ -2049,9 +2009,89 @@ export function consoleApp(): App {
     return page(c, 'Intelligence', (
       <>
         <div class="card">
-          <h2>ML — role-signal model <span class="muted">(roadmap · not built)</span></h2>
-          <p class="muted my-1">The job market is an attention market — the edge is knowing which words employers reward. A future statistical model would learn that from outcomes (survivor / applied signals) and feed calibration automatically, instead of hand-tuning weights.</p>
-          <p class="muted my-1">This does not exist yet. Scoring today is 100% hand-tuned keyword weights + gates (see <a href="/calibration">Calibration</a>); the IA below is what actually runs. This card is a placeholder for the roadmap.</p>
+          <h2>ML — keyword intelligence</h2>
+          <p class="muted my-1">The job market is an attention market — the edge is knowing which words employers reward. This reads your Blocks Bank (your CV) and the newest {sample.length} scored jobs: it surfaces vocabulary you have but haven't calibrated, and shows which calibrated words are actually pulling weight. Suggestions only — you approve, nothing auto-applies.</p>
+
+          <h3 class="mt-2">Suggested keywords <span class="muted">— in your profile, not yet calibrated ({mined.length})</span></h3>
+          {mined.length === 0 ? <p class="muted">nothing new — every recurring profile word is already calibrated</p> : (
+            <div class="table-wrap"><table>
+              <tr><th>keyword</th><th>in blocks</th><th>add as</th></tr>
+              {mined.map((m) => (
+                <tr>
+                  <td>{m.term}</td>
+                  <td class="muted">{m.blocks}</td>
+                  <td>
+                    <form method="post" action="/calibration/word-add" class="actions">
+                      <input type="hidden" name="term_en" value={m.term} />
+                      <input type="hidden" name="term_es" value={m.term} />
+                      <input type="hidden" name="dir" value="favor" />
+                      <input type="hidden" name="back" value="/intelligence" />
+                      <select name="category" aria-label="category">
+                        {MATRIX_CATEGORIES.filter((cat) => cat !== 'location').map((cat) => <option value={cat}>{MATRIX_LABELS[cat][0]}</option>)}
+                      </select>
+                      <select name="weight" aria-label="strength">
+                        <option value="1">+1</option>
+                        <option value="2" selected>+2</option>
+                        <option value="3">+3</option>
+                      </select>
+                      <button type="submit" class="primary">Add</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </table></div>
+          )}
+
+          <div class="matrix-groups mt-2">
+            <details class="rc">
+              <summary class="rc-head"><span class="caret" /><span class="rc-title">Keyword impact</span><span class="rc-sub">favor keywords by matches</span><span class="rc-meta">{topImpact.length}</span></summary>
+              <div class="rc-body">
+                <div class="table-wrap"><table>
+                  <tr><th>keyword</th><th>category</th><th>matches</th><th>in survivors</th><th>survivor rate</th></tr>
+                  {topImpact.map(([term, e]) => (
+                    <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.hits}</td><td>{e.surv}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
+                  ))}
+                </table></div>
+              </div>
+            </details>
+            <details class="rc">
+              <summary class="rc-head"><span class="caret" /><span class="rc-title">Strong signals</span><span class="rc-sub">≥3 matches, ≥50% in survivors</span><span class="rc-meta">{strong.length}</span></summary>
+              <div class="rc-body">
+                {strong.length === 0 ? <p class="muted">none yet in the sample</p> : (
+                  <div class="table-wrap"><table>
+                    <tr><th>keyword</th><th>category</th><th>survivors / matches</th><th>rate</th></tr>
+                    {strong.map(([term, e]) => (
+                      <tr><td>{term}</td><td class="muted">{e.cat}</td><td>{e.surv} / {e.hits}</td><td class="muted">{Math.round((e.surv / e.hits) * 100)}%</td></tr>
+                    ))}
+                  </table></div>
+                )}
+              </div>
+            </details>
+            <details class="rc">
+              <summary class="rc-head"><span class="caret" /><span class="rc-title">Dead keywords</span><span class="rc-sub">favor words with 0 matches — consider removing</span><span class="rc-meta">{dead.length}</span></summary>
+              <div class="rc-body">
+                {dead.length === 0 ? <p class="muted">none — every favor keyword matched at least once</p> : (
+                  <div class="table-wrap"><table>
+                    <tr><th>keyword</th><th>category</th></tr>
+                    {dead.map((d) => <tr><td>{d.en}</td><td class="muted">{d.cat}</td></tr>)}
+                  </table></div>
+                )}
+                <p class="muted mt-1">Favor keywords only, over the newest {sample.length} jobs. Against-words and location gates aren't measured here.</p>
+              </div>
+            </details>
+            <details class="rc">
+              <summary class="rc-head"><span class="caret" /><span class="rc-title">Near-miss</span><span class="rc-sub">Skipped jobs closest to the bar</span><span class="rc-meta">{topNear.length}</span></summary>
+              <div class="rc-body">
+                {topNear.length === 0 ? <p class="muted">no near-misses in the sample</p> : topNear.map((n) => (
+                  <div class="bullet">
+                    <a href={`/jobs/${n.hash}`}>{n.title}</a> @ {n.company} · <strong>{n.score}</strong>
+                    <div class="muted">{n.reason}</div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+          <p class="muted mt-2">The miner reads your Blocks Bank now; as your applied / dismissed history grows it will weight by that too. A statistical decision model (log-odds over outcomes) is the documented next step — not built yet.</p>
         </div>
         <div class="card">
           <h2>IA — live enrichment pipeline</h2>
