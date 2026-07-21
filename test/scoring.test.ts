@@ -170,8 +170,8 @@ describe('scoreJob — EN/ES matching and title', () => {
   });
 });
 
-describe('scoreJob — per-track thresholds', () => {
-  it('a track with its own thresholds uses them instead of the globals', () => {
+describe('scoreJob — one score, gates route only (decoupled)', () => {
+  it('per-track thresholds are ignored; every track uses the one global threshold', () => {
     const cfg: ScoringConfig = {
       ...config,
       tracks: config.tracks.map((t) =>
@@ -183,10 +183,9 @@ describe('scoreJob — per-track thresholds', () => {
       location: 'Vancouver, Canada',
       description: 'Compliance team. Python.',
     });
-    const global = scoreJob(j, config);
-    const perTrack = scoreJob(j, cfg);
-    expect(global.tracks.canada_coop!.verdict).toBe('Skip');
-    expect(perTrack.tracks.canada_coop!.verdict).toBe('Stretch-worth-it');
+    // A per-track override no longer changes anything — same verdict with or without it.
+    expect(scoreJob(j, cfg).tracks.canada_coop!.verdict)
+      .toBe(scoreJob(j, config).tracks.canada_coop!.verdict);
   });
 });
 

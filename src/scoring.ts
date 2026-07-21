@@ -136,6 +136,15 @@ function hitTerm(term: string, normalizedText: string): boolean {
   return !!term && matchesIn(term, normalizedText);
 }
 
+const gRegexCache = new Map<string, RegExp>();
+/** Count word-boundary occurrences of a term (same matching as hitTerm, global flag). */
+function countIn(term: string, normalizedText: string): number {
+  if (!term) return 0;
+  let re = gRegexCache.get(term);
+  if (!re) { re = new RegExp(termRegex(term).source, 'gu'); gRegexCache.set(term, re); }
+  return (normalizedText.match(re) ?? []).length;
+}
+
 interface Corpus {
   title: string;
   location: string;
@@ -173,18 +182,23 @@ function scoreCategory(
   }
 
   for (const kw of effective) {
-    // One concept = one match check across BOTH languages → counted once (no double count).
     const inTitle = hitTerm(kw.en, corpus.title) || hitTerm(kw.es, corpus.title);
-    const inBody = inTitle || hitTerm(kw.en, corpus.text) || hitTerm(kw.es, corpus.text);
-    if (!inBody) continue;
-    const contribution = kw.weight * (inTitle && kw.weight > 0 ? config.title_multiplier : 1);
+    // Occurrences across BOTH languages in the full text, capped at 3: repetition counts
+    // (banking×3 → 3), but one word can't run away (banking×20 → still 3).
+    const occ = countIn(kw.en, corpus.text) + (kw.es && kw.es !== kw.en ? countIn(kw.es, corpus.text) : 0);
+    if (occ === 0) continue;
+    const reps = Math.min(occ, 3);
+    const contribution = kw.weight * reps * (inTitle && kw.weight > 0 ? config.title_multiplier : 1);
     matches.push({ term: kw.en, weight: contribution, in_title: inTitle });
     raw += contribution;
   }
 
   raw = Math.max(0, raw);
   const { weight, saturation } = config.weights[category];
-  const normalized = Math.min(1, saturation > 0 ? raw / saturation : 0);
+  // Gradual fill 1 - e^(-raw/s): a weak match lands low, a solid one mid-high, a strong one
+  // near full — so scores SPREAD and rank, instead of all maxing out (old hard clip) or all
+  // squashing down. `saturation` (s) tunes how fast the meter fills per section.
+  const normalized = saturation > 0 ? 1 - Math.exp(-raw / saturation) : 0;
   return { matches, raw, normalized, points: normalized * weight };
 }
 
@@ -212,8 +226,6 @@ function verdictFor(score: number, thresholds: ScoringConfig['thresholds']): Ver
   return 'Skip';
 }
 
-const VERDICT_RANK: Record<Verdict, number> = { 'Apply': 2, 'Stretch-worth-it': 1, 'Skip': 0 };
-
 /** Pure engine function: job + config -> complete result (persistable in jobs.score_breakdown). */
 export function scoreJob(job: Job, config: ScoringConfig): ScoreResult {
   const corpus = buildCorpus(job);
@@ -233,6 +245,9 @@ export function scoreJob(job: Job, config: ScoringConfig): ScoreResult {
 
   const score = Math.round(CATEGORIES.reduce((acc, c) => acc + breakdown[c].points, 0));
 
+  // Gates are ELIGIBILITY + ROUTING only — they no longer shape the score. One score, one
+  // global threshold. The route (track) = the first track whose gates all pass; if none pass,
+  // the job isn't eligible (Skip regardless of score). Track never changes the score.
   const tracks: Record<string, TrackResult> = {};
   for (const track of config.tracks) {
     const gates = track.gates.map((g) => evaluateGate(g, corpus));
@@ -241,21 +256,16 @@ export function scoreJob(job: Job, config: ScoringConfig): ScoreResult {
       gates,
       hard_failed: hardFailed,
       adjusted_score: score,
-      verdict: hardFailed ? 'Skip' : verdictFor(score, track.thresholds ?? config.thresholds),
+      verdict: hardFailed ? 'Skip' : verdictFor(score, config.thresholds),
     };
   }
 
-  let best: ScoreResult['best'] | null = null;
-  for (const [id, t] of Object.entries(tracks)) {
-    if (
-      !best ||
-      VERDICT_RANK[t.verdict] > VERDICT_RANK[best.verdict] ||
-      (VERDICT_RANK[t.verdict] === VERDICT_RANK[best.verdict] && t.adjusted_score > best.adjusted_score)
-    ) {
-      best = { track: id, verdict: t.verdict, adjusted_score: t.adjusted_score };
-    }
-  }
-  if (!best) best = { track: null, verdict: 'Skip', adjusted_score: score };
+  const route = config.tracks.find((t) => !tracks[t.id]!.hard_failed)?.id ?? null;
+  const best: ScoreResult['best'] = {
+    track: route,
+    verdict: route ? verdictFor(score, config.thresholds) : 'Skip',
+    adjusted_score: score,
+  };
 
   const result: ScoreResult = { score, breakdown, tracks, best };
   if (best.verdict === 'Skip') result.near_miss_reason = nearMissReason(result, config);
