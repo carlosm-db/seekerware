@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkFreshness } from '../src/freshness';
+import { checkFreshness, reliablyStale } from '../src/freshness';
 import { escapeHtml, formatJobMessage, formatMaintenance } from '../src/notify';
 import type { Job } from '../src/types';
 
@@ -26,6 +26,24 @@ describe('checkFreshness', () => {
   it('invalid date counts as unreliable', () => {
     const f = checkFreshness('not-a-date', '2026-07-17T11:00:00Z', 3, NOW);
     expect(f.freshness_ok).toBe('unknown');
+  });
+});
+
+describe('reliablyStale (pipeline freshness-first drop rule)', () => {
+  // The pipeline drops a NEW job before fetch/score iff reliablyStale(freshness) is true.
+  it('drops a new job with a reliable date older than the window', () => {
+    const f = checkFreshness('2026-07-12T12:00:00Z', '2026-07-17T12:00:00Z', 3, NOW); // 5 days
+    expect(reliablyStale(f)).toBe(true);
+  });
+
+  it('keeps a fresh job (recent reliable date)', () => {
+    const f = checkFreshness('2026-07-16T12:00:00Z', '2026-07-17T12:00:00Z', 3, NOW); // 1 day
+    expect(reliablyStale(f)).toBe(false);
+  });
+
+  it('keeps a job with no/unreliable date (never dropped on a guess)', () => {
+    expect(reliablyStale(checkFreshness(null, '2026-07-01T00:00:00Z', 3, NOW))).toBe(false);
+    expect(reliablyStale(checkFreshness('not-a-date', '2026-07-01T00:00:00Z', 3, NOW))).toBe(false);
   });
 });
 

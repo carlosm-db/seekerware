@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { canonicalUrl, stripHtml, urlHash } from '../src/connectors/common';
-import { fetchJobs, isLive } from '../src/connectors/greenhouse';
+import { fetchDetail, fetchJobs, isLive } from '../src/connectors/greenhouse';
 import type { Company } from '../src/types';
 
 const company: Company = { id: 1, name: 'Acme', ats: 'greenhouse', token: 'acme', active: true };
 
-// Fixture with the real shape of the Greenhouse feed (escaped content, tracking query params).
+// Fixture with the real shape of the Greenhouse LIGHT list (no `content`; tracking query params,
+// custom career page). The description is pulled per-job by fetchDetail, not present here.
 const FEED = {
   jobs: [
     {
       id: 101,
       title: 'Business Analyst, Payments',
       absolute_url: 'https://boards.greenhouse.io/acme/jobs/101?gh_src=abc123&utm_source=x',
-      content: '&lt;p&gt;Reconciliation &amp;amp; settlement ops.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;SQL&lt;/li&gt;&lt;/ul&gt;',
       first_published: '2026-07-15T10:00:00-04:00',
       updated_at: '2026-07-16T09:00:00-04:00',
       location: { name: 'Vancouver, BC' },
@@ -79,7 +79,7 @@ describe('stripHtml', () => {
 });
 
 describe('fetchJobs', () => {
-  it('normalizes the feed: canonical url, posted_at from first_published, plain description', async () => {
+  it('normalizes the LIGHT list: canonical url, posted_at from first_published, no description', async () => {
     mockFetch({ body: FEED });
     const jobs = await fetchJobs(company);
     expect(jobs).toHaveLength(2);
@@ -94,8 +94,8 @@ describe('fetchJobs', () => {
       location: 'Vancouver, BC',
       ats: 'greenhouse',
     });
-    expect(a!.description).toContain('Reconciliation & settlement ops.');
-    expect(a!.description).not.toContain('<');
+    // the light list carries no content — the pipeline pulls it via fetchDetail before scoring
+    expect(a!.description).toBe('');
 
     // identity preserved on boards with a custom page: gh_jid stays, tracking is stripped
     expect(b!.url).toBe('https://acme.com/careers/job-post?gh_jid=102');
@@ -106,6 +106,29 @@ describe('fetchJobs', () => {
   it('throws if the feed returns an error (the caller isolates per company)', async () => {
     mockFetch({ status: 500, body: {} });
     await expect(fetchJobs(company)).rejects.toThrow('HTTP 500');
+  });
+});
+
+// The single-job detail carries the full `content` the light list omits.
+const DETAIL = {
+  id: 101,
+  title: 'Business Analyst, Payments',
+  content: '&lt;p&gt;Reconciliation &amp;amp; settlement ops.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;SQL&lt;/li&gt;&lt;/ul&gt;',
+};
+
+describe('fetchDetail', () => {
+  const job = { id: '101' } as Parameters<typeof fetchDetail>[1];
+
+  it('returns the plain-text description from the single-job content', async () => {
+    mockFetch({ body: DETAIL });
+    const patch = await fetchDetail(company, job);
+    expect(patch.description).toContain('Reconciliation & settlement ops.');
+    expect(patch.description).not.toContain('<');
+  });
+
+  it('throws on HTTP error (the pipeline logs a warn and moves on)', async () => {
+    mockFetch({ status: 500, body: {} });
+    await expect(fetchDetail(company, job)).rejects.toThrow('HTTP 500');
   });
 });
 

@@ -6,7 +6,7 @@ import { connectors } from './connectors/index';
 import { urlHash } from './connectors/common';
 import { loadScoringConfig } from './config-store';
 import { normalizeTitle, scoreJob, type ScoringConfig } from './scoring';
-import { checkFreshness } from './freshness';
+import { checkFreshness, reliablyStale } from './freshness';
 import { formatDigest, formatJobMessage, formatMaintenance, ruleBasedTexts, sendTelegram } from './notify';
 import { generateCv } from './ia/cv_factory';
 import { RunStats, trackedFetch } from './runstats';
@@ -258,37 +258,37 @@ async function processCompany(
       // is guaranteed by auto-expire; last_seen is stamped on close.
       continue;
     }
+    // Freshness-first: a NEW posting reliably older than the window can NEVER be notified
+    // (rule 3), so drop it here — before any detail fetch or scoring. A missing/unreliable date
+    // is treated as fresh (processed). This is what stops a mega board from dumping its whole
+    // backlog every run; the scarce new-job budget goes to recent (notifiable) postings.
+    const freshness = checkFreshness(job.posted_at, nowIso, maxDays);
+    if (reliablyStale(freshness)) continue;
     if (stats.jobsNew >= maxNewPerRun) {
       // CPU cap reached: the rest waits for the next run (they are still
       // "new"; not being in the store, auto-expire does not touch them).
       continue;
     }
     stats.jobsNew++;
-    // Bounded description enrichment for list-only connectors (SF <urlset>, Workday):
-    // fetch the per-job detail ONLY for jobs that clear a track's hard (location) gate,
-    // capped per run. Jobs that hard-fail every track are a real Skip — no fetch.
+    // Fetch the description BEFORE scoring: the light list may omit it (Greenhouse, SF <urlset>,
+    // Workday), and the per-track location gates are text-scoped (they read the description), so
+    // scoring without it could wrongly reject a "remote in the description" job. Fetch for every
+    // fresh new job, capped per run by the subrequest budget; overflow spills to the next run.
     if (connector.fetchDetail && !job.description) {
-      const pre = scoreJob(job, config);
-      // Enrich if a track's hard (location) gate passes, OR the location is unknown
-      // (list gave none — e.g. Workday "N Locations") so we must fetch to learn it.
-      const locViable = !job.location || Object.values(pre.tracks).some((t) => !t.hard_failed);
-      if (locViable) {
-        if (stats.detailFetches >= maxDetailPerRun) { stats.jobsNew--; continue; } // budget spent → next run
-        stats.detailFetches++;
-        try {
-          Object.assign(job, await connector.fetchDetail(company, job, doFetch));
-        } catch (err) {
-          stats.event({
-            type: 'fetch_fail', severity: 'warn', company_id: company.id, url_hash: hash,
-            detail: err instanceof Error ? err.message : 'detail fetch failed',
-          });
-        }
+      if (stats.detailFetches >= maxDetailPerRun) { stats.jobsNew--; continue; } // budget spent → next run
+      stats.detailFetches++;
+      try {
+        Object.assign(job, await connector.fetchDetail(company, job, doFetch));
+      } catch (err) {
+        stats.event({
+          type: 'fetch_fail', severity: 'warn', company_id: company.id, url_hash: hash,
+          detail: err instanceof Error ? err.message : 'detail fetch failed',
+        });
       }
     }
     const result = scoreJob(job, config);
     stats.jobsScored++;
     const isSurvivor = result.best.verdict !== 'Skip';
-    const freshness = checkFreshness(job.posted_at, nowIso, maxDays);
 
     let status: 'new' | 'notified' | 'skipped' | 'closed' = isSurvivor ? 'new' : 'skipped';
     let notifiedAt: string | null = null;
