@@ -1176,7 +1176,6 @@ export function consoleApp(): App {
   };
 
   app.get('/tracker', async (c) => {
-    const nowIso = now();
     const rows = (
       await c.env.DB.prepare(
         `SELECT a.url_hash, a.stage, a.applied_at, a.follow_up_at, a.notes, a.updated_at,
@@ -1188,47 +1187,43 @@ export function consoleApp(): App {
     ).results;
     const capped = rows.length > 300;
     if (capped) rows.pop();
-    const due = rows.filter((r) => r.follow_up_at && String(r.follow_up_at) <= nowIso);
     const daysIn = (iso: string | number | null | undefined) =>
       iso ? Math.floor((Date.now() - new Date(String(iso)).getTime()) / 86400000) : 0;
 
     return page(c, 'Tracker', (
       <>
-        {due.length > 0 ? (
-          <div class="card">
-            <h2 class="mt-0">Overdue follow-ups</h2>
-            {due.map((r) => <div><a href={`/jobs/${r.url_hash}`}>{r.title}</a> @ {r.company} — follow-up {String(r.follow_up_at).slice(0, 10)}</div>)}
-          </div>
-        ) : null}
         {capped ? <div class="card muted">Showing the 300 most recent applications — dismiss or close old items to tidy the board.</div> : null}
-        <div class="kanban">
-          {STAGES.map((stage) => {
-            const col = rows.filter((r) => r.stage === stage);
-            return (
-              <div class="kancol">
-                <h2 class="mt-0">{STAGE_LABEL[stage]} <span class="muted">({col.length})</span></h2>
-                {col.map((r) => (
-                  <div class="card">
-                    <a href={`/jobs/${r.url_hash}`}><strong>{r.title}</strong></a>
-                    <div class="muted">{r.company} · <span class="chip">{r.track}</span> · {daysIn(r.updated_at)}d in stage</div>
-                    {r.notes ? <div class="muted">📝 {String(r.notes).slice(0, 80)}</div> : null}
-                    <form method="post" action="/tracker/update" class="stackform">
+        {STAGES.map((stage) => {
+          const col = rows.filter((r) => r.stage === stage);
+          return (
+            <details class="rc" open={col.length > 0}>
+              <summary>
+                <span class="caret"></span>
+                <span class="rc-title">{STAGE_LABEL[stage]}</span>
+                <span class="rc-meta">({col.length})</span>
+              </summary>
+              <div class="rc-body">
+                {col.length === 0 ? <div class="muted">—</div> : col.map((r) => (
+                  <div class="b-row">
+                    <div class="b-text">
+                      <a href={`/jobs/${r.url_hash}`}><strong>{r.title}</strong></a>
+                      <div class="muted">{r.company} · <span class="chip">{r.track}</span> · {daysIn(r.updated_at)}d in stage</div>
+                      {r.notes ? <div class="muted">📝 {String(r.notes).slice(0, 80)}</div> : null}
+                    </div>
+                    <form method="post" action="/tracker/update" class="inline">
                       <input type="hidden" name="hash" value={String(r.url_hash)} />
-                      <div class="actions">
-                        <select name="stage">
-                          {[...STAGES, 'dismissed'].map((s) => <option value={s} selected={s === stage}>{STAGE_LABEL[s]}</option>)}
-                        </select>
-                        <input type="date" name="follow_up" value={r.follow_up_at ? String(r.follow_up_at).slice(0, 10) : ''} />
-                      </div>
-                      <input type="text" name="note" placeholder="note (optional)" />
+                      <select name="stage">
+                        {[...STAGES, 'dismissed'].map((s) => <option value={s} selected={s === stage}>{STAGE_LABEL[s]}</option>)}
+                      </select>
+                      <input type="text" name="note" placeholder="note" />
                       <button type="submit">Update</button>
                     </form>
                   </div>
                 ))}
               </div>
-            );
-          })}
-        </div>
+            </details>
+          );
+        })}
       </>
     ));
   });
@@ -1239,17 +1234,16 @@ export function consoleApp(): App {
     const stage = String(b.stage ?? '');
     if (!hash || !STAGE_LABEL[stage]) return c.redirect('/tracker?m=invalid');
     const ts = now();
-    const followUp = b.follow_up ? `${String(b.follow_up)}T12:00:00Z` : null;
     const note = String(b.note ?? '').trim();
     const stamp =
       stage === 'applied' ? 'applied_at' : stage === 'interview' ? 'interview_at'
       : stage === 'offer' || stage === 'rejected' ? 'outcome_at' : null;
     await c.env.DB.prepare(
-      `UPDATE applications SET stage = ?, follow_up_at = ?, updated_at = ?,
+      `UPDATE applications SET stage = ?, updated_at = ?,
          notes = CASE WHEN ? != '' THEN COALESCE(notes || char(10), '') || ? ELSE notes END
          ${stamp ? `, ${stamp} = COALESCE(${stamp}, ?)` : ''}
        WHERE url_hash = ?`,
-    ).bind(...(stamp ? [stage, followUp, ts, note, note, ts, hash] : [stage, followUp, ts, note, note, hash])).run();
+    ).bind(...(stamp ? [stage, ts, note, note, ts, hash] : [stage, ts, note, note, hash])).run();
     await jobEvent(c.env, hash, `stage:${stage}`, note);
     return c.redirect('/tracker?m=updated');
   });
