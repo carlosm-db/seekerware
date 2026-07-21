@@ -613,6 +613,22 @@ export function consoleApp(): App {
   // ---------- Companies ----------
   app.get('/companies', async (c) => {
     const pg = pageNum(c);
+    // Sortable columns: whitelist key -> SQL expression (never interpolate raw input into ORDER BY).
+    const SORTS: Record<string, string> = {
+      company: 'c.name', ats: 'c.ats', token: 'c.token', active: 'c.active',
+      health: 'c.fail_count', jobs: 'jobs_seen', survivors: 'survivors',
+      yield: 'CAST(COALESCE(survivors, 0) AS REAL) / NULLIF(jobs_seen, 0)',
+    };
+    const rawSort = c.req.query('sort') ?? '';
+    const sortKey = Object.prototype.hasOwnProperty.call(SORTS, rawSort) ? rawSort : 'survivors';
+    const dir = c.req.query('dir') === 'asc' ? 'ASC' : 'DESC';
+    const sortTh = (k: string, label: string) => {
+      const on = k === sortKey;
+      const next = on ? (dir === 'ASC' ? 'desc' : 'asc') : 'desc';
+      return (
+        <th><a href={`/companies?sort=${k}&dir=${next}`} style="color:inherit;text-decoration:none">{label}{on ? (dir === 'ASC' ? ' ▲' : ' ▼') : ''}</a></th>
+      );
+    };
     const rows = (
       await c.env.DB.prepare(
         `SELECT c.id, c.name, c.ats, c.token, c.active, c.fail_count, c.last_ok_fetch, c.last_error, c.notes,
@@ -620,7 +636,7 @@ export function consoleApp(): App {
                 SUM(CASE WHEN j.verdict IN ('Apply','Stretch-worth-it') THEN 1 ELSE 0 END) survivors
          FROM companies c
          LEFT JOIN jobs j ON j.company_id = c.id AND j.first_seen >= datetime('now','-90 days')
-         GROUP BY c.id ORDER BY survivors DESC, c.name LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
+         GROUP BY c.id ORDER BY ${SORTS[sortKey]} ${dir}, c.name LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
       ).all<Record<string, string | number | null>>()
     ).results;
     const hasNext = rows.length > PAGE;
@@ -643,7 +659,7 @@ export function consoleApp(): App {
           <div class="actions mt-1"><button type="submit" class="primary">Add all</button></div>
         </form>
         <div class="table-wrap"><table>
-          <tr><th>company</th><th>ats</th><th>token</th><th>active</th><th>health</th><th>jobs 90d</th><th>survivors</th><th>yield</th></tr>
+          <tr>{sortTh('company', 'company')}{sortTh('ats', 'ats')}{sortTh('token', 'token')}{sortTh('active', 'active')}{sortTh('health', 'health')}{sortTh('jobs', 'jobs 90d')}{sortTh('survivors', 'survivors')}{sortTh('yield', 'yield')}</tr>
           {rows.map((r) => (
             <tr>
               <td><a href={`/companies/${r.id}`}>{r.name}</a><div class="muted">{r.notes}</div></td>
@@ -662,7 +678,7 @@ export function consoleApp(): App {
             </tr>
           ))}
         </table></div>
-        {pager('/companies', pg, hasNext, total, {})}
+        {pager('/companies', pg, hasNext, total, { sort: sortKey, dir: dir.toLowerCase() })}
       </>
     ));
   });
