@@ -376,6 +376,28 @@ export function consoleApp(): App {
     if (q.verdict) { where.push('j.verdict = ?'); binds.push(q.verdict); }
     if (q.status) { where.push('j.status = ?'); binds.push(q.status); }
     if (q.q) { where.push('j.title LIKE ?'); binds.push(`%${q.q}%`); }
+    // Sortable columns: whitelist key -> SQL expression (raw input never reaches ORDER BY).
+    const SORTS: Record<string, string> = {
+      title: 'j.title', track: 'j.track', verdict: 'j.verdict',
+      status: 'j.status', score: 'j.score', seen: 'j.first_seen',
+    };
+    const rawSort = q.sort ?? '';
+    const sortKey = Object.prototype.hasOwnProperty.call(SORTS, rawSort) ? rawSort : 'seen';
+    const dir = q.dir === 'asc' ? 'ASC' : 'DESC';
+    const sortHref = (k: string, next: string) => {
+      const p = new URLSearchParams();
+      if (view) p.set('view', view);
+      for (const f of ['q', 'track', 'verdict', 'status'] as const) if (q[f]) p.set(f, q[f]!);
+      p.set('sort', k); p.set('dir', next);
+      return `/jobs?${p.toString()}`;
+    };
+    const sortTh = (k: string, label: string, cls = '') => {
+      const on = k === sortKey;
+      const next = on && dir === 'DESC' ? 'asc' : 'desc';
+      return (
+        <th class={cls}><a href={sortHref(k, next)} style="color:inherit;text-decoration:none">{label}{on ? (dir === 'ASC' ? ' ▲' : ' ▼') : ''}</a></th>
+      );
+    };
     const pg = pageNum(c);
     const rows = (
       await c.env.DB.prepare(
@@ -384,7 +406,7 @@ export function consoleApp(): App {
          FROM jobs j JOIN companies c ON c.id = j.company_id
          LEFT JOIN applications a ON a.url_hash = j.url_hash
          WHERE ${where.join(' AND ')}
-         ORDER BY j.first_seen DESC, j.score DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
+         ORDER BY ${SORTS[sortKey]} ${dir}, j.first_seen DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
       ).bind(...binds).all<Record<string, string | number | null>>()
     ).results;
     const hasNext = rows.length > PAGE;
@@ -417,7 +439,7 @@ export function consoleApp(): App {
           <button type="submit" class="primary">Filter</button>
         </form>
         <div class="table-wrap"><table>
-          <tr><th>title</th><th class="hide-sm">track</th><th>verdict</th><th class="hide-sm">status</th><th>score</th><th class="hide-sm">stage</th><th class="hide-sm">seen</th></tr>
+          <tr>{sortTh('title', 'title')}{sortTh('track', 'track', 'hide-sm')}{sortTh('verdict', 'verdict')}{sortTh('status', 'status', 'hide-sm')}{sortTh('score', 'score')}<th class="hide-sm">stage</th>{sortTh('seen', 'seen', 'hide-sm')}</tr>
           {rows.map((j) => (
             <tr>
               <td><a href={`/jobs/${j.url_hash}`}>{j.title}</a><div class="muted">{j.company} · {j.location}</div></td>
@@ -430,7 +452,7 @@ export function consoleApp(): App {
             </tr>
           ))}
         </table></div>
-        {pager('/jobs', pg, hasNext, total, { view, track: q.track, verdict: q.verdict, status: q.status, q: q.q })}
+        {pager('/jobs', pg, hasNext, total, { view, track: q.track, verdict: q.verdict, status: q.status, q: q.q, sort: sortKey, dir: dir.toLowerCase() })}
       </>
     ));
   });
