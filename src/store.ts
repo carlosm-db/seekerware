@@ -97,7 +97,10 @@ export class RunBatch {
 
   private jobStmt(j: JobInsert): D1PreparedStatement {
     return this.env.DB.prepare(
-      `INSERT INTO jobs (url_hash, url, company_id, ats, ext_id, title, location, posted_at,
+      // OR IGNORE: the same job can appear on two companies' boards (or a board lists a dup) →
+      // same url_hash. Without this, one duplicate PK fails the whole atomic batch and the run
+      // stores nothing. First occurrence wins; the rest are skipped.
+      `INSERT OR IGNORE INTO jobs (url_hash, url, company_id, ats, ext_id, title, location, posted_at,
          freshness_ok, track, score, verdict, status, first_seen, last_seen, notified_at,
          cv_pending, why_it_fits, positioning_lead, description_text, score_breakdown, title_norm,
          enriched_by, role_analysis)
