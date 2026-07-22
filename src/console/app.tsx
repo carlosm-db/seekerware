@@ -184,75 +184,9 @@ export function consoleApp(): App {
     return c.redirect('/');
   });
 
-  // ---------- Overview (indicators) ----------
-  app.get('/', (c) => c.redirect('/overview'));
-  app.get('/overview', async (c) => {
-    const strip = await c.env.DB.prepare(
-      `SELECT
-        (SELECT COUNT(*) FROM applications WHERE stage='applied' AND applied_at >= datetime('now','-7 days')) applied_week,
-        (SELECT status FROM runs ORDER BY id DESC LIMIT 1) run_status`,
-    ).first<{ applied_week: number; run_status: string | null }>();
-
-    const pendingTotal = await pendingTriage(c.env);
-    // This week's funnel (folded in from the old Week page).
-    const fromIso = new Date(Date.now() - 7 * 86400000).toISOString();
-    const funnel = await c.env.DB.prepare(
-      `SELECT
-        (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1) seen,
-        (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1 AND verdict != 'Skip') survivors,
-        (SELECT COUNT(*) FROM jobs WHERE notified_at >= ?1) notified,
-        (SELECT COUNT(*) FROM applications WHERE applied_at >= ?1) applied`,
-    ).bind(fromIso).first<Record<string, number>>();
-
-    const health = strip?.run_status === 'ok' ? <span class="ok">green</span>
-      : strip?.run_status ? <span class="warn">{strip.run_status}</span> : <span class="muted">no runs</span>;
-
-    // Control-panel counts (one cheap aggregate query)
-    const panel = await c.env.DB.prepare(
-      `SELECT
-        (SELECT COUNT(*) FROM applications WHERE stage NOT IN ('dismissed','rejected')) tracker_active,
-        (SELECT COUNT(*) FROM companies WHERE active=1) companies_active,
-        (SELECT COUNT(*) FROM companies) companies_total,
-        (SELECT COUNT(*) FROM jobs) jobs_total,
-        (SELECT COUNT(*) FROM blocks WHERE status='approved') blocks_approved,
-        (SELECT COUNT(*) FROM blocks) blocks_total,
-        (SELECT COUNT(*) FROM config WHERE key='contact_profile') contact_set`,
-    ).first<Record<string, number>>();
-    const cards: Array<[string, string, string, string]> = [
-      ['Operate', '/jobs?view=survivors', `${pendingTotal}`, 'new survivors to triage'],
-      ['Operate', '/tracker', `${panel?.tracker_active ?? 0}`, 'active applications'],
-      ['Operate', '/jobs', `${panel?.jobs_total ?? 0}`, 'jobs seen (all)'],
-      ['Profile & setup', '/companies', `${panel?.companies_active ?? 0}/${panel?.companies_total ?? 0}`, 'companies active'],
-      ['Profile & setup', '/blocks_bank', `${panel?.blocks_approved ?? 0}/${panel?.blocks_total ?? 0}`, 'blocks approved'],
-      ['Profile & setup', '/contact', panel?.contact_set ? 'set ✓' : 'not set', 'contact profile'],
-      ['System', '/health', strip?.run_status ?? '—', 'last run'],
-    ];
-
-    return page(c, 'Overview', (
-      <>
-        <div class="statgrid">
-          <div class="stat"><div class="n">{pendingTotal}</div><div class="l">pending triage</div></div>
-          <div class="stat"><div class="n">{strip?.applied_week ?? 0}</div><div class="l">applied this week</div></div>
-          <div class="stat"><div class="n">{health}</div><div class="l">system health</div></div>
-          <div class="stat"><div class="n">{funnel?.survivors ?? 0}</div><div class="l">survivors this week</div></div>
-        </div>
-        <div class="card">
-          <h2>This week's funnel</h2>
-          <p>seen <strong>{funnel?.seen ?? 0}</strong> → new-survivors <strong>{funnel?.survivors ?? 0}</strong> → notified <strong>{funnel?.notified ?? 0}</strong> → applied <strong>{funnel?.applied ?? 0}</strong></p>
-          <p class="muted">The Monday digest to Telegram summarizes these same numbers.</p>
-        </div>
-        <div class="cardgrid">
-          {cards.map(([group, href, n, label]) => (
-            <a class="panelcard" href={href}>
-              <div class="pg">{group}</div>
-              <div class="pn">{n}</div>
-              <div class="pl">{label} →</div>
-            </a>
-          ))}
-        </div>
-      </>
-    ));
-  });
+  // Overview merged into /health (2026-07-22); / and the old /overview path both land there.
+  app.get('/', (c) => c.redirect('/health'));
+  app.get('/overview', (c) => c.redirect('/health'));
 
   app.post('/triage', async (c) => {
     const b = await c.req.parseBody();
@@ -2159,8 +2093,38 @@ export function consoleApp(): App {
   });
 
   // ---------- Health ----------
+  // Home: dashboard (folded in from the old Overview) + ops monitor.
   app.get('/health', async (c) => {
     const pg = pageNum(c);
+    const pendingTotal = await pendingTriage(c.env);
+    const fromIso = new Date(Date.now() - 7 * 86400000).toISOString();
+    const week = await c.env.DB.prepare(
+      `SELECT
+        (SELECT COUNT(*) FROM applications WHERE stage='applied' AND applied_at >= datetime('now','-7 days')) applied_week,
+        (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1) seen,
+        (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1 AND verdict != 'Skip') survivors,
+        (SELECT COUNT(*) FROM jobs WHERE notified_at >= ?1) notified,
+        (SELECT COUNT(*) FROM applications WHERE applied_at >= ?1) applied`,
+    ).bind(fromIso).first<Record<string, number>>();
+    const panel = await c.env.DB.prepare(
+      `SELECT
+        (SELECT COUNT(*) FROM applications WHERE stage NOT IN ('dismissed','rejected')) tracker_active,
+        (SELECT COUNT(*) FROM companies WHERE active=1) companies_active,
+        (SELECT COUNT(*) FROM companies) companies_total,
+        (SELECT COUNT(*) FROM jobs) jobs_total,
+        (SELECT COUNT(*) FROM blocks WHERE status='approved') blocks_approved,
+        (SELECT COUNT(*) FROM blocks) blocks_total,
+        (SELECT COUNT(*) FROM config WHERE key='contact_profile') contact_set`,
+    ).first<Record<string, number>>();
+    const cards: Array<[string, string, string, string]> = [
+      ['Operate', '/jobs?view=survivors', `${pendingTotal}`, 'new survivors to triage'],
+      ['Operate', '/tracker', `${panel?.tracker_active ?? 0}`, 'active applications'],
+      ['Operate', '/jobs', `${panel?.jobs_total ?? 0}`, 'jobs seen (all)'],
+      ['Profile & setup', '/companies', `${panel?.companies_active ?? 0}/${panel?.companies_total ?? 0}`, 'companies active'],
+      ['Profile & setup', '/blocks_bank', `${panel?.blocks_approved ?? 0}/${panel?.blocks_total ?? 0}`, 'blocks approved'],
+      ['Profile & setup', '/contact', panel?.contact_set ? 'set ✓' : 'not set', 'contact profile'],
+    ];
+
     const runs = (
       await c.env.DB.prepare(
         `SELECT id, started_at, status, trigger, duration_ms, companies_total, companies_ok, companies_fail, jobs_seen, jobs_new, survivors, notified, closed, subrequests, d1_reads, d1_writes, errors FROM runs ORDER BY id DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
@@ -2182,13 +2146,28 @@ export function consoleApp(): App {
     return page(c, 'Health', (
       <>
         <div class="statgrid">
+          <div class="stat"><div class="n">{pendingTotal}</div><div class="l">pending triage</div></div>
+          <div class="stat"><div class="n">{week?.applied_week ?? 0}</div><div class="l">applied this week</div></div>
+          <div class="stat"><div class="n">{week?.survivors ?? 0}</div><div class="l">survivors this week</div></div>
           <div class="stat"><div class="n">{today?.runs ?? 0}</div><div class="l">runs today</div></div>
-          <div class="stat"><div class="n">{today?.writes ?? 0}</div><div class="l">D1 writes today (limit 100k)</div></div>
-          <div class="stat"><div class="n">{today?.reads ?? 0}</div><div class="l">D1 reads today (limit 5M)</div></div>
+        </div>
+        <div class="card">
+          <h2>This week's funnel</h2>
+          <p>seen <strong>{week?.seen ?? 0}</strong> → new-survivors <strong>{week?.survivors ?? 0}</strong> → notified <strong>{week?.notified ?? 0}</strong> → applied <strong>{week?.applied ?? 0}</strong></p>
+          <p class="muted">The Monday digest to Telegram summarizes these same numbers.</p>
+        </div>
+        <div class="cardgrid">
+          {cards.map(([group, href, n, label]) => (
+            <a class="panelcard" href={href}>
+              <div class="pg">{group}</div>
+              <div class="pn">{n}</div>
+              <div class="pl">{label} →</div>
+            </a>
+          ))}
         </div>
         <div class="card">
           <strong>Polling</strong>{' '}
-          <span class="muted">GitHub Actions (poll.yml) · twice daily 07:00 / 17:00 America/Bogota · last run {lastRun}</span>
+          <span class="muted">GitHub Actions (poll.yml) · twice daily 07:00 / 17:00 America/Bogota · last run {lastRun} · D1 today {today?.writes ?? 0} writes / {today?.reads ?? 0} reads</span>
         </div>
         <div class="table-wrap"><table>
           <tr><th>run</th><th>start</th><th>status</th><th class="hide-sm">ms</th><th>companies</th><th class="hide-sm">seen</th><th class="hide-sm">new</th><th>surv.</th><th>notif.</th><th class="hide-sm">closed</th><th class="hide-sm">subreq</th><th>errors</th></tr>
