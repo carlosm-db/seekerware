@@ -190,8 +190,7 @@ export class RunBatch {
       `UPDATE runs SET finished_at = ?, status = ?, duration_ms = ?,
          companies_total = ?, companies_ok = ?, companies_fail = ?,
          jobs_seen = ?, jobs_new = ?, jobs_scored = ?, survivors = ?, notified = ?, closed = ?,
-         subrequests = ?, d1_reads = ?, d1_writes = ?, gemini_calls = ?, errors = ?, error_summary = ?,
-         rotation_covered = ?
+         subrequests = ?, d1_reads = ?, d1_writes = ?, gemini_calls = ?, errors = ?, error_summary = ?
        WHERE id = ?`,
     )
       .bind(
@@ -199,7 +198,6 @@ export class RunBatch {
         stats.companiesTotal, stats.companiesOk, stats.companiesFail,
         stats.jobsSeen, stats.jobsNew, stats.jobsScored, stats.survivors, stats.notified, stats.closed,
         stats.subrequests, stats.d1Reads, stats.d1Writes, stats.geminiCalls, stats.errors, stats.errorSummary,
-        stats.rotationCovered,
         runId,
       )
       .run();

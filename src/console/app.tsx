@@ -2163,7 +2163,7 @@ export function consoleApp(): App {
     const pg = pageNum(c);
     const runs = (
       await c.env.DB.prepare(
-        `SELECT id, started_at, status, trigger, duration_ms, companies_total, companies_ok, companies_fail, jobs_seen, jobs_new, survivors, notified, closed, subrequests, d1_reads, d1_writes, errors, rotation_covered FROM runs ORDER BY id DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
+        `SELECT id, started_at, status, trigger, duration_ms, companies_total, companies_ok, companies_fail, jobs_seen, jobs_new, survivors, notified, closed, subrequests, d1_reads, d1_writes, errors FROM runs ORDER BY id DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
       ).all<Record<string, string | number | null>>()
     ).results;
     const runsHasNext = runs.length > PAGE;
@@ -2175,84 +2175,21 @@ export function consoleApp(): App {
       ).all<Record<string, string>>()
     ).results;
     const today = await c.env.DB.prepare(
-      "SELECT MAX(subrequests) peak_subreq, SUM(d1_reads) reads, SUM(d1_writes) writes, COUNT(*) runs FROM runs WHERE date(started_at) = date('now')",
-    ).first<{ peak_subreq: number; reads: number; writes: number; runs: number }>();
-
-    const { DEFAULT_SCHEDULE, SCHEDULE_TIMEZONES, nextRunAfter, normalizeSchedule } = await import('../schedule');
-    const schedRow = await c.env.DB.prepare("SELECT value FROM config WHERE key='schedule'").first<{ value: string }>();
-    let schedRaw: unknown = null;
-    try { if (schedRow) schedRaw = JSON.parse(schedRow.value); } catch { /* defaults */ }
-    const sched = normalizeSchedule(schedRaw ?? DEFAULT_SCHEDULE);
-    const activeCompanies = (await c.env.DB.prepare('SELECT COUNT(*) n FROM companies WHERE active = 1').first<{ n: number }>())?.n ?? 0;
-    const batchesNeeded = Math.max(1, Math.ceil(activeCompanies / 25));
+      "SELECT SUM(d1_reads) reads, SUM(d1_writes) writes, COUNT(*) runs FROM runs WHERE date(started_at) = date('now')",
+    ).first<{ reads: number; writes: number; runs: number }>();
     const lastRun = runs[0]?.started_at ? fmt(String(runs[0].started_at)) : '—';
-    const next = nextRunAfter(new Date(), sched, batchesNeeded);
-    // On-demand burst counter (batches still to run), set by "Start burst".
-    const forceBurst = Math.max(0, Number(
-      (await c.env.DB.prepare("SELECT value FROM config WHERE key='force_burst'").first<{ value: string }>())?.value ?? '0',
-    ) || 0);
-
-    // Live breadcrumb of where the pipeline is/was (written per company by runPipeline). Reveals a
-    // crashed run's death point at a glance; the run_crash event records it permanently.
-    let checkpointLine: string | null = null;
-    const cpRaw = (await c.env.DB.prepare(
-      "SELECT value FROM config WHERE key LIKE 'run_step:%' ORDER BY CAST(substr(key,10) AS INTEGER) DESC LIMIT 1",
-    ).first<{ value: string }>())?.value;
-    if (cpRaw) {
-      try {
-        const cp = JSON.parse(cpRaw) as { run_id: number; i: number; total: number; company: string; ats: string; ts: string };
-        const ageS = Math.max(0, Math.round((Date.now() - new Date(cp.ts).getTime()) / 1000));
-        checkpointLine = `run ${cp.run_id}: ${cp.company} (${cp.ats}) ${cp.i}/${cp.total} · ${ageS}s ago`;
-      } catch { /* ignore malformed */ }
-    }
 
     return page(c, 'Health', (
       <>
         <div class="statgrid">
           <div class="stat"><div class="n">{today?.runs ?? 0}</div><div class="l">runs today</div></div>
-          <div class="stat"><div class="n">{today?.peak_subreq ?? 0}/50</div><div class="l">peak subrequests</div></div>
           <div class="stat"><div class="n">{today?.writes ?? 0}</div><div class="l">D1 writes today (limit 100k)</div></div>
           <div class="stat"><div class="n">{today?.reads ?? 0}</div><div class="l">D1 reads today (limit 5M)</div></div>
         </div>
-        <form method="post" action="/health/schedule" class="card actions">
-          <strong>Schedule (bursts)</strong>
-          <label>burst hours{' '}
-            <input type="text" name="burst_hours" value={sched.burst_hours.join(', ')} placeholder="7, 17" class="w-md" />
-          </label>
-          <label>batch every{' '}
-            <select name="batch_every_min">
-              {[5, 10, 15, 20, 30].map((m) => <option value={String(m)} selected={m === sched.batch_every_min}>{m}m</option>)}
-            </select>
-          </label>
-          <select name="timezone">
-            {SCHEDULE_TIMEZONES.map((tz) => <option value={tz} selected={tz === sched.timezone}>{tz}</option>)}
-          </select>
-          <button type="submit" class="primary">Save schedule</button>
-          <span class="muted">
-            last run {lastRun} · next {next ? fmt(next.toISOString()) : '—'} ·
-            {' '}covers {activeCompanies} companies in {batchesNeeded} batch(es)/burst
-          </span>
-          {checkpointLine && <span class="muted">checkpoint · {checkpointLine}</span>}
-        </form>
-        <form method="post" action="/health/run" class="card actions" data-burst>
-          <strong>Manual burst</strong>
-          {forceBurst > 0 ? (
-            <>
-              <span>⏳ Burst in progress — {forceBurst} batch(es) left · next in ≤{sched.batch_every_min} min</span>
-              <button type="submit" formAction="/health/run-cancel">Cancel</button>
-            </>
-          ) : (
-            <>
-              <button type="submit" class="primary">▶ Start burst</button>
-              <span class="muted">runs all active companies now, in batches; completes on its own.</span>
-            </>
-          )}
-        </form>
-        <script dangerouslySetInnerHTML={{ __html:
-          "(function(){var f=document.querySelector('form[data-burst]');if(!f)return;" +
-          "f.addEventListener('submit',function(e){var b=e.submitter||f.querySelector('button[type=submit]');" +
-          "if(b){b.disabled=true;if(b.classList.contains('primary'))b.textContent='\\u23f3 Working\\u2026';}});})();"
-        }} />
+        <div class="card">
+          <strong>Polling</strong>{' '}
+          <span class="muted">GitHub Actions (poll.yml) · twice daily 07:00 / 17:00 America/Bogota · last run {lastRun}</span>
+        </div>
         <div class="table-wrap"><table>
           <tr><th>run</th><th>start</th><th>status</th><th class="hide-sm">ms</th><th>companies</th><th class="hide-sm">seen</th><th class="hide-sm">new</th><th>surv.</th><th>notif.</th><th class="hide-sm">closed</th><th class="hide-sm">subreq</th><th>errors</th></tr>
           {runs.map((r) => (
@@ -2261,7 +2198,7 @@ export function consoleApp(): App {
               <td class="muted">{fmt(String(r.started_at))}</td>
               <td class={r.status === 'ok' ? 'ok' : r.status === 'running' ? 'muted' : 'bad'}>{r.status}</td>
               <td class="hide-sm">{r.duration_ms ?? '—'}</td>
-              <td>{r.companies_ok}/{r.companies_total ?? (Number(r.companies_ok) + Number(r.companies_fail))} <span class="muted">({r.rotation_covered ?? '—'}/{activeCompanies})</span></td>
+              <td>{r.companies_ok}/{r.companies_total ?? (Number(r.companies_ok) + Number(r.companies_fail))}</td>
               <td class="hide-sm">{r.jobs_seen}</td><td class="hide-sm">{r.jobs_new}</td><td>{r.survivors}</td>
               <td>{r.notified}</td><td class="hide-sm">{r.closed}</td><td class="hide-sm">{r.subrequests}</td>
               <td class={Number(r.errors) > 0 ? 'bad' : ''}>{r.errors}</td>
@@ -2277,44 +2214,6 @@ export function consoleApp(): App {
         )}
       </>
     ));
-  });
-
-  app.post('/health/schedule', async (c) => {
-    const b = await c.req.parseBody();
-    const { normalizeSchedule } = await import('../schedule');
-    const burst_hours = String(b.burst_hours ?? '')
-      .split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n));
-    const sched = normalizeSchedule({
-      burst_hours, batch_every_min: Number(b.batch_every_min), timezone: String(b.timezone ?? ''),
-    });
-    await c.env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('schedule', ?)")
-      .bind(JSON.stringify(sched)).run();
-    return c.redirect(`/health?m=${encodeURIComponent(
-      `schedule saved: bursts at ${sched.burst_hours.map((h) => h + ':00').join(', ')} every ${sched.batch_every_min}m (${sched.timezone})`,
-    )}`);
-  });
-
-  // "Start burst": run batch 1 NOW (one page, foreground) + queue the rest via force_burst;
-  // the cron finishes the rotation over its ticks (one page each, respecting the subrequest cap).
-  app.post('/health/run', async (c) => {
-    const [countRow, pageRow] = await Promise.all([
-      c.env.DB.prepare('SELECT COUNT(*) n FROM companies WHERE active = 1').first<{ n: number }>(),
-      c.env.DB.prepare("SELECT value FROM config WHERE key='poll_page_size'").first<{ value: string }>(),
-    ]);
-    const pageSize = Math.max(1, Number(pageRow?.value ?? '25') || 25);
-    const batchesNeeded = Math.max(1, Math.ceil((countRow?.n ?? 0) / pageSize));
-    // Non-blocking: just QUEUE the burst (force_burst = N batches). The cron runs one page per
-    // tick until it hits 0. We do NOT run the pipeline in this request — a blocking run can be
-    // cut before it returns, leaving the click with no redirect/feedback. Redirect instantly;
-    // the "⏳ Burst in progress" state renders on the reload.
-    await c.env.DB.prepare("INSERT INTO config (key, value) VALUES ('force_burst', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-      .bind(String(batchesNeeded)).run();
-    return c.redirect(`/health?m=${encodeURIComponent(`burst started: ${batchesNeeded} batch(es) queued`)}`);
-  });
-
-  app.post('/health/run-cancel', async (c) => {
-    await c.env.DB.prepare("DELETE FROM config WHERE key='force_burst'").run();
-    return c.redirect(`/health?m=${encodeURIComponent('burst canceled')}`);
   });
 
   return app;

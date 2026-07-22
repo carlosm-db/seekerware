@@ -14,9 +14,9 @@ import { RunBatch, getActiveCompanies, getCompanyJobs, getConfigValue, openRun, 
 
 /**
  * Drains the CV queue: builds ONE queued CV (oldest cv_pending job) per call. Standalone so the
- * 15-min cron tick can run it WITHOUT the company review — it only reads jobs already flagged
- * `cv_pending=1`; it NEVER polls a company. generateCv clears the flag on success; on failure a
- * `gdocs_fail` event is logged so the existing retry cap (cv_pending_max) still applies.
+ * Worker's cron can drain it on its own — it only reads jobs already flagged `cv_pending=1`; it
+ * NEVER polls a company (polling runs in the Actions poller). generateCv clears the flag on
+ * success; on failure a `gdocs_fail` event is logged so the retry cap (cv_pending_max) still applies.
  */
 export async function buildPendingCvs(env: Env, doFetch: typeof fetch = fetch): Promise<void> {
   if (!env.GOOGLE_OAUTH_REFRESH_TOKEN) return;
@@ -91,13 +91,11 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
     };
     const failStreak = observability.maintenance_fail_streak ?? 3;
 
-    // The CV queue is drained by buildPendingCvs() on every cron tick (decoupled from the
-    // company review, so queued CVs build within ~15 min without waking a burst). A burst run
-    // no longer builds CVs here — it only reviews companies.
+    // The Actions poller never builds CVs — those are produced on demand (Telegram/console Prepare)
+    // and the Worker's cron drains the queue via buildPendingCvs(). This run only reviews companies.
 
     const companies = await getActiveCompanies(env, stats);
     stats.companiesTotal = companies.length;
-    stats.rotationCovered = companies.length; // the poller covers the whole roster every run
 
     // Process companies with bounded concurrency. Per-company isolation is unchanged; the shared
     // stats/batch tolerate async interleaving now that the per-run caps no longer bind.
@@ -131,15 +129,10 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
 
     if (stats.companiesFail > 0) runStatus = 'partial';
 
-    // Quota: warn if the subrequests peak approaches the per-invocation limit
     const obsCfg = JSON.parse((await getConfigValue(env, 'observability')) ?? '{}') as {
-      subrequests_warn?: number;
       retention_days?: { runs?: number; events?: number; notifications?: number };
       digest?: { dow?: number; hour_utc?: number };
     };
-    if (stats.subrequests > (obsCfg.subrequests_warn ?? 40)) {
-      stats.event({ type: 'quota_warn', severity: 'warn', detail: `subrequests ${stats.subrequests} > ${obsCfg.subrequests_warn ?? 40}` });
-    }
 
     // Retention: the first run of each day prunes the observability tables.
     // Cutoffs in JS ISO (stored timestamps are toISOString(); comparing them

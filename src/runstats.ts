@@ -32,8 +32,6 @@ export class RunStats {
   d1Reads = 0;
   d1Writes = 0;
   geminiCalls = 0;
-  /** Cumulative companies covered in the current rotation as of this run (for /health coverage). */
-  rotationCovered = 0;
   events: PendingEvent[] = [];
   notifications: PendingNotification[] = [];
 
@@ -58,12 +56,10 @@ export class RunStats {
 }
 
 /**
- * Wraps EVERY outbound fetch of the pipeline: counts subrequests against the limit of 50, and
- * caps each fetch with a timeout. Without it a single stalled ATS endpoint hangs the whole run
- * until the platform kills it — the run never flushes, so poll_cursor never advances and every
- * later run re-hits the same company (the Canonical deadlock). On timeout the fetch rejects → the
- * connector throws → per-company isolation records a fetch_fail and the run continues.
- * Burst-only wrapper (ATS + Telegram); the Gemini/CV path uses plain fetch, so this never cuts an LLM call.
+ * Wraps every outbound fetch of the poller: caps each with a timeout and counts them (informational —
+ * the Actions runtime has no subrequest limit). Without the timeout a single stalled ATS endpoint could
+ * hang the run; on timeout the fetch rejects → the connector throws → per-company isolation records a
+ * fetch_fail and the run continues. Used for the ATS + notify path; the Gemini/CV path uses plain fetch.
  */
 export function trackedFetch(stats: RunStats, timeoutMs = 20000) {
   return (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
