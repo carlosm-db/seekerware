@@ -2,12 +2,14 @@ name: poll
 
 # ATS polling runs here (Node, no Worker CPU limit), covering every active company each run.
 # The Worker only serves the console/bot/CV and delivers Telegram via /api/notify.
+# Triggered by the Worker's Cloudflare cron via workflow_dispatch (reliable), at noon & 17:00 COT —
+# GitHub's own schedule cron proved unreliable for this repo, so it's intentionally not used here.
 on:
-  schedule:
-    # Twice a day: 12:00 (noon) and 17:00 America/Bogota (UTC-5) = 17:00 and 22:00 UTC. GitHub cron is UTC.
-    # (Overnight 17:00→07:00 boards are idle; noon catches the morning's postings.)
-    - cron: '0 17,22 * * *'
-  workflow_dispatch: {} # manual run from the Actions tab
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'trigger source label (cron = Worker-driven, manual = hand-run)'
+        default: manual
 
 concurrency:
   group: poll
@@ -37,3 +39,5 @@ jobs:
           # Worker base URL (repo Variable) + the Worker's API_TOKEN (Secret) to reach /api/notify.
           WORKER_URL: ${{ vars.WORKER_URL }}
           WORKER_API_TOKEN: ${{ secrets.WORKER_API_TOKEN }}
+          # 'cron' when the Worker fires the dispatch, 'manual' for a hand-run (labels the run honestly).
+          POLL_SOURCE: ${{ github.event.inputs.source }}

@@ -134,8 +134,10 @@ export default {
 
   async scheduled(_controller: ScheduledController, env: ConsoleEnv, ctx: ExecutionContext): Promise<void> {
     // ATS polling runs in GitHub Actions (scripts/poll.ts) — no 10 ms CPU limit, whole roster each
-    // run. The Worker cron only drains the CV queue (reads jobs WHERE cv_pending=1; no-op if none),
-    // so a Telegram/console Prepare builds its CV within ~5 min without a separate trigger.
+    // run. This Cloudflare cron (reliable) is the scheduler: it drains the CV queue AND fires the poll
+    // Action via workflow_dispatch at the dispatch windows (GitHub's own schedule cron was unreliable).
     ctx.waitUntil(buildPendingCvs(env).catch((e) => console.log(`cv queue: ${e instanceof Error ? e.message : 'err'}`)));
+    const { maybeDispatchPoll } = await import('./dispatch');
+    ctx.waitUntil(maybeDispatchPoll(env).catch((e) => console.log(`dispatch: ${e instanceof Error ? e.message : 'err'}`)));
   },
 } satisfies ExportedHandler<ConsoleEnv>;

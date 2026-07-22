@@ -48,4 +48,6 @@ export interface Env {
   WORKER_URL?: string;
   /** Poller only: the Worker's API_TOKEN value, sent as Bearer to /api/notify. */
   WORKER_TOKEN?: string;
+  /** Worker secret: fine-grained GitHub PAT (Actions RW) to fire the poll Action via workflow_dispatch. */
+  GH_DISPATCH_TOKEN?: string;
 }

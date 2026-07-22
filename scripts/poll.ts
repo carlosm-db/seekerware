@@ -30,9 +30,10 @@ async function main(): Promise<void> {
     WORKER_TOKEN: required('WORKER_API_TOKEN'),
   } as Env;
 
-  // Honest trigger: GitHub sets GITHUB_EVENT_NAME to 'schedule' for the cron and 'workflow_dispatch'
-  // for a manual run — record it so the console doesn't label every manual run as "cron".
-  const trigger = process.env.GITHUB_EVENT_NAME === 'schedule' ? 'cron' : 'manual';
+  // Honest trigger label: the Worker's workflow_dispatch sends source=cron (POLL_SOURCE); a hand-run
+  // from the Actions tab defaults to 'manual'. (GITHUB_EVENT_NAME=schedule is also treated as cron in
+  // case a GitHub schedule is ever re-added.)
+  const trigger = process.env.POLL_SOURCE === 'cron' || process.env.GITHUB_EVENT_NAME === 'schedule' ? 'cron' : 'manual';
   const stats = await runPipeline(env, trigger);
   console.log(
     `poll: ${stats.companiesOk}/${stats.companiesTotal} companies OK · ${stats.jobsNew} new · ` +
