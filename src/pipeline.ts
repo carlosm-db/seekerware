@@ -9,7 +9,7 @@ import { normalizeTitle, scoreJob, type ScoringConfig } from './scoring';
 import { checkFreshness, reliablyStale } from './freshness';
 import { formatDigest, formatJobMessage, formatMaintenance, ruleBasedTexts, sendTelegram } from './notify';
 import { generateCv } from './ia/cv_factory';
-import { RunStats, trackedFetch } from './runstats';
+import { RunStats, atsTimeoutMs, trackedFetch } from './runstats';
 import { RunBatch, getCompaniesPage, getCompanyJobs, getConfigValue, openRun, writeCheckpoint, type StoredCompany } from './store';
 
 /**
@@ -81,7 +81,12 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
     const maxNewPerRun = Number((await getConfigValue(env, 'max_new_jobs_per_run')) ?? '100');
     // Cap on per-job description fetches per run (list-only connectors: SF <urlset>,
     // Workday). Protects the 50-subrequest budget; overflow spills to the next run.
-    const maxDetailPerRun = Number((await getConfigValue(env, 'max_detail_fetches_per_run')) ?? '12');
+    const maxDetailPerRun = Number((await getConfigValue(env, 'max_detail_fetches_per_run')) ?? '18');
+    // Per-company detail cap: no single company can eat the whole run budget, so companies late in
+    // the page (list-only boards like Sun Life) still get seeded instead of being starved.
+    const detailPerCompany = Number((await getConfigValue(env, 'detail_per_company')) ?? '6');
+    // Optional per-ATS fetch-timeout overrides ({ats: ms}); SF/Workday get baked longer defaults.
+    const atsTimeouts = JSON.parse((await getConfigValue(env, 'ats_timeouts')) ?? '{}') as Record<string, number>;
     const observability = JSON.parse((await getConfigValue(env, 'observability')) ?? '{}') as {
       maintenance_fail_streak?: number;
       cv_pending_max?: number;
@@ -92,8 +97,11 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
     // company review, so queued CVs build within ~15 min without waking a burst). A burst run
     // no longer builds CVs here — it only reviews companies.
 
-    const { companies, nextCursor } = await getCompaniesPage(env, stats);
+    const { companies, nextCursor, wrapped } = await getCompaniesPage(env, stats);
     stats.companiesTotal = companies.length;
+    // Cumulative coverage of the roster this rotation: += the page, reset when a new rotation starts.
+    const prevCovered = Number((await getConfigValue(env, 'rotation_covered')) ?? '0') || 0;
+    stats.rotationCovered = wrapped ? companies.length : prevCovered + companies.length;
 
     for (let i = 0; i < companies.length; i++) {
       const company = companies[i]!;
@@ -103,15 +111,18 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
         run_id: runId, i: i + 1, total: companies.length,
         company: company.name, ats: company.ats, ts: new Date().toISOString(),
       });
+      // Per-company fetcher with the ATS's timeout: slow list-only feeds (SF/Workday) get longer
+      // than the fast API boards, so Scotiabank isn't clipped while a real hang is still aborted.
+      const cFetch = trackedFetch(stats, atsTimeoutMs(atsTimeouts, company.ats, fetchTimeoutMs));
       try {
-        await processCompany(env, company, config, maxDays, maxNewPerRun, maxDetailPerRun, nowIso, stats, batch, doFetch);
+        await processCompany(env, company, config, maxDays, maxNewPerRun, maxDetailPerRun, detailPerCompany, nowIso, stats, batch, cFetch);
         stats.companiesOk++;
-        batch.companySuccess(company.id, nowIso);
+        batch.companySuccess(company.id, runId, nowIso);
       } catch (err) {
         stats.companiesFail++;
         const detail = err instanceof Error ? err.message : 'unknown error';
         stats.event({ type: 'fetch_fail', severity: 'error', company_id: company.id, detail });
-        batch.companyFailure(company.id, nowIso, detail);
+        batch.companyFailure(company.id, runId, nowIso, detail);
         // MAINTENANCE alert exactly when crossing the threshold (anti-spam: only on equality)
         if (company.fail_count + 1 === failStreak) {
           const msg = formatMaintenance(`${company.name} feed failed ${failStreak} runs in a row: ${detail}`);
@@ -128,6 +139,7 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
     }
 
     batch.setConfig('poll_cursor', String(nextCursor));
+    batch.setConfig('rotation_covered', String(stats.rotationCovered));
     if (stats.companiesFail > 0) runStatus = 'partial';
 
     // Quota: warn if the subrequests peak approaches the per-invocation limit
@@ -243,6 +255,7 @@ async function processCompany(
   maxDays: number,
   maxNewPerRun: number,
   maxDetailPerRun: number,
+  maxDetailPerCompany: number,
   nowIso: string,
   stats: RunStats,
   batch: RunBatch,
@@ -257,6 +270,7 @@ async function processCompany(
 
   const existing = await getCompanyJobs(env, stats, company.id);
   const seenHashes = new Set<string>();
+  let companyDetail = 0; // per-company detail-fetch count this run (fairness cap)
 
   for (const job of jobs) {
     const hash = await urlHash(job.url);
@@ -284,8 +298,10 @@ async function processCompany(
     // scoring without it could wrongly reject a "remote in the description" job. Fetch for every
     // fresh new job, capped per run by the subrequest budget; overflow spills to the next run.
     if (connector.fetchDetail && !job.description) {
-      if (stats.detailFetches >= maxDetailPerRun) { stats.jobsNew--; continue; } // budget spent → next run
+      // Stop if the run budget OR this company's fair share is spent → the rest spills to next run.
+      if (stats.detailFetches >= maxDetailPerRun || companyDetail >= maxDetailPerCompany) { stats.jobsNew--; continue; }
       stats.detailFetches++;
+      companyDetail++;
       try {
         Object.assign(job, await connector.fetchDetail(company, job, doFetch));
       } catch (err) {

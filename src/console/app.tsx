@@ -631,7 +631,7 @@ export function consoleApp(): App {
     };
     const rows = (
       await c.env.DB.prepare(
-        `SELECT c.id, c.name, c.ats, c.token, c.active, c.fail_count, c.last_ok_fetch, c.last_error, c.notes,
+        `SELECT c.id, c.name, c.ats, c.token, c.active, c.fail_count, c.last_ok_fetch, c.last_error, c.notes, c.last_run_id,
                 COUNT(j.url_hash) jobs_seen,
                 SUM(CASE WHEN j.verdict IN ('Apply','Stretch-worth-it') THEN 1 ELSE 0 END) survivors
          FROM companies c
@@ -671,7 +671,9 @@ export function consoleApp(): App {
                   <button type="submit">{r.active ? '✅ yes' : '⛔ no'}</button>
                 </form>
               </td>
-              <td>{Number(r.fail_count) > 0 ? <span class="bad">{r.fail_count} failures · {r.last_error}</span> : <span class="ok">ok {fmt(r.last_ok_fetch as string)}</span>}</td>
+              <td>{Number(r.fail_count) > 0
+                ? <span class="bad">{r.fail_count} fail{r.last_run_id ? ` · run ${r.last_run_id}` : ''} · {r.last_error}</span>
+                : <span class="ok">ok{r.last_run_id ? ` · run ${r.last_run_id}` : ''}{r.last_ok_fetch ? ` · ${fmt(String(r.last_ok_fetch))}` : ''}</span>}</td>
               <td>{r.jobs_seen}</td>
               <td>{r.survivors ?? 0}</td>
               <td>{Number(r.jobs_seen) > 0 ? `${((Number(r.survivors ?? 0) / Number(r.jobs_seen)) * 100).toFixed(1)}%` : '—'}</td>
@@ -2139,7 +2141,7 @@ export function consoleApp(): App {
     const pg = pageNum(c);
     const runs = (
       await c.env.DB.prepare(
-        `SELECT id, started_at, status, trigger, duration_ms, companies_ok, companies_fail, jobs_seen, jobs_new, survivors, notified, closed, subrequests, d1_reads, d1_writes, errors FROM runs ORDER BY id DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
+        `SELECT id, started_at, status, trigger, duration_ms, companies_total, companies_ok, companies_fail, jobs_seen, jobs_new, survivors, notified, closed, subrequests, d1_reads, d1_writes, errors, rotation_covered FROM runs ORDER BY id DESC LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
       ).all<Record<string, string | number | null>>()
     ).results;
     const runsHasNext = runs.length > PAGE;
@@ -2237,7 +2239,7 @@ export function consoleApp(): App {
               <td class="muted">{fmt(String(r.started_at))}</td>
               <td class={r.status === 'ok' ? 'ok' : r.status === 'running' ? 'muted' : 'bad'}>{r.status}</td>
               <td class="hide-sm">{r.duration_ms ?? '—'}</td>
-              <td>{r.companies_ok}/{Number(r.companies_ok) + Number(r.companies_fail)}</td>
+              <td>{r.companies_ok}/{r.companies_total ?? (Number(r.companies_ok) + Number(r.companies_fail))} <span class="muted">({r.rotation_covered ?? '—'}/{activeCompanies})</span></td>
               <td class="hide-sm">{r.jobs_seen}</td><td class="hide-sm">{r.jobs_new}</td><td>{r.survivors}</td>
               <td>{r.notified}</td><td class="hide-sm">{r.closed}</td><td class="hide-sm">{r.subrequests}</td>
               <td class={Number(r.errors) > 0 ? 'bad' : ''}>{r.errors}</td>

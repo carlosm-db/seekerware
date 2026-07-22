@@ -28,26 +28,31 @@ export async function getConfigValue(env: Env, key: string): Promise<string | nu
 export async function getCompaniesPage(
   env: Env,
   stats: RunStats,
-): Promise<{ companies: StoredCompany[]; nextCursor: number }> {
+): Promise<{ companies: StoredCompany[]; nextCursor: number; wrapped: boolean }> {
   const pageSize = Number((await getConfigValue(env, 'poll_page_size')) ?? '25');
   const cursor = Number((await getConfigValue(env, 'poll_cursor')) ?? '0');
 
   const q = env.DB.prepare(
     'SELECT id, name, ats, token, active, last_ok_fetch, fail_count FROM companies WHERE active = 1 AND id > ? ORDER BY id LIMIT ?',
   );
+  // Clean rotations: forward pages of pageSize until the roster end (a short last page is fine),
+  // then RESTART at the beginning. No wrap-fill, so a rotation is exactly ceil(active/pageSize)
+  // batches — the boundary the coverage counter (rotation_covered) reports and the owner expects
+  // (25, 50, 75, 100, 115, then reset).
   let res = await q.bind(cursor, pageSize).all<CompanyRow>();
   stats.d1(res.meta);
   let rows = res.results;
-  if (rows.length < pageSize) {
-    // wrap-around: fill the page from the beginning
-    const res2 = await q.bind(0, pageSize - rows.length).all<CompanyRow>();
-    stats.d1(res2.meta);
-    const seen = new Set(rows.map((r) => r.id));
-    rows = rows.concat(res2.results.filter((r) => !seen.has(r.id)));
+  let wrapped = false;
+  if (rows.length === 0) {
+    // cursor is past the end -> a new rotation starts from the beginning
+    res = await q.bind(0, pageSize).all<CompanyRow>();
+    stats.d1(res.meta);
+    rows = res.results;
+    wrapped = true;
   }
   const companies = rows.map((r) => ({ ...r, active: r.active === 1 }));
   const nextCursor = rows.length ? rows[rows.length - 1]!.id : 0;
-  return { companies, nextCursor };
+  return { companies, nextCursor, wrapped };
 }
 
 /** Current state of a company's jobs (for dedup and auto-expire). */
@@ -205,19 +210,19 @@ export class RunBatch {
     }
   }
 
-  companySuccess(companyId: number, nowIso: string): void {
+  companySuccess(companyId: number, runId: number, nowIso: string): void {
     this.statements.push(
       this.env.DB.prepare(
-        'UPDATE companies SET last_ok_fetch = ?, fail_count = 0, fetch_ok_total = fetch_ok_total + 1 WHERE id = ?',
-      ).bind(nowIso, companyId),
+        'UPDATE companies SET last_ok_fetch = ?, fail_count = 0, fetch_ok_total = fetch_ok_total + 1, last_run_id = ? WHERE id = ?',
+      ).bind(nowIso, runId, companyId),
     );
   }
 
-  companyFailure(companyId: number, nowIso: string, error: string): void {
+  companyFailure(companyId: number, runId: number, nowIso: string, error: string): void {
     this.statements.push(
       this.env.DB.prepare(
-        'UPDATE companies SET fail_count = fail_count + 1, fetch_fail_total = fetch_fail_total + 1, last_fail = ?, last_error = ? WHERE id = ?',
-      ).bind(nowIso, error.slice(0, 200), companyId),
+        'UPDATE companies SET fail_count = fail_count + 1, fetch_fail_total = fetch_fail_total + 1, last_fail = ?, last_error = ?, last_run_id = ? WHERE id = ?',
+      ).bind(nowIso, error.slice(0, 200), runId, companyId),
     );
   }
 
@@ -259,7 +264,8 @@ export class RunBatch {
       `UPDATE runs SET finished_at = ?, status = ?, duration_ms = ?,
          companies_total = ?, companies_ok = ?, companies_fail = ?,
          jobs_seen = ?, jobs_new = ?, jobs_scored = ?, survivors = ?, notified = ?, closed = ?,
-         subrequests = ?, d1_reads = ?, d1_writes = ?, gemini_calls = ?, errors = ?, error_summary = ?
+         subrequests = ?, d1_reads = ?, d1_writes = ?, gemini_calls = ?, errors = ?, error_summary = ?,
+         rotation_covered = ?
        WHERE id = ?`,
     )
       .bind(
@@ -267,6 +273,7 @@ export class RunBatch {
         stats.companiesTotal, stats.companiesOk, stats.companiesFail,
         stats.jobsSeen, stats.jobsNew, stats.jobsScored, stats.survivors, stats.notified, stats.closed,
         stats.subrequests, stats.d1Reads, stats.d1Writes, stats.geminiCalls, stats.errors, stats.errorSummary,
+        stats.rotationCovered,
         runId,
       )
       .run();

@@ -32,6 +32,8 @@ export class RunStats {
   d1Reads = 0;
   d1Writes = 0;
   geminiCalls = 0;
+  /** Cumulative companies covered in the current rotation as of this run (for /health coverage). */
+  rotationCovered = 0;
   events: PendingEvent[] = [];
   notifications: PendingNotification[] = [];
 
@@ -68,4 +70,15 @@ export function trackedFetch(stats: RunStats, timeoutMs = 20000) {
     stats.subrequests++;
     return fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(timeoutMs) });
   };
+}
+
+/**
+ * Per-ATS fetch timeout: list-only ATS (SuccessFactors urlset, Workday) fetch slow, large feeds and
+ * legitimately need longer than the fast API boards — a flat 20 s clipped Scotiabank's SF feed. Baked
+ * defaults apply even with no config; a `ats_timeouts` config value ({ats: ms}) overrides per ATS.
+ */
+export const DEFAULT_ATS_TIMEOUTS: Record<string, number> = { successfactors: 35000, workday: 35000 };
+
+export function atsTimeoutMs(cfg: Record<string, number>, ats: string, fallback: number): number {
+  return cfg[ats] ?? DEFAULT_ATS_TIMEOUTS[ats] ?? fallback;
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RunStats, trackedFetch } from '../src/runstats';
+import { RunStats, atsTimeoutMs, trackedFetch } from '../src/runstats';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -31,5 +31,19 @@ describe('trackedFetch', () => {
     await trackedFetch(stats)('https://x.io', { signal: ctrl.signal });
 
     expect(seen?.signal).toBe(ctrl.signal);
+  });
+});
+
+describe('atsTimeoutMs', () => {
+  it('a config override wins over the baked default', () => {
+    expect(atsTimeoutMs({ successfactors: 40000 }, 'successfactors', 20000)).toBe(40000);
+  });
+  it('slow list-only ATS get the longer baked default when unconfigured', () => {
+    expect(atsTimeoutMs({}, 'workday', 20000)).toBe(35000);
+    expect(atsTimeoutMs({}, 'successfactors', 20000)).toBe(35000);
+  });
+  it('everything else falls back to the general timeout', () => {
+    expect(atsTimeoutMs({}, 'greenhouse', 20000)).toBe(20000);
+    expect(atsTimeoutMs({}, 'lever', 20000)).toBe(20000);
   });
 });
