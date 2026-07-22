@@ -65,7 +65,9 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
   const startedMs = Date.now();
   const nowIso = new Date().toISOString();
   const stats = new RunStats();
-  const doFetch = trackedFetch(stats);
+  // Per-fetch timeout so one stalled ATS board can't wedge the whole run (live-tunable, no deploy).
+  const fetchTimeoutMs = Number((await getConfigValue(env, 'fetch_timeout_ms')) ?? '20000') || 20000;
+  const doFetch = trackedFetch(stats, fetchTimeoutMs);
   const runId = await openRun(env, trigger, nowIso);
   const batch = new RunBatch(env);
   let runStatus: 'ok' | 'partial' | 'fail' = 'ok';

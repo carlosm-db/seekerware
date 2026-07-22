@@ -55,10 +55,17 @@ export class RunStats {
   }
 }
 
-/** Wraps EVERY outbound fetch of the pipeline: counts subrequests against the limit of 50. */
-export function trackedFetch(stats: RunStats) {
+/**
+ * Wraps EVERY outbound fetch of the pipeline: counts subrequests against the limit of 50, and
+ * caps each fetch with a timeout. Without it a single stalled ATS endpoint hangs the whole run
+ * until the platform kills it — the run never flushes, so poll_cursor never advances and every
+ * later run re-hits the same company (the Canonical deadlock). On timeout the fetch rejects → the
+ * connector throws → per-company isolation records a fetch_fail and the run continues.
+ * Burst-only wrapper (ATS + Telegram); the Gemini/CV path uses plain fetch, so this never cuts an LLM call.
+ */
+export function trackedFetch(stats: RunStats, timeoutMs = 20000) {
   return (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     stats.subrequests++;
-    return fetch(input, init);
+    return fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(timeoutMs) });
   };
 }

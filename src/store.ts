@@ -122,8 +122,8 @@ export async function writeCheckpoint(
     // Per-run key: each run owns its trail, so a dead run's breadcrumb is never overwritten by a
     // later run (the shared-key v1 lost it within seconds). flush() deletes it on a clean finish;
     // openRun reads + deletes it when it marks the run crashed.
-    await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('run_step:' || ?, ?)")
-      .bind(cp.run_id, JSON.stringify(cp)).run();
+    await env.DB.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)')
+      .bind(`run_step:${cp.run_id}`, JSON.stringify(cp)).run();
   } catch { /* never fail a run over a breadcrumb */ }
 }
 
@@ -246,7 +246,7 @@ export class RunBatch {
     // Reaching flush() = this run finished (ok/partial/fail), not a hard kill: drop its own
     // breadcrumb. Only a killed run leaves run_step:<id> behind for openRun's sweep to record.
     this.statements.push(
-      this.env.DB.prepare("DELETE FROM config WHERE key = 'run_step:' || ?").bind(runId),
+      this.env.DB.prepare('DELETE FROM config WHERE key = ?').bind(`run_step:${runId}`),
     );
     // 1) Run the run's work and accumulate the exact D1 accounting from its metas
     if (this.statements.length) {
