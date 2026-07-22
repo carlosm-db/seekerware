@@ -112,5 +112,15 @@ export function parseAtsUrl(input: string): { ats: Ats; token: string } | null {
     const site = seg.find((s) => !/^[a-z]{2}-[A-Za-z]{2,4}$/.test(s));
     return site ? { ats: 'workday', token: `${host}/${site}` } : null;
   }
+  // SmartRecruiters: jobs/careers.smartrecruiters.com/{companyId}/... or the API host -> token '{companyId}'.
+  if (host === 'jobs.smartrecruiters.com' || host === 'careers.smartrecruiters.com') {
+    return first ? { ats: 'smartrecruiters', token: first } : null;
+  }
+  if (host === 'api.smartrecruiters.com') {
+    // /v1/companies/{id}/postings...
+    const i = seg.indexOf('companies');
+    const id = i >= 0 ? seg[i + 1] : undefined;
+    return id ? { ats: 'smartrecruiters', token: decodeURIComponent(id) } : null;
+  }
   return null;
 }
