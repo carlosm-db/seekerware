@@ -4,6 +4,42 @@ Running record of times an agent (Claude or other) broke a rule or caused
 harm on this project, so the pattern is not repeated. Newest first. Process
 failures only — no owner private data here (CLAUDE.md §4).
 
+## 2026-07-22 — Diagnosed from INFERENCE stated as fact; misread a metric and built a causal story on it (caught: "are you hallucinating?")
+Through the pipeline-crash investigation the agent repeatedly presented guesses as findings:
+- Blamed **Canonical** as the wedging company off a live checkpoint, then — only after being pushed —
+  fetched its board and found it fast (302 jobs, 0.8 s). The checkpoint had just caught a run's *first*
+  company, not the culprit. Same over-read happened again pointing at Scotiabank/KOHO as "the cause"
+  before verifying.
+- Claimed runs "ran 15–20 min → hit the Worker wall-clock limit → caused by my 35 s timeout" — built
+  entirely on **misreading `age_s`** (`now − started_at`, time since a run *started*) as its *runtime*.
+  A crashed run's `age_s` climbs forever regardless of how long it ran; the real runtime (`duration_ms`)
+  was NULL. Nothing supported the 20-minute / wall-clock / overlap story — pure invention.
+- The owner had to challenge twice ("you're guessing not auditing", "are you hallucinating?") before the
+  agent separated solid data (breadcrumbs naming the companies) from the narrative around it.
+- **Rules broken:** CLAUDE.md §1 — audit the real thing, diagnose the ROOT cause; never present inference
+  as diagnosis.
+- **Lessons:** (1) State only what the data shows; say "hypothesis" out loud for anything inferred.
+  (2) Before asserting a cause, verify it cheaply (fetch the board, re-check the metric). (3) Know what a
+  metric MEANS before reasoning on it — `age_s` ≠ runtime. (4) When told "you're guessing," STOP and
+  re-derive from evidence — don't restate the guess with more confidence. Relates to [[change-only-what-asked]].
+
+## 2026-07-22 — Shipped blind value-changes that regressed; changed many levers at once so cause/effect was untraceable
+Chasing the crash, the agent changed behavior by guessing at numbers and shipping without verifying the result:
+- Added a **20 s** global fetch timeout → clipped Scotiabank's slow SF feed (it read before).
+- Then "Phase 1" **raised it to 35 s** → turned runs that had *survived* (Scotiabank failed-fast, run
+  flushed as `partial`) into runs that **crash** on Scotiabank. A "fix" that made it strictly worse.
+- Across the session it changed freshness-first, Greenhouse rich→list-only, per-run breadcrumb, the global
+  timeout, per-ATS timeouts, and detail-budget caps — so when results regressed, isolating which change did
+  it was hard, and each "fix" seeded the next defect.
+- **Rules broken:** don't ship a change whose effect you haven't verified; prefer the smallest provably-correct
+  change (§1, implement only after audit/plan/approval — and confirm the outcome).
+- **Lessons:** (1) A timeout/cap is a behavior change — reason about its worst case (35 s × many fetches)
+  before shipping, and prefer a structural guard (a soft run-time budget that always flushes) over tuning
+  magic numbers. (2) Change ONE lever at a time while debugging, so cause/effect stays legible. (3) After
+  deploying, VERIFY the run actually improved before calling it a fix or stacking the next one. (4) A
+  completing-but-imperfect state (fail-fast, run survives) beats a "more complete" one that crashes — don't
+  trade robustness for coverage.
+
 ## 2026-07-21 (later) — Shipped INCOMPLETE LOGIC (miner add-word forced Español = English) without auditing how adding words works
 The Step-3b keyword miner's "Suggested keywords" add form hardcoded both language slots to the same
 value — a hidden `term_en={term}` AND a hidden `term_es={term}` — silently forcing every mined word to
