@@ -2093,37 +2093,15 @@ export function consoleApp(): App {
   });
 
   // ---------- Health ----------
-  // Home: dashboard (folded in from the old Overview) + ops monitor.
+  // Home (/, /overview redirect here): focused pipeline-health monitor.
   app.get('/health', async (c) => {
     const pg = pageNum(c);
-    const pendingTotal = await pendingTriage(c.env);
-    const fromIso = new Date(Date.now() - 7 * 86400000).toISOString();
-    const week = await c.env.DB.prepare(
-      `SELECT
-        (SELECT COUNT(*) FROM applications WHERE stage='applied' AND applied_at >= datetime('now','-7 days')) applied_week,
-        (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1) seen,
-        (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1 AND verdict != 'Skip') survivors,
-        (SELECT COUNT(*) FROM jobs WHERE notified_at >= ?1) notified,
-        (SELECT COUNT(*) FROM applications WHERE applied_at >= ?1) applied`,
-    ).bind(fromIso).first<Record<string, number>>();
-    const panel = await c.env.DB.prepare(
-      `SELECT
-        (SELECT COUNT(*) FROM applications WHERE stage NOT IN ('dismissed','rejected')) tracker_active,
-        (SELECT COUNT(*) FROM companies WHERE active=1) companies_active,
-        (SELECT COUNT(*) FROM companies) companies_total,
-        (SELECT COUNT(*) FROM jobs) jobs_total,
-        (SELECT COUNT(*) FROM blocks WHERE status='approved') blocks_approved,
-        (SELECT COUNT(*) FROM blocks) blocks_total,
-        (SELECT COUNT(*) FROM config WHERE key='contact_profile') contact_set`,
-    ).first<Record<string, number>>();
-    const cards: Array<[string, string, string, string]> = [
-      ['Operate', '/jobs?view=survivors', `${pendingTotal}`, 'new survivors to triage'],
-      ['Operate', '/tracker', `${panel?.tracker_active ?? 0}`, 'active applications'],
-      ['Operate', '/jobs', `${panel?.jobs_total ?? 0}`, 'jobs seen (all)'],
-      ['Profile & setup', '/companies', `${panel?.companies_active ?? 0}/${panel?.companies_total ?? 0}`, 'companies active'],
-      ['Profile & setup', '/blocks_bank', `${panel?.blocks_approved ?? 0}/${panel?.blocks_total ?? 0}`, 'blocks approved'],
-      ['Profile & setup', '/contact', panel?.contact_set ? 'set ✓' : 'not set', 'contact profile'],
-    ];
+    const fmtDur = (ms: number | null): string => {
+      if (ms == null) return '—';
+      if (ms < 1000) return `${ms}ms`;
+      const s = Math.round(ms / 1000);
+      return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+    };
 
     const runs = (
       await c.env.DB.prepare(
@@ -2138,45 +2116,55 @@ export function consoleApp(): App {
         'SELECT ts, type, severity, detail FROM events ORDER BY id DESC LIMIT 30',
       ).all<Record<string, string>>()
     ).results;
-    const today = await c.env.DB.prepare(
-      "SELECT SUM(d1_reads) reads, SUM(d1_writes) writes, COUNT(*) runs FROM runs WHERE date(started_at) = date('now')",
-    ).first<{ reads: number; writes: number; runs: number }>();
-    const lastRun = runs[0]?.started_at ? fmt(String(runs[0].started_at)) : '—';
+
+    // Ops KPIs: today's runs + D1, last-7-days survivors/notified, and boards currently failing.
+    const fromIso = new Date(Date.now() - 7 * 86400000).toISOString();
+    const kpi = await c.env.DB.prepare(
+      `SELECT
+        (SELECT COUNT(*) FROM runs WHERE date(started_at) = date('now')) runs_today,
+        (SELECT COALESCE(SUM(d1_reads),0) FROM runs WHERE date(started_at) = date('now')) reads,
+        (SELECT COALESCE(SUM(d1_writes),0) FROM runs WHERE date(started_at) = date('now')) writes,
+        (SELECT COUNT(*) FROM jobs WHERE first_seen >= ?1 AND verdict != 'Skip') survivors_7d,
+        (SELECT COUNT(*) FROM jobs WHERE notified_at >= ?1) notified_7d,
+        (SELECT COUNT(*) FROM companies WHERE active=1 AND fail_count > 0) failing`,
+    ).bind(fromIso).first<Record<string, number>>();
+
+    const last = runs[0];
+    const lastRun = last?.started_at ? fmt(String(last.started_at)) : '—';
+    const lastStatus = last?.status ? String(last.status) : 'no runs';
+    const lastDur = fmtDur((last?.duration_ms as number | null) ?? null);
+    // Next scheduled fire: cron '0 17,22 * * *' UTC (noon & 17:00 America/Bogota). Best-effort —
+    // GitHub scheduling can lag or drop, so it's labelled approximate.
+    const nowMs = Date.now();
+    const d = new Date();
+    const nextMs = [0, 1]
+      .flatMap((day) => [17, 22].map((h) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + day, h, 0, 0)))
+      .filter((t) => t > nowMs)
+      .sort((a, b) => a - b)[0];
+    const nextRun = nextMs ? fmt(new Date(nextMs).toISOString()) : '—';
 
     return page(c, 'Health', (
       <>
         <div class="statgrid">
-          <div class="stat"><div class="n">{pendingTotal}</div><div class="l">pending triage</div></div>
-          <div class="stat"><div class="n">{week?.applied_week ?? 0}</div><div class="l">applied this week</div></div>
-          <div class="stat"><div class="n">{week?.survivors ?? 0}</div><div class="l">survivors this week</div></div>
-          <div class="stat"><div class="n">{today?.runs ?? 0}</div><div class="l">runs today</div></div>
+          <div class="stat"><div class="n">{kpi?.runs_today ?? 0}</div><div class="l">runs today</div></div>
+          <div class="stat"><div class="n">{kpi?.survivors_7d ?? 0}</div><div class="l">survivors (7d)</div></div>
+          <div class="stat"><div class="n">{kpi?.notified_7d ?? 0}</div><div class="l">notified (7d)</div></div>
+          <div class="stat"><div class={Number(kpi?.failing ?? 0) > 0 ? 'n bad' : 'n'}>{kpi?.failing ?? 0}</div><div class="l">failing boards</div></div>
         </div>
         <div class="card">
-          <h2>This week's funnel</h2>
-          <p>seen <strong>{week?.seen ?? 0}</strong> → new-survivors <strong>{week?.survivors ?? 0}</strong> → notified <strong>{week?.notified ?? 0}</strong> → applied <strong>{week?.applied ?? 0}</strong></p>
-          <p class="muted">The Monday digest to Telegram summarizes these same numbers.</p>
-        </div>
-        <div class="cardgrid">
-          {cards.map(([group, href, n, label]) => (
-            <a class="panelcard" href={href}>
-              <div class="pg">{group}</div>
-              <div class="pn">{n}</div>
-              <div class="pl">{label} →</div>
-            </a>
-          ))}
-        </div>
-        <div class="card">
-          <strong>Polling</strong>{' '}
-          <span class="muted">GitHub Actions (poll.yml) · twice daily 07:00 / 17:00 America/Bogota · last run {lastRun} · D1 today {today?.writes ?? 0} writes / {today?.reads ?? 0} reads</span>
+          <strong>Pipeline</strong>{' '}
+          <span class="muted">GitHub Actions (poll.yml) · runs noon &amp; 17:00 America/Bogota</span>
+          <div class="muted">last run {lastRun} · <span class={lastStatus === 'ok' ? 'ok' : lastStatus === 'no runs' ? 'muted' : 'bad'}>{lastStatus}</span> · {lastDur} · next ~{nextRun}</div>
+          <div class="muted">D1 today: {kpi?.writes ?? 0} writes / {kpi?.reads ?? 0} reads</div>
         </div>
         <div class="table-wrap"><table>
-          <tr><th>run</th><th>start</th><th>status</th><th class="hide-sm">ms</th><th>companies</th><th class="hide-sm">seen</th><th class="hide-sm">new</th><th>surv.</th><th>notif.</th><th class="hide-sm">closed</th><th class="hide-sm">subreq</th><th>errors</th></tr>
+          <tr><th>run</th><th>start</th><th>status</th><th class="hide-sm">dur</th><th>companies</th><th class="hide-sm">seen</th><th class="hide-sm">new</th><th>surv.</th><th>notif.</th><th class="hide-sm">closed</th><th class="hide-sm">subreq</th><th>errors</th></tr>
           {runs.map((r) => (
             <tr>
               <td>{r.id} <span class="muted">{r.trigger}</span></td>
               <td class="muted">{fmt(String(r.started_at))}</td>
               <td class={r.status === 'ok' ? 'ok' : r.status === 'running' ? 'muted' : 'bad'}>{r.status}</td>
-              <td class="hide-sm">{r.duration_ms ?? '—'}</td>
+              <td class="hide-sm">{fmtDur((r.duration_ms as number | null) ?? null)}</td>
               <td>{r.companies_ok}/{r.companies_total ?? (Number(r.companies_ok) + Number(r.companies_fail))}</td>
               <td class="hide-sm">{r.jobs_seen}</td><td class="hide-sm">{r.jobs_new}</td><td>{r.survivors}</td>
               <td>{r.notified}</td><td class="hide-sm">{r.closed}</td><td class="hide-sm">{r.subrequests}</td>
