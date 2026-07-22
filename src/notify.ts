@@ -43,6 +43,42 @@ export async function sendTelegram(
   }
 }
 
+export interface NotifyPayload {
+  /** Pre-formatted message text (built with the formatters below). */
+  text: string;
+  /** Job url_hash — present only for job notifications; the Worker attaches the kit buttons. */
+  hash?: string;
+  kind: 'job' | 'maintenance' | 'digest';
+}
+
+/**
+ * Poller path (scripts/poll.ts): send a notification THROUGH the Worker's /api/notify instead of
+ * calling Telegram directly, so TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID stay in Cloudflare and are
+ * never copied into GitHub Actions. The Worker formats buttons + calls sendTelegram, and returns
+ * the same TelegramResult shape (message_id) so the run records it exactly as before.
+ */
+export async function notifyViaWorker(
+  env: Env,
+  payload: NotifyPayload,
+  doFetch: Fetcher = fetch,
+): Promise<TelegramResult> {
+  if (!env.WORKER_URL || !env.WORKER_TOKEN) {
+    return { ok: false, error: 'WORKER_URL/WORKER_TOKEN not configured' };
+  }
+  try {
+    const res = await doFetch(`${env.WORKER_URL.replace(/\/$/, '')}/api/notify`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${env.WORKER_TOKEN}` },
+      body: JSON.stringify(payload),
+    });
+    const body = (await res.json()) as TelegramResult;
+    if (!res.ok || !body.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
+    return body;
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'network error' };
+  }
+}
+
 /** Escapes third-party content for parse_mode HTML (job titles are untrusted text). */
 export function escapeHtml(text: string): string {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');

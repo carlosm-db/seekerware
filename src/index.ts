@@ -6,7 +6,7 @@ import { urlHash } from './connectors/common';
 import { counts } from './store';
 import { loadScoringConfig } from './config-store';
 import { scoreJob, type ScoreResult, type ScoringConfig } from './scoring';
-import { buildPendingCvs, runPipeline } from './pipeline';
+import { buildPendingCvs } from './pipeline';
 import { sendTelegram } from './notify';
 import { consoleApp } from './console/app';
 import type { ConsoleEnv } from './console/auth';
@@ -17,15 +17,18 @@ const app = consoleApp();
 
 app.get('/api/health', async (c) => c.json({ ok: true, tables: await counts(c.env) }));
 
-app.post('/api/run', async (c) => {
-  const stats = await runPipeline(c.env, 'manual');
-  return c.json({
-    ok: true,
-    companies: { total: stats.companiesTotal, ok: stats.companiesOk, fail: stats.companiesFail },
-    jobs: { seen: stats.jobsSeen, new: stats.jobsNew, survivors: stats.survivors, notified: stats.notified, closed: stats.closed },
-    subrequests: stats.subrequests,
-    errors: stats.errors,
-  });
+// Notifications are delivered here so the Telegram token stays in Cloudflare: the Actions poller
+// (scripts/poll.ts) POSTs each survivor/alert and this endpoint attaches the kit buttons + sends.
+app.post('/api/notify', async (c) => {
+  const { text, hash, kind } = await c.req.json<{ text?: string; hash?: string; kind?: string }>();
+  if (!text) return c.json({ ok: false, error: 'missing text' }, 400);
+  let replyMarkup: unknown;
+  if (hash && kind === 'job') {
+    const { kitButtons } = await import('./tg');
+    replyMarkup = kitButtons(hash);
+  }
+  const sent = await sendTelegram(c.env, text, fetch, replyMarkup);
+  return c.json(sent, sent.ok ? 200 : 502);
 });
 
 app.post('/api/notify-test', async (c) => {
@@ -130,51 +133,9 @@ export default {
   fetch: app.fetch,
 
   async scheduled(_controller: ScheduledController, env: ConsoleEnv, ctx: ExecutionContext): Promise<void> {
-    // The cron is a dumb 15-min 24/7 tick; the owner-editable D1 config `schedule`
-    // (console /health panel) decides which ticks run a batch. batchesNeeded = one
-    // full company rotation, so each burst covers every active company once.
-    const { normalizeSchedule, shouldRunAt } = await import('./schedule');
-    let raw: unknown = null;
-    try {
-      const row = await env.DB.prepare("SELECT value FROM config WHERE key='schedule'").first<{ value: string }>();
-      if (row) raw = JSON.parse(row.value);
-    } catch { /* fall back to defaults */ }
-    const sched = normalizeSchedule(raw);
-
-    const [countRow, pageRow, forceRow] = await Promise.all([
-      env.DB.prepare('SELECT COUNT(*) n FROM companies WHERE active = 1').first<{ n: number }>(),
-      env.DB.prepare("SELECT value FROM config WHERE key='poll_page_size'").first<{ value: string }>(),
-      env.DB.prepare("SELECT value FROM config WHERE key='force_burst'").first<{ value: string }>(),
-    ]);
-    const pageSize = Math.max(1, Number(pageRow?.value ?? '25') || 25);
-    const batchesNeeded = Math.max(1, Math.ceil((countRow?.n ?? 0) / pageSize));
-    // On-demand burst requested from /health: a counter of batches still to run. Adds review
-    // ticks OUTSIDE the scheduled windows until it hits 0 (bounded); auto-bursts are unaffected.
-    const forceBurst = Math.max(0, Number(forceRow?.value ?? '0') || 0);
-
-    // Every tick: drain the CV queue (reads jobs WHERE cv_pending=1; no-op if none). Decoupled
-    // from the company review — never polls a company — so queued CVs (e.g. from Telegram
-    // Prepare) build within ~15 min without waking a burst.
+    // ATS polling runs in GitHub Actions (scripts/poll.ts) — no 10 ms CPU limit, whole roster each
+    // run. The Worker cron only drains the CV queue (reads jobs WHERE cv_pending=1; no-op if none),
+    // so a Telegram/console Prepare builds its CV within ~5 min without a separate trigger.
     ctx.waitUntil(buildPendingCvs(env).catch((e) => console.log(`cv queue: ${e instanceof Error ? e.message : 'err'}`)));
-
-    // Company review: scheduled burst windows, OR an on-demand burst requested from /health.
-    if (!shouldRunAt(new Date(), sched, batchesNeeded) && forceBurst === 0) {
-      console.log(`cron tick: company review skipped (outside bursts [${sched.burst_hours.join(',')}] ${sched.timezone}); CV queue checked`);
-      return;
-    }
-    // Consume one forced batch (bounded: decrements to 0 → stops on its own).
-    if (forceBurst > 0) {
-      await env.DB.prepare("INSERT INTO config (key, value) VALUES ('force_burst', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-        .bind(String(forceBurst - 1)).run();
-    }
-    ctx.waitUntil(
-      runPipeline(env, 'cron').then((stats) => {
-        console.log(
-          `run: ${stats.companiesOk}/${stats.companiesTotal} companies OK · ${stats.jobsNew} new · ` +
-            `${stats.survivors} survivors · ${stats.notified} notified · ${stats.closed} closed · ` +
-            `${stats.subrequests} subrequests · ${stats.errors} errors`,
-        );
-      }),
-    );
   },
 } satisfies ExportedHandler<ConsoleEnv>;

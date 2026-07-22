@@ -24,35 +24,13 @@ export async function getConfigValue(env: Env, key: string): Promise<string | nu
   return row?.value ?? null;
 }
 
-/** Round-robin page of active companies (cursor in config['poll_cursor']). */
-export async function getCompaniesPage(
-  env: Env,
-  stats: RunStats,
-): Promise<{ companies: StoredCompany[]; nextCursor: number; wrapped: boolean }> {
-  const pageSize = Number((await getConfigValue(env, 'poll_page_size')) ?? '25');
-  const cursor = Number((await getConfigValue(env, 'poll_cursor')) ?? '0');
-
-  const q = env.DB.prepare(
-    'SELECT id, name, ats, token, active, last_ok_fetch, fail_count FROM companies WHERE active = 1 AND id > ? ORDER BY id LIMIT ?',
-  );
-  // Clean rotations: forward pages of pageSize until the roster end (a short last page is fine),
-  // then RESTART at the beginning. No wrap-fill, so a rotation is exactly ceil(active/pageSize)
-  // batches — the boundary the coverage counter (rotation_covered) reports and the owner expects
-  // (25, 50, 75, 100, 115, then reset).
-  let res = await q.bind(cursor, pageSize).all<CompanyRow>();
+/** Every active company (the poller covers the whole roster each run — no paging/cursor). */
+export async function getActiveCompanies(env: Env, stats: RunStats): Promise<StoredCompany[]> {
+  const res = await env.DB.prepare(
+    'SELECT id, name, ats, token, active, last_ok_fetch, fail_count FROM companies WHERE active = 1 ORDER BY id',
+  ).all<CompanyRow>();
   stats.d1(res.meta);
-  let rows = res.results;
-  let wrapped = false;
-  if (rows.length === 0) {
-    // cursor is past the end -> a new rotation starts from the beginning
-    res = await q.bind(0, pageSize).all<CompanyRow>();
-    stats.d1(res.meta);
-    rows = res.results;
-    wrapped = true;
-  }
-  const companies = rows.map((r) => ({ ...r, active: r.active === 1 }));
-  const nextCursor = rows.length ? rows[rows.length - 1]!.id : 0;
-  return { companies, nextCursor, wrapped };
+  return res.results.map((r) => ({ ...r, active: r.active === 1 }));
 }
 
 /** Current state of a company's jobs (for dedup and auto-expire). */
@@ -70,66 +48,16 @@ export async function getCompanyJobs(
 
 /** Opens the run row (immediate INSERT: a crash must be data, not silence) and stamps orphans. */
 export async function openRun(env: Env, trigger: 'cron' | 'manual', nowIso: string): Promise<number> {
-  // Stamp orphans: a prior run still 'running' after 10 min never flushed = crashed. Compare via
-  // julianday() (it parses the ISO 'T'). A plain `started_at < datetime(?, '-10 minutes')` silently
-  // matched NOTHING — datetime() returns a SPACE-separated string and 'T' (84) > ' ' (32) in string
-  // order, so the `<` was never true (that dead sweep is why stuck 'running' rows piled up).
-  const stuck = (
-    await env.DB.prepare(
-      "SELECT id FROM runs WHERE status = 'running' AND (julianday(?) - julianday(started_at)) > 10.0/1440",
-    ).bind(nowIso).all<{ id: number }>()
-  ).results;
-  if (stuck.length) {
-    const ids = stuck.map((r) => r.id);
-    const ph = ids.map(() => '?').join(',');
-    await env.DB.prepare(
-      `UPDATE runs SET status = 'crashed', finished_at = ? WHERE id IN (${ph})`,
-    ).bind(nowIso, ...ids).run();
-    // Each crashed run kept its OWN breadcrumb (run_step:<id>), untouched by later runs. Turn each
-    // into a permanent run_crash event (which company/connector it died on; the ts separates a hang
-    // from a fast CPU death), then delete the key.
-    const keys = ids.map((id) => `run_step:${id}`);
-    const crumbs = (
-      await env.DB.prepare(`SELECT key, value FROM config WHERE key IN (${keys.map(() => '?').join(',')})`)
-        .bind(...keys).all<{ key: string; value: string }>()
-    ).results;
-    for (const row of crumbs) {
-      try {
-        const c = JSON.parse(row.value) as { run_id?: number; company?: string; ats?: string; i?: number; total?: number; ts?: string };
-        await env.DB.prepare(
-          'INSERT INTO events (run_id, ts, type, severity, company_id, url_hash, detail) VALUES (?,?,?,?,?,?,?)',
-        ).bind(c.run_id ?? null, nowIso, 'run_crash', 'error', null, null,
-          `died at ${c.company ?? '?'} (${c.ats ?? '?'}) ${c.i ?? '?'}/${c.total ?? '?'} @ ${c.ts ?? '?'}`).run();
-      } catch { /* unparseable — skip this one */ }
-    }
-    if (crumbs.length) {
-      await env.DB.prepare(`DELETE FROM config WHERE key IN (${crumbs.map(() => '?').join(',')})`)
-        .bind(...crumbs.map((r) => r.key)).run();
-    }
-  }
+  // Orphan sweep: a prior run still 'running' after 10 min never flushed = crashed. Compare via
+  // julianday() (it parses the ISO 'T'); a plain string '<' against datetime() never matches.
+  await env.DB.prepare(
+    "UPDATE runs SET status = 'crashed', finished_at = ? WHERE status = 'running' AND (julianday(?) - julianday(started_at)) > 10.0/1440",
+  ).bind(nowIso, nowIso).run();
   const row = await env.DB.prepare('INSERT INTO runs (started_at, trigger) VALUES (?, ?) RETURNING id')
     .bind(nowIso, trigger)
     .first<{ id: number }>();
   if (!row) throw new Error('could not open run row');
   return row.id;
-}
-
-/**
- * Immediate best-effort breadcrumb of where a run is, written BEFORE each company. The buffered
- * RunBatch flushes only at the end, so a hard-killed run would leave no trace; this survives the
- * kill because it was already written. openRun reads it to attribute a crash to its company.
- */
-export async function writeCheckpoint(
-  env: Env,
-  cp: { run_id: number; i: number; total: number; company: string; ats: string; ts: string },
-): Promise<void> {
-  try {
-    // Per-run key: each run owns its trail, so a dead run's breadcrumb is never overwritten by a
-    // later run (the shared-key v1 lost it within seconds). flush() deletes it on a clean finish;
-    // openRun reads + deletes it when it marks the run crashed.
-    await env.DB.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)')
-      .bind(`run_step:${cp.run_id}`, JSON.stringify(cp)).run();
-  } catch { /* never fail a run over a breadcrumb */ }
 }
 
 export interface JobInsert {
@@ -248,11 +176,6 @@ export class RunBatch {
         ).bind(runId, n.url_hash ?? null, n.kind, nowIso, n.status, n.tg_message_id ?? null, n.error ?? null),
       );
     }
-    // Reaching flush() = this run finished (ok/partial/fail), not a hard kill: drop its own
-    // breadcrumb. Only a killed run leaves run_step:<id> behind for openRun's sweep to record.
-    this.statements.push(
-      this.env.DB.prepare('DELETE FROM config WHERE key = ?').bind(`run_step:${runId}`),
-    );
     // 1) Run the run's work and accumulate the exact D1 accounting from its metas
     if (this.statements.length) {
       const results = await this.env.DB.batch(this.statements);

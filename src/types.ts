@@ -44,4 +44,8 @@ export interface Env {
   CV_TEMPLATE_DOC_ID?: string;
   /** Secret path segment of the Telegram webhook (step 8 two-way bot). */
   TELEGRAM_WEBHOOK_TOKEN?: string;
+  /** Poller only (scripts/poll.ts): base URL of the Worker, to POST /api/notify. */
+  WORKER_URL?: string;
+  /** Poller only: the Worker's API_TOKEN value, sent as Bearer to /api/notify. */
+  WORKER_TOKEN?: string;
 }

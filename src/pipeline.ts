@@ -7,10 +7,10 @@ import { urlHash } from './connectors/common';
 import { loadScoringConfig } from './config-store';
 import { normalizeTitle, scoreJob, type ScoringConfig } from './scoring';
 import { checkFreshness, reliablyStale } from './freshness';
-import { formatDigest, formatJobMessage, formatMaintenance, ruleBasedTexts, sendTelegram } from './notify';
+import { formatDigest, formatJobMessage, formatMaintenance, notifyViaWorker, ruleBasedTexts } from './notify';
 import { generateCv } from './ia/cv_factory';
 import { RunStats, atsTimeoutMs, trackedFetch } from './runstats';
-import { RunBatch, getCompaniesPage, getCompanyJobs, getConfigValue, openRun, writeCheckpoint, type StoredCompany } from './store';
+import { RunBatch, getActiveCompanies, getCompanyJobs, getConfigValue, openRun, type StoredCompany } from './store';
 
 /**
  * Drains the CV queue: builds ONE queued CV (oldest cv_pending job) per call. Standalone so the
@@ -75,16 +75,14 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
   try {
     const config = await loadScoringConfig(env);
     const maxDays = Number((await getConfigValue(env, 'FRESHNESS_MAX_DAYS')) ?? '3');
-    // Cap on NEW jobs scored per run: protects the free tier's CPU limit
-    // (error 1102 confirmed by seeding 1,336 at once). Seeding completes in
-    // batches over successive runs; steady state never comes close.
-    const maxNewPerRun = Number((await getConfigValue(env, 'max_new_jobs_per_run')) ?? '100');
-    // Cap on per-job description fetches per run (list-only connectors: SF <urlset>,
-    // Workday). Protects the 50-subrequest budget; overflow spills to the next run.
-    const maxDetailPerRun = Number((await getConfigValue(env, 'max_detail_fetches_per_run')) ?? '18');
-    // Per-company detail cap: no single company can eat the whole run budget, so companies late in
-    // the page (list-only boards like Sun Life) still get seeded instead of being starved.
-    const detailPerCompany = Number((await getConfigValue(env, 'detail_per_company')) ?? '6');
+    // The poller runs in Node (no 10 ms CPU / 50-subrequest limit), so the Worker-era caps are
+    // relaxed to effectively unlimited — every fresh new job is scored and enriched each run.
+    // Still config-tunable if a specific board ever needs throttling for politeness.
+    const maxNewPerRun = Number((await getConfigValue(env, 'max_new_jobs_per_run')) ?? '100000');
+    const maxDetailPerRun = Number((await getConfigValue(env, 'max_detail_fetches_per_run')) ?? '100000');
+    const detailPerCompany = Number((await getConfigValue(env, 'detail_per_company')) ?? '1000');
+    // Companies are processed concurrently (Node has no 6-connection cap) to keep each run ~1 min.
+    const concurrency = Number((await getConfigValue(env, 'poll_concurrency')) ?? '10') || 10;
     // Optional per-ATS fetch-timeout overrides ({ats: ms}); SF/Workday get baked longer defaults.
     const atsTimeouts = JSON.parse((await getConfigValue(env, 'ats_timeouts')) ?? '{}') as Record<string, number>;
     const observability = JSON.parse((await getConfigValue(env, 'observability')) ?? '{}') as {
@@ -97,20 +95,13 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
     // company review, so queued CVs build within ~15 min without waking a burst). A burst run
     // no longer builds CVs here — it only reviews companies.
 
-    const { companies, nextCursor, wrapped } = await getCompaniesPage(env, stats);
+    const companies = await getActiveCompanies(env, stats);
     stats.companiesTotal = companies.length;
-    // Cumulative coverage of the roster this rotation: += the page, reset when a new rotation starts.
-    const prevCovered = Number((await getConfigValue(env, 'rotation_covered')) ?? '0') || 0;
-    stats.rotationCovered = wrapped ? companies.length : prevCovered + companies.length;
+    stats.rotationCovered = companies.length; // the poller covers the whole roster every run
 
-    for (let i = 0; i < companies.length; i++) {
-      const company = companies[i]!;
-      // Breadcrumb BEFORE the work: if this company hard-kills the run, openRun on the next run
-      // reads this to record where it died. Immediate write, best-effort (never fails the run).
-      await writeCheckpoint(env, {
-        run_id: runId, i: i + 1, total: companies.length,
-        company: company.name, ats: company.ats, ts: new Date().toISOString(),
-      });
+    // Process companies with bounded concurrency. Per-company isolation is unchanged; the shared
+    // stats/batch tolerate async interleaving now that the per-run caps no longer bind.
+    await mapPool(companies, concurrency, async (company) => {
       // Per-company fetcher with the ATS's timeout: slow list-only feeds (SF/Workday) get longer
       // than the fast API boards, so Scotiabank isn't clipped while a real hang is still aborted.
       const cFetch = trackedFetch(stats, atsTimeoutMs(atsTimeouts, company.ats, fetchTimeoutMs));
@@ -126,7 +117,7 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
         // MAINTENANCE alert exactly when crossing the threshold (anti-spam: only on equality)
         if (company.fail_count + 1 === failStreak) {
           const msg = formatMaintenance(`${company.name} feed failed ${failStreak} runs in a row: ${detail}`);
-          const sent = await sendTelegram(env, msg, doFetch);
+          const sent = await notifyViaWorker(env, { text: msg, kind: 'maintenance' }, doFetch);
           stats.notifications.push({
             kind: 'maintenance',
             status: sent.ok ? 'sent' : 'fail',
@@ -136,10 +127,8 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
           stats.event({ type: 'maintenance_alert', severity: 'warn', company_id: company.id, detail });
         }
       }
-    }
+    });
 
-    batch.setConfig('poll_cursor', String(nextCursor));
-    batch.setConfig('rotation_covered', String(stats.rotationCovered));
     if (stats.companiesFail > 0) runStatus = 'partial';
 
     // Quota: warn if the subrequests peak approaches the per-invocation limit
@@ -191,7 +180,7 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
       await env.DB.prepare("INSERT OR REPLACE INTO config (key, value) VALUES ('digest_last_sent', ?)")
         .bind(weekKey).run();
       const digest = await buildDigest(env);
-      const sent = await sendTelegram(env, formatDigest(digest), doFetch);
+      const sent = await notifyViaWorker(env, { text: formatDigest(digest), kind: 'digest' }, doFetch);
       stats.notifications.push({ kind: 'digest', status: sent.ok ? 'sent' : 'fail', tg_message_id: sent.message_id, error: sent.error });
       stats.event({ type: 'digest_sent', severity: sent.ok ? 'info' : 'warn', detail: `${weekKey}${sent.ok ? '' : ` FAILED: ${sent.error}`}` });
     }
@@ -213,6 +202,18 @@ function isoWeek(d: Date): number {
   t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
   const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
   return Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
+
+/** Runs `fn` over `items` with at most `limit` tasks in flight at once. */
+async function mapPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while (next < items.length) {
+      const item = items[next++]!;
+      await fn(item);
+    }
+  });
+  await Promise.all(workers);
 }
 
 async function buildDigest(env: Env) {
@@ -352,9 +353,8 @@ async function processCompany(
             whyItFits: texts.whyItFits, gapToAddress: texts.gapToAddress,
             positioningLead: texts.positioningLead, ruleBased,
           });
-          // Step-8 buttons: Prepare / I applied / Dismiss (two-way bot).
-          const { kitButtons } = await import('./tg');
-          const sent = await sendTelegram(env, msg, doFetch, kitButtons(hash));
+          // Step-8 buttons (Prepare / I applied / Dismiss) are attached by the Worker's /api/notify.
+          const sent = await notifyViaWorker(env, { text: msg, hash, kind: 'job' }, doFetch);
           stats.notifications.push({
             url_hash: hash, kind: 'job', status: sent.ok ? 'sent' : 'fail',
             tg_message_id: sent.message_id, error: sent.error,

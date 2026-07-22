@@ -10,11 +10,13 @@
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
+    "poll": "tsx scripts/poll.ts",
     "migrate:local": "wrangler d1 migrations apply seekerware --local",
     "migrate:remote": "wrangler d1 migrations apply seekerware --remote"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260714.1",
+    "tsx": "^4.19.0",
     "typescript": "^5.5.0",
     "vitest": "^3.0.0",
     "wrangler": "^4.112.0"
