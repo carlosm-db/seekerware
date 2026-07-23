@@ -152,14 +152,14 @@ describe('connector successfactors', () => {
 <url><loc>https://empleo.grupobancolombia.com/job/Bogota-Analista-de-Datos-Senior-CO/604033/</loc><lastmod>2026-07-18</lastmod></url>
 </urlset>`;
 
-  it('parses the <urlset> flavor: url, lastmod date, slug title, empty description', async () => {
+  it('parses the <urlset> flavor: url, slug title, empty description, posted_at NULL (lastmod is the sitemap date, not the job date)', async () => {
     mockText(URLSET);
     const jobs = await successfactors.fetchJobs(sfCo);
     expect(jobs).toHaveLength(1);
     const j = jobs[0]!;
     expect(j.id).toBe('604033');
     expect(j.url).toBe('https://empleo.grupobancolombia.com/job/Bogota-Analista-de-Datos-Senior-CO/604033/');
-    expect(j.posted_at).toBe('2026-07-18');
+    expect(j.posted_at).toBeNull(); // <lastmod> is the sitemap regen date, unreliable per-job -> unknown
     expect(j.title.toLowerCase()).toContain('analista de datos');
     expect(j.description).toBe(''); // filled later by fetchDetail
   });

@@ -93,7 +93,12 @@ function fromUrlset(company: Company, block: string): Job | null {
     location: '',
     url,
     description: '', // filled by fetchDetail()
-    posted_at: tag(block, 'lastmod') || null,
+    // A urlset <lastmod> is the SITEMAP's regeneration date (every job shares it), NOT the job's
+    // posting date — using it made every job "age" together and freshness-drop the whole board once
+    // the sitemap was >FRESHNESS_MAX_DAYS old (Bombardier: 1249 jobs all lastmod=one date → 0 stored).
+    // Treat as unknown-date (like the RSS variant); freshness then processes them (fresh) and dedup
+    // keeps each notified once.
+    posted_at: null,
     ats: 'successfactors',
     raw: { id },
   };
