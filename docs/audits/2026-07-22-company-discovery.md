@@ -22,6 +22,18 @@ likely canada_coop-heavy). Added boards seed silently on their next poll (rule 4
 A candidate counts as on-target only if a **verify-once** board fetch shows ≥1 job whose location clears
 one track's gate (verdict ≠ Skip under the live calibration).
 
+## Part A done (2026-07-22): SmartRecruiters connector shipped (commit a4c2225)
+7th ATS live (public API, verified vs Wise/Avianca). Add SR companies with `ats='smartrecruiters'`,
+token = the SR company id (e.g. `Wise`). Coverage caveat stands: few on-target SR companies (Avianca
+currently 1 US job). Use for Part B candidates that happen to be on SR.
+
+## Part B status (canada_coop growth)
+Cheap guessable pool (greenhouse/lever/ashby Canadian tech tokens) is **largely exhausted** — the obvious
+names were probed in batches 1–2 (hits: aylo, thinkific, d2l, dialpad, jane; the rest use other ATS).
+Remaining canada_coop volume = **Workday/SF per-company URL research** (~1 web search each — the real
+token cost). Method proven (Bombardier, ISA). Next batches: owner-named employers (cheapest — verify only)
+or a research batch of N Canadian Workday/SF employers (≈N searches), owner-approved per batch.
+
 ## Dead / wrong tokens to fix (Phase 0)
 
 | Company | ATS | Current token | Status | Resolution |

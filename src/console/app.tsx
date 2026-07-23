@@ -309,10 +309,11 @@ export function consoleApp(): App {
     if (q.track) { where.push('j.track = ?'); binds.push(q.track); }
     if (q.verdict) { where.push('j.verdict = ?'); binds.push(q.verdict); }
     if (q.status) { where.push('j.status = ?'); binds.push(q.status); }
-    if (q.q) { where.push('j.title LIKE ?'); binds.push(`%${q.q}%`); }
+    // One search box covers both the job title and the company name.
+    if (q.q) { where.push('(j.title LIKE ? OR c.name LIKE ?)'); binds.push(`%${q.q}%`, `%${q.q}%`); }
     // Sortable columns: whitelist key -> SQL expression (raw input never reaches ORDER BY).
     const SORTS: Record<string, string> = {
-      title: 'j.title', track: 'j.track', verdict: 'j.verdict',
+      title: 'j.title', company: 'c.name', track: 'j.track', verdict: 'j.verdict',
       status: 'j.status', score: 'j.score', seen: 'j.first_seen',
     };
     const rawSort = q.sort ?? '';
@@ -366,17 +367,18 @@ export function consoleApp(): App {
         </div>
         <form method="get" action="/jobs" class="card actions filterbar">
           <input type="hidden" name="view" value={view} />
-          <input type="text" name="q" placeholder="search in title" value={q.q ?? ''} />
+          <input type="text" name="q" placeholder="search title or company" value={q.q ?? ''} />
           {sel('track', ['canada_coop', 'colombia_perm', 'contractor_usd'], q.track)}
           {sel('verdict', ['Apply', 'Stretch-worth-it', 'Skip'], q.verdict)}
           {sel('status', ['new', 'notified', 'closed', 'skipped'], q.status)}
           <button type="submit" class="primary">Filter</button>
         </form>
         <div class="table-wrap"><table>
-          <tr>{sortTh('title', 'title')}{sortTh('track', 'track', 'hide-sm')}{sortTh('verdict', 'verdict')}{sortTh('status', 'status', 'hide-sm')}{sortTh('score', 'score')}<th class="hide-sm">stage</th>{sortTh('seen', 'seen', 'hide-sm')}</tr>
+          <tr>{sortTh('title', 'title')}{sortTh('company', 'company', 'hide-sm')}{sortTh('track', 'track', 'hide-sm')}{sortTh('verdict', 'verdict')}{sortTh('status', 'status', 'hide-sm')}{sortTh('score', 'score')}<th class="hide-sm">stage</th>{sortTh('seen', 'seen', 'hide-sm')}</tr>
           {rows.map((j) => (
             <tr>
-              <td><a href={`/jobs/${j.url_hash}`}>{j.title}</a><div class="muted">{j.company} · {j.location}</div></td>
+              <td><a href={`/jobs/${j.url_hash}`}>{j.title}</a><div class="muted">{j.location}</div></td>
+              <td class="hide-sm">{j.company}</td>
               <td class="hide-sm">{j.track ?? '—'}</td>
               <td class={`v-${j.verdict}`}>{j.verdict}</td>
               <td class={`hide-sm s-${j.status}`}>{j.status}</td>
@@ -1977,7 +1979,7 @@ export function consoleApp(): App {
                   <div class="table-wrap"><table class="kwadd">
                     <tr><th>In blocks</th><th>English</th><th>Español</th><th>Category</th><th>Strength</th><th /></tr>
                     {mined.map((m, i) => (
-                      <tr>
+                      <tr class={i >= 10 ? 'sk-more' : ''} style={i >= 10 ? 'display:none' : ''}>
                         <td class="muted">{m.blocks}
                           <form id={`sk${i}`} method="post" action="/calibration/word-add">
                             <input type="hidden" name="dir" value="favor" />
@@ -2002,6 +2004,14 @@ export function consoleApp(): App {
                       </tr>
                     ))}
                   </table></div>
+                  {mined.length > 10 && (
+                    <>
+                      <div class="mt-1"><button type="button" id="sk-more-btn" class="btnlike">Show all {mined.length}</button></div>
+                      <script dangerouslySetInnerHTML={{ __html:
+                        "(function(){var b=document.getElementById('sk-more-btn');if(!b)return;b.addEventListener('click',function(){document.querySelectorAll('tr.sk-more').forEach(function(r){r.style.display='';});b.style.display='none';});})();"
+                      }} />
+                    </>
+                  )}
                   <p class="muted mt-1">English is pre-filled from your profile; edit <em>Español</em> when the word translates (e.g. <code>banking</code> → <code>banca</code>). Leave them identical for language-neutral terms (<code>sql</code>, <code>python</code>). Both languages are stored.</p>
                 </>
               )}
