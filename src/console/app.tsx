@@ -368,7 +368,7 @@ export function consoleApp(): App {
         <form method="get" action="/jobs" class="card actions filterbar">
           <input type="hidden" name="view" value={view} />
           <input type="text" name="q" placeholder="search title or company" value={q.q ?? ''} />
-          {sel('track', ['canada_coop', 'colombia_perm', 'contractor_usd'], q.track)}
+          {sel('track', ['canada_coop', 'colombia_perm'], q.track)}
           {sel('verdict', ['Apply', 'Stretch-worth-it', 'Skip'], q.verdict)}
           {sel('status', ['new', 'notified', 'closed', 'skipped'], q.status)}
           <button type="submit" class="primary">Filter</button>
@@ -789,9 +789,9 @@ export function consoleApp(): App {
     tool_overlap: ['Tools', 'what I work with'],
   };
   const TRACK_LABELS: Record<string, string> = {
-    canada_coop: 'Canada co-op',
-    colombia_perm: 'Colombia permanent',
-    contractor_usd: 'Contractor international',
+    canada_coop: 'Canada',
+    colombia_perm: 'Colombia',
+    contractor_usd: 'Colombia', // legacy id: contractor merged into Colombia (2-path). Kept for old stored rows.
   };
   /** Live scoring config, normalized to the {en,es} shape. */
   async function loadLive(env: ConsoleEnv): Promise<import('../scoring').ScoringConfig> {
@@ -1067,7 +1067,7 @@ export function consoleApp(): App {
   // ---------- Contact profile (private; fills CV template placeholders) ----------
   // Phone + CV location grouped by country (phone/location feed the CV header per track).
   const SIMPLE_CO: Array<[string, string]> = [
-    ['phone_co', 'Colombian phone (colombia_perm & contractor_usd)'],
+    ['phone_co', 'Colombian phone (colombia_perm)'],
     ['location_co', 'Colombia location for CV header (e.g. Medellín, Colombia)'],
   ];
   const SIMPLE_CA: Array<[string, string]> = [

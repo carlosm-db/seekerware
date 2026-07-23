@@ -40,7 +40,7 @@ export interface ContactProfile {
   address_co?: AddressCO;
 }
 
-/** Per-track fill map: canada_coop -> CA values; colombia_perm & contractor_usd -> CO values. */
+/** Per-path fill map: canada_coop -> CA values; colombia_perm (and any legacy track) -> CO values. */
 export function contactPlaceholders(track: string | null, p: ContactProfile): Record<string, string> {
   const ca = track === 'canada_coop';
   return {

@@ -9,12 +9,11 @@ export function profile(): string {
   return 'a business analyst/data professional in banking, payments, collections, and compliance transitioning to data';
 }
 
-/** The three search tracks and what each targets (matches the scoring config tracks). */
+/** The two search paths and what each targets (matches the scoring config tracks). */
 export function tracks(): string {
   return [
-    'canada_coop — co-op / intern / work-term roles in Canada',
-    'colombia_perm — permanent roles in Colombia / LATAM or remote-friendly',
-    'contractor_usd — remote worldwide contractor roles',
+    'canada_coop — roles in Canada (co-op / new-grad / skilled)',
+    'colombia_perm — roles in Colombia / LATAM or globally-open remote',
   ].join('; ');
 }
 

@@ -22,10 +22,12 @@ describe('contactPlaceholders (per-track fill)', () => {
     });
   });
 
-  it('contractor_usd -> Colombian values (LATAM orientation)', () => {
-    expect(contactPlaceholders('contractor_usd', profile)).toEqual({
-      '{{phone}}': '+57-300-555-0002', '{{location}}': 'Medellín, Colombia',
-    });
+  it('any non-Canada track (incl. legacy contractor_usd / null) -> Colombian values', () => {
+    for (const track of ['colombia_perm', 'contractor_usd', null]) {
+      expect(contactPlaceholders(track, profile)).toEqual({
+        '{{phone}}': '+57-300-555-0002', '{{location}}': 'Medellín, Colombia',
+      });
+    }
   });
 
   it('never leaks a raw {{...}}: unset values resolve to empty string', () => {
