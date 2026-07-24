@@ -220,6 +220,23 @@ function evaluateGate(gate: Gate, corpus: Corpus): GateResult {
   return { id: gate.id, passed: true, evidence: 'no failing conditions' };
 }
 
+/**
+ * Console add-by-URL verifier tally: which tracks a bare LOCATION string clears on location alone.
+ * Only LOCATION-scope gates are checked (the paste-preview has no description, so text/work-auth
+ * gates like reject_us_only are skipped) — reuses the engine's word-boundary matching so "can" does
+ * NOT false-match "candidate". Approximate preview signal, not a stored verdict.
+ */
+export function locationClears(location: string, config: ScoringConfig): Set<string> {
+  const norm = normalizeText(location);
+  const corpus: Corpus = { title: '', location: norm, title_location: norm, text: norm };
+  const cleared = new Set<string>();
+  for (const track of config.tracks) {
+    const locGates = track.gates.filter((g) => (g.scope ?? 'text') === 'location');
+    if (locGates.length > 0 && locGates.every((g) => evaluateGate(g, corpus).passed)) cleared.add(track.id);
+  }
+  return cleared;
+}
+
 function verdictFor(score: number, thresholds: ScoringConfig['thresholds']): Verdict {
   if (score >= thresholds.apply) return 'Apply';
   if (score >= thresholds.stretch) return 'Stretch-worth-it';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeTitle, scoreJob, type ScoringConfig } from '../src/scoring';
+import { locationClears, normalizeTitle, scoreJob, type ScoringConfig } from '../src/scoring';
 import { normalizeScoringConfig } from '../src/config-store';
 import type { Job } from '../src/types';
 
@@ -65,6 +65,42 @@ const config: ScoringConfig = normalizeScoringConfig({
       ],
     },
   ],
+});
+
+describe('locationClears (verifier CA/CO tally — location-scope gates only, word-boundary)', () => {
+  const locCfg: ScoringConfig = normalizeScoringConfig({
+    weights: {
+      domain: { weight: 40, saturation: 6 }, role_type: { weight: 25, saturation: 4 },
+      tool_overlap: { weight: 20, saturation: 5 }, level_fit: { weight: 15, saturation: 3 },
+    },
+    title_multiplier: 1, thresholds: { apply: 75, stretch: 55 },
+    keywords: { domain: [], role_type: [], tool_overlap: [], level_fit: [] },
+    tracks: [
+      { id: 'canada_coop', gates: [{ id: 'loc_ca', require: [{ en: 'canada', es: 'canada' }, { en: 'can', es: 'can' }, { en: 'toronto', es: 'toronto' }, { en: 'montreal', es: 'montreal' }], scope: 'location' }] },
+      { id: 'colombia_perm', gates: [
+        { id: 'loc_co', require: [{ en: 'colombia', es: 'colombia' }, { en: 'bogota', es: 'bogota' }, { en: 'latam', es: 'latam' }], scope: 'location' },
+        { id: 'reject_us', reject: [{ en: 'no sponsorship', es: 'sin patrocinio' }], scope: 'text' }, // text-scope → ignored by the tally
+      ] },
+    ],
+  });
+  it('clears canada_coop for Canadian cities (accent-insensitive)', () => {
+    expect([...locationClears('Toronto, ON, Canada', locCfg)]).toContain('canada_coop');
+    expect([...locationClears('Montréal, QC', locCfg)]).toContain('canada_coop');
+  });
+  it('clears colombia_perm for Colombia / LATAM', () => {
+    expect([...locationClears('Bogotá, Colombia', locCfg)]).toContain('colombia_perm');
+    expect([...locationClears('Remote - LATAM', locCfg)]).toContain('colombia_perm');
+  });
+  it('clears neither for off-target locations', () => {
+    expect(locationClears('São Paulo; Remote', locCfg).size).toBe(0);
+    expect(locationClears('Palo Alto', locCfg).size).toBe(0);
+  });
+  it('word-boundary: "candidate" does NOT false-match the "can" term', () => {
+    expect(locationClears('candidate experience center', locCfg).has('canada_coop')).toBe(false);
+  });
+  it('empty location (SF-urlset list) clears nothing', () => {
+    expect(locationClears('', locCfg).size).toBe(0);
+  });
 });
 
 function job(over: Partial<Job>): Job {

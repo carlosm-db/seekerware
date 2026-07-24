@@ -15,7 +15,7 @@ import {
 import { connectors } from '../connectors';
 import { parseAtsUrl } from '../connectors/common';
 import type { Ats, Company, Verdict } from '../types';
-import { CATEGORIES, type Category, type ScoreResult } from '../scoring';
+import { CATEGORIES, locationClears, type Category, type ScoreResult } from '../scoring';
 
 // Client island for the Prepare modal (INFORMATIONAL only): intercepts the Prepare form,
 // POSTs with x-progress:1 (server runs prepareJob BLOCKING in-request and writes each step
@@ -610,11 +610,11 @@ export function consoleApp(): App {
           <input type="text" name="notes" placeholder="notes" />
           <button type="submit" class="primary">Add company</button>
         </form>
-        <form method="post" action="/companies/add-urls" class="card">
+        <form method="post" action="/companies/verify-urls" class="card">
           <strong>Add by URL (bulk)</strong>
-          <p class="muted my-2">Paste career/board URLs — one per line. Greenhouse / Lever / Ashby are detected automatically; each is validated on the next poll (see the health column).</p>
+          <p class="muted my-2">Paste career/board URLs — one per line (up to 8). Each is checked live: ATS detected, board fetched, Canada/Colombia jobs tallied — then you pick which to add.</p>
           <textarea name="urls" rows={4} class="w-full" placeholder={'https://jobs.lever.co/acme\nhttps://boards.greenhouse.io/acme\nhttps://jobs.ashbyhq.com/acme'} />
-          <div class="actions mt-1"><button type="submit" class="primary">Add all</button></div>
+          <div class="actions mt-1"><button type="submit" class="primary">Verify &amp; preview</button></div>
         </form>
         <div class="table-wrap"><table>
           <tr>{sortTh('company', 'company')}{sortTh('ats', 'ats')}{sortTh('token', 'token')}{sortTh('active', 'active')}{sortTh('health', 'health')}{sortTh('jobs', 'jobs 90d')}{sortTh('survivors', 'survivors')}{sortTh('yield', 'yield')}</tr>
@@ -668,26 +668,94 @@ export function consoleApp(): App {
     return c.redirect(`/companies?m=${encodeURIComponent(probe)}`);
   });
 
-  // Bulk "add by URL": paste career/board URLs; detect ATS+token from the host.
-  // Zero probes here (subrequest budget) — companies are validated on the next
-  // poll (health column), so pasting many is cheap.
-  app.post('/companies/add-urls', async (c) => {
+  // Bulk "add by URL", step 1 — VERIFY: detect ATS from each URL, fetch the board live (token OK?
+  // how many jobs?), and tally Canada/Colombia by location, so the owner adds only real, on-target
+  // boards. Runs in the Worker (10 ms CPU / 50 subrequests) → capped at 8 URLs; SF-urlset lists have
+  // no per-job location so their CA/CO tally shows "—" (locations need a detail fetch).
+  const VERIFY_CAP = 8;
+  app.post('/companies/verify-urls', async (c) => {
     const b = await c.req.parseBody();
     const lines = String(b.urls ?? '').split(/[\r\n,]+/).map((s) => s.trim()).filter(Boolean);
+    const over = Math.max(0, lines.length - VERIFY_CAP);
+    const cfg = await loadLive(c.env);
+    const existing = new Set(
+      (await c.env.DB.prepare('SELECT ats, token FROM companies').all<{ ats: string; token: string }>()).results
+        .map((r) => `${r.ats}|${r.token}`),
+    );
+    type VRow = { url: string; ats?: Ats; token?: string; live: boolean; jobs: number; ca: number; co: number; hasLoc: boolean; already: boolean; error?: string };
+    const rows: VRow[] = [];
+    for (const url of lines.slice(0, VERIFY_CAP)) {
+      const parsed = parseAtsUrl(url);
+      if (!parsed) { rows.push({ url, live: false, jobs: 0, ca: 0, co: 0, hasLoc: false, already: false, error: 'not an ATS URL' }); continue; }
+      const already = existing.has(`${parsed.ats}|${parsed.token}`);
+      try {
+        const jobs = await connectors[parsed.ats].fetchJobs({ id: 0, name: parsed.token, ats: parsed.ats, token: parsed.token, active: true });
+        let ca = 0, co = 0, hasLoc = false;
+        for (const j of jobs.slice(0, 250)) {
+          if (j.location) hasLoc = true;
+          const cl = locationClears(j.location, cfg);
+          if (cl.has('canada_coop')) ca++;
+          if (cl.has('colombia_perm')) co++;
+        }
+        rows.push({ url, ats: parsed.ats, token: parsed.token, live: true, jobs: jobs.length, ca, co, hasLoc, already });
+      } catch (err) {
+        rows.push({ url, ats: parsed.ats, token: parsed.token, live: false, jobs: 0, ca: 0, co: 0, hasLoc: false, already, error: err instanceof Error ? err.message.slice(0, 70) : 'fetch failed' });
+      }
+    }
+    return page(c, 'Verify & add', (
+      <>
+        <div class="card">
+          <strong>Verify results</strong>
+          <p class="muted my-1">ATS detected · live check · Canada/Colombia tally (location only; SF-urlset lists carry no location → CA/CO show "—"). On-target rows are pre-checked.{over > 0 ? ` ${over} URL(s) beyond the ${VERIFY_CAP}-per-batch cap were skipped.` : ''}</p>
+          <form method="post" action="/companies/add-selected">
+            <div class="table-wrap"><table>
+              <tr><th /><th>URL</th><th>ATS</th><th>token</th><th>live</th><th>jobs</th><th>CA</th><th>CO</th><th>status</th></tr>
+              {rows.map((r) => {
+                const onTarget = r.live && (r.ca > 0 || r.co > 0);
+                const addable = r.live && !!r.ats && !r.already;
+                const tally = (n: number) => (r.ats ? (r.hasLoc ? String(n) : '—') : '—');
+                return (
+                  <tr>
+                    <td>{addable ? <input type="checkbox" name="sel" value={`${r.ats}|${r.token}`} checked={onTarget} /> : null}</td>
+                    <td class="muted">{r.url}</td>
+                    <td>{r.ats ?? '—'}</td>
+                    <td class="muted">{r.token ?? '—'}</td>
+                    <td class={r.live ? 'ok' : 'bad'}>{r.live ? '✓' : '✗'}</td>
+                    <td>{r.live ? r.jobs : '—'}</td>
+                    <td class={r.ca > 0 ? 'ok' : ''}>{tally(r.ca)}</td>
+                    <td class={r.co > 0 ? 'ok' : ''}>{tally(r.co)}</td>
+                    <td class="muted">{r.error ?? (r.already ? 'already on roster' : onTarget ? 'on-target' : 'live, no CA/CO')}</td>
+                  </tr>
+                );
+              })}
+            </table></div>
+            <div class="actions mt-1"><button type="submit" class="primary">Add selected</button><a class="btnlike" href="/companies">Back</a></div>
+          </form>
+        </div>
+      </>
+    ));
+  });
+
+  // Bulk "add by URL", step 2 — ADD the selected verified boards (ats|token pairs). INSERT OR IGNORE
+  // dedups; active=1 (they were just confirmed live in step 1).
+  app.post('/companies/add-selected', async (c) => {
+    const b = await c.req.parseBody({ all: true });
+    const raw = b.sel;
+    const sels = Array.isArray(raw) ? raw.map(String) : raw != null ? [String(raw)] : [];
     const stmts = [];
-    const skipped: string[] = [];
-    for (const line of lines.slice(0, 200)) {
-      const parsed = parseAtsUrl(line);
-      if (!parsed) { skipped.push(line); continue; }
+    for (const s of sels) {
+      const i = s.indexOf('|');
+      if (i < 0) continue;
+      const ats = s.slice(0, i);
+      const token = s.slice(i + 1);
+      if (!token || !connectors[ats as Ats]) continue;
       stmts.push(
         c.env.DB.prepare('INSERT OR IGNORE INTO companies (name, ats, token, active, notes) VALUES (?,?,?,1,?)')
-          .bind(parsed.token, parsed.ats, parsed.token, 'added by URL'),
+          .bind(token, ats, token, 'added by URL (verified)'),
       );
     }
     if (stmts.length) await c.env.DB.batch(stmts);
-    const msg = `added ${stmts.length} (validated on next poll)`
-      + (skipped.length ? ` · skipped ${skipped.length} non-ATS URL(s)` : '');
-    return c.redirect(`/companies?m=${encodeURIComponent(msg)}`);
+    return c.redirect(`/companies?m=${encodeURIComponent(`added ${stmts.length} verified compan${stmts.length === 1 ? 'y' : 'ies'}`)}`);
   });
 
   app.post('/companies/toggle', async (c) => {
