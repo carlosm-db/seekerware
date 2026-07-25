@@ -44,7 +44,26 @@ HTML" rule). No clean connector reaches that market.
 4. If Colombian mid-market coverage is a hard requirement, the honest options are manual (owner browses
    elempleo/Magneto) or a future, separate "external saved-search" feature — not an ATS connector.
 
-## Next step (owner's call)
+## Colombian aggregators — empirically tested 2026-07-25 (DO NOT re-explore)
 
-- **Build SmartRecruiters** (I'll plan it: connector + parseAtsUrl + migration + tests) — or
-- **Skip it**, keep growing canada_coop via Workday/SF research + owner-seeded verification.
+Owner asked to scrape the local job boards (elempleo, Magneto365, Computrabajo, Grupo Aval). Probed each
+live (incl. owner-captured browser requests). **None exposes a clean, public, replayable jobs API:**
+- **Computrabajo** — HTTP 403 (AWS WAF), blocks non-browser requests.
+- **elempleo** — reachable (ASP.NET, `/api/joboffers/findbyfilter`), but the exact call is assembled in
+  minified JS; not replayable from outside.
+- **Magneto365** — `api.magneto365.com` is public for **nav/SEO only** (`seo/v1/mega-menu/by-company` works
+  no-auth). The actual **job listings load via Next.js Server Actions** (`server-action-reducer.ts`), and
+  the client job endpoints (`suggested`, `count`) return **401**. No clean public jobs API.
+- **Grupo Aval** — SPA careers widget, backend hidden.
+
+Conclusion: reaching them = scraping server-actions/HTML or defeating auth → against the "API not HTML"
+rule, fragile, ToS-risky, IP-blockable on CI. **Parked.** Compliant Colombian coverage stays: big corps on
+SF/Workday (Bancolombia, SURA, ISA, Scotiabank) + LATAM fintechs on greenhouse/lever/ashby (Belvo, Kueski,
+Addi, Nubank, Clara, Cobre). SMB/aggregator layer is out of clean reach.
+
+## Result (2026-07-24): both viable ATS connectors were built
+SmartRecruiters (commit a4c2225) and **BambooHR** (commit 491aa62) shipped — 8 ATSes total. BambooHR proved
+the cleanest (public REST + structured location; OPAL-RT = real Canadian company, 16 Montréal roles).
+
+## Next step (owner's call)
+Grow via the 8 clean ATSes + the verify-then-add flow (owner-seeded employer URLs). Aggregators parked.
