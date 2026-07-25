@@ -122,5 +122,10 @@ export function parseAtsUrl(input: string): { ats: Ats; token: string } | null {
     const id = i >= 0 ? seg[i + 1] : undefined;
     return id ? { ats: 'smartrecruiters', token: decodeURIComponent(id) } : null;
   }
+  // BambooHR hosted careers: {subdomain}.bamboohr.com/careers/... (or the /js/jobs2.php embed) -> token '{subdomain}'.
+  if (host.endsWith('.bamboohr.com')) {
+    const sub = host.slice(0, -'.bamboohr.com'.length);
+    if (sub && !['www', 'api'].includes(sub)) return { ats: 'bamboohr', token: sub };
+  }
   return null;
 }
