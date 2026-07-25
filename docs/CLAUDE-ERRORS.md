@@ -4,6 +4,48 @@ Running record of times an agent (Claude or other) broke a rule or caused
 harm on this project, so the pattern is not repeated. Newest first. Process
 failures only — no owner private data here (CLAUDE.md §4).
 
+## 2026-07-25 — Near-miss: almost wrote MOJIBAKE into the live scoring config (Windows `wrangler --json | python` corrupts UTF-8)
+Twice, preparing a prod `config['scoring']` edit, the agent exported the config via `wrangler d1 execute
+--json | python`, which on this Windows box decoded UTF-8 as cp1252 — turning `américa latina` into
+`amÃ©rica latina`. Both times it was about to emit `UPDATE config SET value=…` built from that mangled JSON;
+noticing the mojibake in a debug print (not by design) was the only thing that stopped corrupted accent
+terms going into the live location gates, which would silently break es-side matching for colombia_perm.
+- Recurring, related: sharing a temp file between curl (writes to Git Bash `/tmp`) and Windows Python
+  (resolves `/tmp` as `C:\tmp`) → silent ENOENT / empty output; several probes reported "nothing found"
+  that were actually path failures, wasting effort.
+- **Lessons:** (1) On Windows, NEVER pipe `wrangler --json` through Python for accented data headed back
+  to prod — export via file redirect + read with Node (or `PYTHONUTF8=1`), and round-trip-check that a
+  known accented term (`américa latina`) survives before writing. (2) Don't share temp files across
+  Git-Bash-curl and Windows-Python via `/tmp`; use a relative path in cwd or the scratchpad absolute path.
+  (3) An empty probe result is a *possible tooling failure*, not proof of "none found" — confirm the tool ran.
+
+## 2026-07-25 — Limited the user's scope by assuming, not checking: swept only big cities AND never verified the gate covered all of Canada (caught: "you are limiting yourself")
+Running the Canada discovery sweep, the agent keyed every search on Toronto/Vancouver/Montreal/Ottawa/Calgary
+and — worse — never checked whether the `canada_coop` location gate actually recognized the rest of Canada.
+It didn't: the gate cleared only `canada` + BC/ON/AB + those big cities, so jobs in Manitoba / Saskatchewan /
+Quebec-outside-Montreal / Atlantic / the territories were being **silently Skipped** — meaning even added
+companies' regional jobs would never surface. Owner had to correct: "you are limiting yourself... it can be
+Manitoba, Alberta, Nova Scotia, anywhere."
+- Also overclaimed the sweep was "**free of every downside**"; owner pushed back ("how?") and it had to be
+  walked back to "free of *scraping's* downsides, but costs discovery effort."
+- **Lessons:** (1) Before building discovery/filtering on a config-driven gate, READ the gate and confirm it
+  covers the user's stated scope — don't assume the calibration matches the intent. (2) When the user says
+  "anywhere," don't bias to the obvious/biggest cases; cover the long tail. (3) Never claim "no downside /
+  free of everything" — state the actual tradeoff precisely. Relates to [[change-only-what-asked]].
+
+## 2026-07-25 — Ground into undocumented SPA APIs with curl/static-analysis instead of recognizing the wall and asking for a browser capture
+Assessing new sources (Dayforce, JOIN, elempleo, Magneto365, Grupo Aval), the agent repeatedly tried to
+reverse-engineer each one's job API from outside — guessing endpoint paths, following redirects, grepping
+minified JS — and hit the SAME wall each time: modern SPAs build their API calls dynamically (or WAF-block),
+so the exact request isn't recoverable by curl. Each site burned many probes before concluding "needs the
+real request from the browser."
+- **Lessons:** (1) For an SPA / undocumented API, do ONE page-inspect + ONE endpoint probe; if the call
+  isn't in the static HTML / `__NEXT_DATA__`, STOP and ask the owner for a DevTools "Copy as cURL" (30 s
+  for them; it unblocked Magneto's real API immediately) instead of grinding guesses. (2) A plain-request
+  WAF-403 (Computrabajo, ADP) means done — don't fight it. (3) The clean wins (SmartRecruiters, BambooHR)
+  had *documented/discoverable* public APIs; that's the bar — if a source doesn't clear it fast, escalate
+  to the owner or drop it.
+
 ## 2026-07-22 — Diagnosed from INFERENCE stated as fact; misread a metric and built a causal story on it (caught: "are you hallucinating?")
 Through the pipeline-crash investigation the agent repeatedly presented guesses as findings:
 - Blamed **Canonical** as the wedging company off a live checkpoint, then — only after being pushed —
