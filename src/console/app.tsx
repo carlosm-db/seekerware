@@ -605,7 +605,7 @@ export function consoleApp(): App {
       <>
         <form method="post" action="/companies" class="card actions">
           <input type="text" name="name" placeholder="name" required />
-          <select name="ats">{Object.keys(connectors).map((a) => <option value={a}>{a}</option>)}</select>
+          <select name="ats">{Object.keys(connectors).sort().map((a) => <option value={a}>{a}</option>)}</select>
           <input type="text" name="token" placeholder="board token / SF host" required />
           <input type="text" name="notes" placeholder="notes" />
           <button type="submit" class="primary">Add company</button>
@@ -780,7 +780,7 @@ export function consoleApp(): App {
           <form method="post" action={`/companies/${id}/edit`}>
             <div class="field"><label>Name</label><input type="text" name="name" value={String(co.name)} required /></div>
             <div class="field"><label>ATS</label>
-              <select name="ats">{Object.keys(connectors).map((a) => <option value={a} selected={a === co.ats}>{a}</option>)}</select></div>
+              <select name="ats">{Object.keys(connectors).sort().map((a) => <option value={a} selected={a === co.ats}>{a}</option>)}</select></div>
             <div class="field"><label>Board token / host</label><input type="text" name="token" value={String(co.token)} required /></div>
             <div class="field"><label>Notes</label><input type="text" name="notes" value={String(co.notes ?? '')} /></div>
             <label class="chk"><input type="checkbox" name="active" checked={!!co.active} /> Active (polled each run)</label>
