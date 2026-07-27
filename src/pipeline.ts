@@ -23,7 +23,7 @@ export async function buildPendingCvs(env: Env, doFetch: typeof fetch = fetch): 
   const pending = await env.DB.prepare(
     `SELECT j.url_hash, j.title, j.location, j.description_text, j.track, j.url, j.ext_id, j.ats, c.name company
      FROM jobs j JOIN companies c ON c.id = j.company_id
-     WHERE j.cv_pending = 1 AND j.status IN ('new','notified')
+     WHERE j.cv_pending = 1 AND j.status IN ('new','notified','aged')
      ORDER BY j.notified_at, j.first_seen LIMIT 1`,
   ).first<Record<string, string | null>>();
   if (!pending) return; // empty queue → no-op
@@ -75,6 +75,10 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
   try {
     const config = await loadScoringConfig(env);
     const maxDays = Number((await getConfigValue(env, 'FRESHNESS_MAX_DAYS')) ?? '3');
+    // STORE window (>= the notify window): a NEW posting reliably older than this is dropped; between the
+    // two windows it is kept and stored silently as `aged` (browsable, never alerted). The Node poller is
+    // uncapped, so carrying ~45d of backlog is cheap — this replaces the old Worker-era "drop > 3d" rule.
+    const storeMaxDays = Number((await getConfigValue(env, 'STORE_MAX_DAYS')) ?? '45');
     // The poller runs in Node (no 10 ms CPU / 50-subrequest limit), so the Worker-era caps are
     // relaxed to effectively unlimited — every fresh new job is scored and enriched each run.
     // Still config-tunable if a specific board ever needs throttling for politeness.
@@ -104,7 +108,7 @@ export async function runPipeline(env: Env, trigger: 'cron' | 'manual'): Promise
       // than the fast API boards, so Scotiabank isn't clipped while a real hang is still aborted.
       const cFetch = trackedFetch(stats, atsTimeoutMs(atsTimeouts, company.ats, fetchTimeoutMs));
       try {
-        await processCompany(env, company, config, maxDays, maxNewPerRun, maxDetailPerRun, detailPerCompany, nowIso, stats, batch, cFetch);
+        await processCompany(env, company, config, maxDays, storeMaxDays, maxNewPerRun, maxDetailPerRun, detailPerCompany, nowIso, stats, batch, cFetch);
         stats.companiesOk++;
         batch.companySuccess(company.id, runId, nowIso);
       } catch (err) {
@@ -247,6 +251,7 @@ async function processCompany(
   company: StoredCompany,
   config: ScoringConfig,
   maxDays: number,
+  storeMaxDays: number,
   maxNewPerRun: number,
   maxDetailPerRun: number,
   maxDetailPerCompany: number,
@@ -275,12 +280,14 @@ async function processCompany(
       // is guaranteed by auto-expire; last_seen is stamped on close.
       continue;
     }
-    // Freshness-first: a NEW posting reliably older than the window can NEVER be notified
-    // (rule 3), so drop it here — before any detail fetch or scoring. A missing/unreliable date
-    // is treated as fresh (processed). This is what stops a mega board from dumping its whole
-    // backlog every run; the scarce new-job budget goes to recent (notifiable) postings.
-    const freshness = checkFreshness(job.posted_at, nowIso, maxDays);
-    if (reliablyStale(freshness)) continue;
+    // Two windows (docs/TRD.md §5): NOTIFY (maxDays, ~3d) gates whether a survivor is alerted; STORE
+    // (storeMaxDays, ~45d) gates whether it is kept at all. A NEW posting reliably older than the STORE
+    // window is dropped here — before any detail fetch or scoring. Between the two windows it is KEPT and
+    // stored silently as `aged` (browsable, never notified — rule 3). A missing/unreliable date is treated
+    // as fresh. This still stops a board from dumping ancient (> storeMaxDays) postings every run.
+    const freshness = checkFreshness(job.posted_at, nowIso, maxDays);            // notify window
+    const storeFreshness = checkFreshness(job.posted_at, nowIso, storeMaxDays);  // store window
+    if (reliablyStale(storeFreshness)) continue;
     if (stats.jobsNew >= maxNewPerRun) {
       // CPU cap reached: the rest waits for the next run (they are still
       // "new"; not being in the store, auto-expire does not touch them).
@@ -309,7 +316,8 @@ async function processCompany(
     stats.jobsScored++;
     const isSurvivor = result.best.verdict !== 'Skip';
 
-    let status: 'new' | 'notified' | 'skipped' | 'closed' = isSurvivor ? 'new' : 'skipped';
+    let status: 'new' | 'notified' | 'aged' | 'skipped' | 'closed' =
+      isSurvivor ? (freshness.fresh ? 'new' : 'aged') : 'skipped';
     let notifiedAt: string | null = null;
     let cvPending: 0 | 1 = 0;
     let enrichedBy = 'rule';
@@ -388,7 +396,7 @@ async function processCompany(
 
   // Auto-expire ONLY on a successful fetch (being here = success): absent from the feed -> closed
   const disappeared = [...existing.entries()]
-    .filter(([hash, status]) => !seenHashes.has(hash) && (status === 'new' || status === 'notified'))
+    .filter(([hash, status]) => !seenHashes.has(hash) && (status === 'new' || status === 'notified' || status === 'aged'))
     .map(([hash]) => hash);
   if (disappeared.length) {
     batch.closeJobs(disappeared, nowIso);

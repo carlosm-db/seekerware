@@ -58,7 +58,7 @@ button.chipx:hover { color:var(--bad) }
 .v-Apply { color:var(--ok); font-weight:700 } .v-Stretch-worth-it { color:var(--warn); font-weight:600 }
 .v-Skip { color:var(--muted) }
 .s-new { color:var(--accent) } .s-notified { color:var(--ok) } .s-closed { color:var(--muted) }
-.s-skipped { color:var(--muted) }
+.s-skipped { color:var(--muted) } .s-aged { color:var(--warn) }
 .muted { color:var(--muted) } .ok { color:var(--ok) } .warn { color:var(--warn) } .bad { color:var(--bad) }
 /* display:contents removes the form's box so its <button> is a DIRECT flex child
    of .actions — same alignment as a bare <a.btnlike>. (A form as an inline flex

@@ -305,6 +305,9 @@ export function consoleApp(): App {
       where.push("(j.verdict = 'Skip' OR j.status = 'skipped')");
     } else if (view === 'closed') {
       where.push("j.status = 'closed'");
+    } else if (view === 'aged') {
+      // Survivors stored older than the notify window: browsable openings, never alerted.
+      where.push("j.status = 'aged'");
     }
     if (q.track) { where.push('j.track = ?'); binds.push(q.track); }
     if (q.verdict) { where.push('j.verdict = ?'); binds.push(q.verdict); }
@@ -361,7 +364,7 @@ export function consoleApp(): App {
     return page(c, 'Jobs', (
       <>
         <div class="actions mb-1">
-          {([['survivors', 'New survivors'], ['all', 'All'], ['skipped', 'Skipped'], ['closed', 'Closed']] as const).map(
+          {([['survivors', 'New survivors'], ['aged', 'Aged'], ['all', 'All'], ['skipped', 'Skipped'], ['closed', 'Closed']] as const).map(
             ([v, label]) => <a href={`/jobs?view=${v}`} class={view === v ? 'btnlike sec' : 'btnlike'}>{label}</a>,
           )}
         </div>
@@ -370,7 +373,7 @@ export function consoleApp(): App {
           <input type="text" name="q" placeholder="search title or company" value={q.q ?? ''} />
           {sel('track', ['canada_coop', 'colombia_perm'], q.track)}
           {sel('verdict', ['Apply', 'Stretch-worth-it', 'Skip'], q.verdict)}
-          {sel('status', ['new', 'notified', 'closed', 'skipped'], q.status)}
+          {sel('status', ['new', 'notified', 'aged', 'closed', 'skipped'], q.status)}
           <button type="submit" class="primary">Filter</button>
         </form>
         <div class="table-wrap"><table>
@@ -593,7 +596,7 @@ export function consoleApp(): App {
                 COUNT(j.url_hash) jobs_seen,
                 SUM(CASE WHEN j.verdict IN ('Apply','Stretch-worth-it') THEN 1 ELSE 0 END) survivors
          FROM companies c
-         LEFT JOIN jobs j ON j.company_id = c.id AND j.first_seen >= datetime('now','-90 days')
+         LEFT JOIN jobs j ON j.company_id = c.id AND j.first_seen >= datetime('now','-45 days')
          GROUP BY c.id ORDER BY ${SORTS[sortKey]} ${dir}, c.name LIMIT ${PAGE + 1} OFFSET ${pg * PAGE}`,
       ).all<Record<string, string | number | null>>()
     ).results;
@@ -617,7 +620,7 @@ export function consoleApp(): App {
           <div class="actions mt-1"><button type="submit" class="primary">Verify &amp; preview</button></div>
         </form>
         <div class="table-wrap"><table>
-          <tr>{sortTh('company', 'company')}{sortTh('ats', 'ats')}{sortTh('token', 'token')}{sortTh('active', 'active')}{sortTh('health', 'health')}{sortTh('jobs', 'jobs 90d')}{sortTh('survivors', 'survivors')}{sortTh('yield', 'yield')}</tr>
+          <tr>{sortTh('company', 'company')}{sortTh('ats', 'ats')}{sortTh('token', 'token')}{sortTh('active', 'active')}{sortTh('health', 'health')}{sortTh('jobs', 'jobs 45d')}{sortTh('survivors', 'survivors')}{sortTh('yield', 'yield')}</tr>
           {rows.map((r) => (
             <tr>
               <td><a href={`/companies/${r.id}`}>{r.name}</a><div class="muted">{r.notes}</div></td>

@@ -73,7 +73,7 @@ export interface JobInsert {
   track: string | null;
   score: number;
   verdict: string;
-  status: 'new' | 'notified' | 'skipped' | 'closed';
+  status: 'new' | 'notified' | 'aged' | 'skipped' | 'closed';
   first_seen: string;
   last_seen: string;
   notified_at: string | null;
@@ -135,7 +135,7 @@ export class RunBatch {
     for (const h of urlHashes) {
       this.statements.push(
         this.env.DB.prepare(
-          "UPDATE jobs SET status = 'closed', last_seen = ? WHERE url_hash = ? AND status IN ('new','notified')",
+          "UPDATE jobs SET status = 'closed', last_seen = ? WHERE url_hash = ? AND status IN ('new','notified','aged')",
         ).bind(nowIso, h),
       );
     }

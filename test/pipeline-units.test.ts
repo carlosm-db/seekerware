@@ -29,21 +29,34 @@ describe('checkFreshness', () => {
   });
 });
 
-describe('reliablyStale (pipeline freshness-first drop rule)', () => {
-  // The pipeline drops a NEW job before fetch/score iff reliablyStale(freshness) is true.
-  it('drops a new job with a reliable date older than the window', () => {
-    const f = checkFreshness('2026-07-12T12:00:00Z', '2026-07-17T12:00:00Z', 3, NOW); // 5 days
-    expect(reliablyStale(f)).toBe(true);
+describe('two windows: notify (alert) vs store (keep) — pipeline drop/aged rule', () => {
+  // The pipeline uses TWO windows. It DROPS a new job before fetch/score only if reliablyStale vs the
+  // STORE window (~45d). A survivor reliablyStale vs the NOTIFY window (~3d) but within the store window is
+  // KEPT and stored as `aged` (browsable, never alerted). A missing/unreliable date is never dropped.
+  const NOTIFY = 3;
+  const STORE = 45;
+
+  it('recent (1d): notifiable AND stored', () => {
+    const f = checkFreshness('2026-07-16T12:00:00Z', '2026-07-17T12:00:00Z', NOTIFY, NOW);
+    expect(f.fresh).toBe(true); // -> notify
+    expect(reliablyStale(checkFreshness('2026-07-16T12:00:00Z', '2026-07-17T12:00:00Z', STORE, NOW))).toBe(false); // -> not dropped
   });
 
-  it('keeps a fresh job (recent reliable date)', () => {
-    const f = checkFreshness('2026-07-16T12:00:00Z', '2026-07-17T12:00:00Z', 3, NOW); // 1 day
-    expect(reliablyStale(f)).toBe(false);
+  it('mid-age (5d): NOT notifiable but within the store window -> kept as `aged`', () => {
+    const notify = checkFreshness('2026-07-12T12:00:00Z', '2026-07-17T12:00:00Z', NOTIFY, NOW);
+    const store = checkFreshness('2026-07-12T12:00:00Z', '2026-07-17T12:00:00Z', STORE, NOW);
+    expect(notify.fresh).toBe(false); // never alerted
+    expect(reliablyStale(store)).toBe(false); // but not dropped -> stored as `aged`
   });
 
-  it('keeps a job with no/unreliable date (never dropped on a guess)', () => {
-    expect(reliablyStale(checkFreshness(null, '2026-07-01T00:00:00Z', 3, NOW))).toBe(false);
-    expect(reliablyStale(checkFreshness('not-a-date', '2026-07-01T00:00:00Z', 3, NOW))).toBe(false);
+  it('ancient (50d): older than the store window -> dropped before fetch/score', () => {
+    const store = checkFreshness('2026-05-28T12:00:00Z', '2026-07-17T12:00:00Z', STORE, NOW);
+    expect(reliablyStale(store)).toBe(true);
+  });
+
+  it('no/unreliable date: never dropped (kept, stored)', () => {
+    expect(reliablyStale(checkFreshness(null, '2026-07-01T00:00:00Z', STORE, NOW))).toBe(false);
+    expect(reliablyStale(checkFreshness('not-a-date', '2026-07-01T00:00:00Z', STORE, NOW))).toBe(false);
   });
 });
 
