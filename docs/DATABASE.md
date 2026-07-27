@@ -99,8 +99,8 @@ CREATE TABLE jobs (
   track            TEXT,
   score            INTEGER,
   verdict          TEXT CHECK (verdict IN ('Apply','Stretch-worth-it','Skip')),
-  status           TEXT NOT NULL
-                     CHECK (status IN ('new','notified','closed','skipped')),
+  status           TEXT NOT NULL     -- 'aged' added by migration 0015
+                     CHECK (status IN ('new','notified','aged','closed','skipped')),
   first_seen       TEXT NOT NULL,
   last_seen        TEXT NOT NULL,
   notified_at      TEXT,
@@ -122,20 +122,22 @@ ALTER TABLE jobs ADD COLUMN cv_pdf_key TEXT;
 ## 4. `jobs.status` state machine
 
 ```
-                    (verdict Skip, or first-run seeding, or manual)
-        new job ─────────────────────────────────────────> skipped
-            │
-            │ (verdict Apply|Stretch + freshness + verify-on-notify OK
-            │  + successful Telegram push)
-            v
-           new ──────────────────────────────────────────> notified
-            │                                                  │
-            │ (absent from feed with fetch OK,                 │ (idem)
-            │  or verify-on-notify failed)                     │
-            v                                                  v
-          closed <─────────────────────────────────────────────
+                     (verdict Skip, or first-run seeding, or manual)
+   new job ──────────────────────────────────────────────────> skipped
+
+   new job, verdict Apply|Stretch:
+     ├─ posted within FRESHNESS_MAX_DAYS ─> new ─(verify-on-notify OK + push)─> notified
+     └─ older than FRESHNESS_MAX_DAYS but                       (kept, never alerted)
+        within STORE_MAX_DAYS ───────────> aged
+
+   new / notified / aged  ────────────────────────────────────> closed
+     (absent from feed with fetch OK, or verify-on-notify failed)
 ```
 
+- `aged` is assigned at first store to a survivor already past `FRESHNESS_MAX_DAYS`
+  but within `STORE_MAX_DAYS`: browsable in the console, never notified, and never
+  promoted to `new`/`notified` (dedup skips it on later runs). It expires like any
+  survivor. Added by migration 0015.
 - `closed` is terminal: if the job reappears in the feed, `last_seen` is
   updated but it is NOT re-notified (anti-spam).
 - Verdicts are computed when the job is discovered; config changes apply to

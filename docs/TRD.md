@@ -122,12 +122,17 @@ output_key}`, sequential runner, wrapper with:
 - **Dedup**: `url_hash` is the PK; if it exists -> continue without writing
   (the presence of an open job is guaranteed by auto-expire; `last_seen` is
   stamped on close — D1 quota, decision 2026-07-17).
-- **Freshness**: age = today - `posted_at` <= `FRESHNESS_MAX_DAYS` (`config`
-  key, initially 3). A company's first run seeds with `status = 'skipped'`,
-  without notifying.
-- **Auto-expire**: after a run with a successful fetch of the company, its
-  store jobs absent from the feed -> `status = 'closed'`. If the fetch failed,
-  nothing is closed.
+- **Freshness (notify window)**: age = today - `posted_at` <= `FRESHNESS_MAX_DAYS`
+  (`config` key, initially 3). Gates NOTIFICATION only: a survivor older than this is
+  never alerted.
+- **Store window**: a NEW posting is kept iff age <= `STORE_MAX_DAYS` (`config` key,
+  initially 45); reliably older -> dropped before fetch/score. A survivor within the
+  store window but past freshness is KEPT and stored as `aged` (browsable in the
+  console, never notified). A missing/unreliable date is treated as fresh and always
+  kept. A company's first run seeds with `status = 'skipped'`, without notifying.
+- **Auto-expire**: after a run with a successful fetch of the company, its store jobs
+  (`new`/`notified`/`aged`) absent from the feed -> `status = 'closed'`. If the fetch
+  failed, nothing is closed.
 - **Verify-on-notify**: immediately before the push, `isLive(job)`; if it died
   -> `closed`, no notification.
 - **Notify**: Telegram Bot API `sendMessage` (HTML parse mode) via `fetch`;

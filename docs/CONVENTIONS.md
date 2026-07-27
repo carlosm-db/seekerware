@@ -20,7 +20,9 @@ in the same commit that introduces the new term.
 | score | 0-100 score from the rules engine | rating, points, grade |
 | verdict | `Apply`, `Stretch-worth-it` or `Skip`; decided by the rules, never the AI | result, decision, classification |
 | survivor | job with an Apply or Stretch-worth-it verdict that passed gates and freshness | finalist, candidate, selected |
-| freshness | publication age <= `FRESHNESS_MAX_DAYS` (3 days) | validity, age |
+| freshness | publication age <= `FRESHNESS_MAX_DAYS` (3 days); gates NOTIFICATION only | validity, age |
+| store window | `STORE_MAX_DAYS` (45 days): a job is kept in the store while its age <= this, even past freshness; gates STORAGE, not notification | retention, catalog window |
+| aged | a survivor first stored already older than `FRESHNESS_MAX_DAYS` but within `STORE_MAX_DAYS`: browsable in the console, never notified (`jobs.status = 'aged'`) | stale survivor, backlog, catalog |
 | verify-on-notify | re-query of the job against the ATS API immediately before notifying | liveness check, liveness verification |
 | store | the system's persistence in D1 (`jobs` table), accessed only via `src/store.ts` | database, DB, registry, history |
 | block | owner-authored phrasing of a fact in the Blocks Bank (`blocks` table), anchored to an anchor, in EN+ES always; saving is the approval (2026-07-18) | phrase, snippet, bullet, sentence |
