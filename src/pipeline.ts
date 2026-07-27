@@ -328,7 +328,9 @@ async function processCompany(
       status = 'skipped';
     } else if (isSurvivor) {
       stats.survivors++;
-      if (freshness.fresh) {
+      // Notify on Apply only: Stretch-worth-it survivors are still stored and shown in the console
+      // (New survivors), but never pushed to Telegram (owner's choice — keep alerts high-signal).
+      if (freshness.fresh && result.best.verdict === 'Apply') {
         // verify-on-notify immediately before the push
         let alive: boolean | null = null;
         try {
