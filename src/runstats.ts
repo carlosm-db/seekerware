@@ -1,5 +1,5 @@
 // Run instrumentation (TRD §7): in-memory counters, zero intermediate
-// writes; everything is flushed in ONE flush inside the final db.batch().
+// writes; everything is flushed at the end of the run, in db.batch() chunks (store.ts).
 
 export interface PendingEvent {
   type: string;

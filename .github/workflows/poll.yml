@@ -18,6 +18,9 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
+    # Healthy runs are 15-90 s; a capped catch-up over a backlog is a few minutes. Fail fast instead
+    # of sitting on the 6 h default: a wedged run (2026-07-28) held its `runs` row open for hours.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

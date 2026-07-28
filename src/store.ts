@@ -1,5 +1,6 @@
 // D1 access (docs/DATABASE.md). Single door to the store: prepared statements,
-// never interpolated SQL. The run's writes travel in ONE final db.batch().
+// never interpolated SQL. The run's writes travel in the final flush, in db.batch() CHUNKS
+// (see RunBatch.flush): one atomic batch per chunk, not one for the whole run.
 
 import type { Company, Env } from './types';
 import type { RunStats } from './runstats';
@@ -80,7 +81,8 @@ export interface JobInsert {
   cv_pending: 0 | 1;
   why_it_fits: string;
   positioning_lead: string;
-  description_text: string;
+  /** NULL for `skipped` rows (never read back); the full text for survivors, used by the CV/kit. */
+  description_text: string | null;
   score_breakdown: string;
   title_norm: string;
   /** AI provenance: 'rule' (rule-based texts) or the Gemini model that enriched it. */
@@ -89,7 +91,14 @@ export interface JobInsert {
   role_analysis: string | null;
 }
 
-/** Statement builder for the run's final batch. */
+/**
+ * Statements per `db.batch()` in the final flush. Sized off the largest batch that ever flushed
+ * clean in production (run 12: 609 statements / 4,276 writes), with room to spare — the payload,
+ * not the count, is the real limit, and a job row carries its full description.
+ */
+const FLUSH_CHUNK = 200;
+
+/** Statement builder for the run's final flush. */
 export class RunBatch {
   private statements: D1PreparedStatement[] = [];
 
@@ -163,7 +172,15 @@ export class RunBatch {
     );
   }
 
-  /** Flushes events, deliveries and the run close; runs EVERYTHING atomically. */
+  /**
+   * Flushes events, deliveries and the run close. The queued writes go out in `db.batch()` CHUNKS —
+   * each chunk atomic, the run as a whole NOT. One batch for the whole run is what wedged the poller
+   * on 2026-07-27: with the 45-day store window a run queues thousands of job INSERTs, and D1
+   * rejects that single oversized request, so the run's ENTIRE bookkeeping was lost and every
+   * retry failed identically. Chunking is safe because every queued statement is idempotent
+   * (`INSERT OR IGNORE` on hashes absent from the store, UPDATEs on hashes already in it), so
+   * partial progress is strictly better than storing nothing.
+   */
   async flush(runId: number, stats: RunStats, status: string, nowIso: string, startedMs: number): Promise<void> {
     for (const e of stats.events) {
       this.statements.push(
@@ -179,13 +196,21 @@ export class RunBatch {
         ).bind(runId, n.url_hash ?? null, n.kind, nowIso, n.status, n.tg_message_id ?? null, n.error ?? null),
       );
     }
-    // 1) Run the run's work and accumulate the exact D1 accounting from its metas
-    if (this.statements.length) {
-      const results = await this.env.DB.batch(this.statements);
-      for (const r of results) stats.d1(r.meta);
+    // 1) Run the run's work in chunks and accumulate the exact D1 accounting from its metas
+    let flushError: string | null = null;
+    try {
+      for (let i = 0; i < this.statements.length; i += FLUSH_CHUNK) {
+        const results = await this.env.DB.batch(this.statements.slice(i, i + FLUSH_CHUNK));
+        for (const r of results) stats.d1(r.meta);
+      }
+    } catch (err) {
+      // The events queued above died with the failing chunk, so the run row below is the ONLY
+      // place this failure can become data — never return without closing it.
+      flushError = err instanceof Error ? err.message : 'flush failed';
+    } finally {
       this.statements = [];
     }
-    // 2) Close the run row with the COMPLETE counters (including the batch above)
+    // 2) ALWAYS close the run row, with the COMPLETE counters (including the chunks above)
     await this.env.DB.prepare(
       `UPDATE runs SET finished_at = ?, status = ?, duration_ms = ?,
          companies_total = ?, companies_ok = ?, companies_fail = ?,
@@ -194,13 +219,19 @@ export class RunBatch {
        WHERE id = ?`,
     )
       .bind(
-        nowIso, status, Date.now() - startedMs,
+        nowIso, flushError ? 'fail' : status, Date.now() - startedMs,
         stats.companiesTotal, stats.companiesOk, stats.companiesFail,
         stats.jobsSeen, stats.jobsNew, stats.jobsScored, stats.survivors, stats.notified, stats.closed,
-        stats.subrequests, stats.d1Reads, stats.d1Writes, stats.geminiCalls, stats.errors, stats.errorSummary,
+        stats.subrequests, stats.d1Reads, stats.d1Writes, stats.geminiCalls,
+        flushError ? stats.errors + 1 : stats.errors,
+        flushError ? `flush_fail: ${flushError}`.slice(0, 200) : stats.errorSummary,
         runId,
       )
       .run();
+
+    // Fail the poll loudly (a red Actions run is the owner's alert channel) — but only AFTER the
+    // run row is closed above, so the same failure is also queryable in the console.
+    if (flushError) throw new Error(`flush failed: ${flushError}`);
   }
 }
 

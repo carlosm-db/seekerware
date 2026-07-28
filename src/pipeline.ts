@@ -386,7 +386,11 @@ async function processCompany(
       first_seen: nowIso, last_seen: nowIso, notified_at: notifiedAt,
       cv_pending: cvPending,
       why_it_fits: texts.whyItFits, positioning_lead: texts.positioningLead,
-      description_text: job.description, score_breakdown: JSON.stringify(result),
+      // A `skipped` job's description is dead weight: nothing ever reads it back (CV/kit builds
+      // run on survivors; the console renders score_breakdown/title_norm), and at ~6.7 kB a row it
+      // was ~80% of the end-of-run flush payload once the store window went to 45 days.
+      description_text: status === 'skipped' ? null : job.description,
+      score_breakdown: JSON.stringify(result),
       title_norm: normalizeTitle(job.title), enriched_by: enrichedBy, role_analysis: roleAnalysis,
     };
     // A NOTIFIED job is persisted IMMEDIATELY: if this run is cut before the final batch flush,

@@ -223,10 +223,15 @@ scores in JSON. Locally: `wrangler dev` + `curl` to the endpoint, or
 **Run instrumentation** (DATABASE.md §9): zero intermediate writes — an
 in-memory `RunStats` object, `trackedFetch()` wraps every outbound fetch
 (counts subrequests), D1 accounting is exact and free
-(`meta.rows_read/rows_written` from each result), and everything is dumped in
-ONE flush inside the final `db.batch()`. The `runs` row is inserted at the
-start (status `running`) and completed in `finally`; the next run stamps
-`crashed` on orphans (> 10 min in `running`). Typical subrequest budget with a
+(`meta.rows_read/rows_written` from each result), and everything is dumped at the
+end of the run in `db.batch()` CHUNKS (`FLUSH_CHUNK`, `src/store.ts`): one atomic
+batch per chunk, never one for the whole run — a single oversized batch is
+rejected by D1 and takes the run's entire bookkeeping with it. The `runs` row is
+inserted at the start (status `running`) and completed in `finally` — including
+when the flush itself fails, which closes it as `fail` with
+`error_summary = 'flush_fail: …'` and then rethrows (a flush failure must be
+data, not silence); the next run stamps `crashed` on orphans (> 10 min in
+`running`). Typical subrequest budget with a
 round-robin page of 25 companies: ~39 of 50 (22% margin); the console meters
 are SUMs of the day's `runs` against `config['quota_limits']`. Console actions
 (dry-run, regenerate CV) are their own invocations with THEIR own budget of 50
@@ -237,8 +242,11 @@ are SUMs of the day's `runs` against `config['quota_limits']`. Console actions
 `config['poll_cursor']`, `src/store.ts`), so daily coverage = `poll_page_size` ×
 runs/day, and the same 25 are only re-polled every run when the active count ≤
 page size. Two per-run ceilings bound a page: **subrequests** (~1 feed each, 50
-on the free tier) and **CPU** (bounded by `config['max_new_jobs_per_run']` —
-overflow scores next run). To grow the set: raise `poll_page_size` toward the
+on the free tier) and **intake** (bounded by `config['max_new_jobs_per_run']`,
+set to 2500 — overflow scores next run). That cap is the guardrail on the store
+window: with `STORE_MAX_DAYS` at 45 an uncapped run ingests the whole backlog of
+every board at once (~5.7k jobs, each with a detail fetch and a queued INSERT),
+which is what wedged the poller on 2026-07-27. To grow the set: raise `poll_page_size` toward the
 subrequest budget and/or widen the /health schedule window so
 `poll_page_size` × runs/day ≥ the active count (≈ once-daily coverage). Free tier
 sustains a few hundred companies at ~daily freshness; **Cloudflare Workers Paid**

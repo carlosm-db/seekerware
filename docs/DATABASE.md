@@ -79,7 +79,7 @@ columns are written by the system; the only user edit (via the dashboard):
 | cv_doc_url | TEXT | Generated Doc (Apply only); cache of the latest — history in `cvs` (step 6) |
 | cv_pending | INTEGER 0/1 | 1 = the CV was left pending (Gemini down); retried on the next run |
 | why_it_fits / positioning_lead | TEXT | Final version sent (rule-based or enriched) |
-| description_text | TEXT | Plain text of the description (post stripHtml) — enables why-not, prep, radar. Written ONCE on ingest |
+| description_text | TEXT | Plain text of the description (post stripHtml) — feeds the CV/kit build at Prepare. Written ONCE on ingest, and NULL for `skipped` rows: nothing reads it back for them, and at ~6.7 kB a row it dominated the flush payload. (why-not comes from `score_breakdown`, the radar from `title_norm`) |
 | score_breakdown | TEXT JSON | Full ScoreResult from the engine (matches per category, gates per track, verdicts) — transparency and why-not |
 | title_norm | TEXT | Normalized title (lowercase, without parentheses or seniority tokens) — similar-jobs radar |
 | cv_pdf_key | TEXT | Latest `generated` snapshot in R2 (step 6) |
@@ -244,7 +244,8 @@ the keys and JSON sub-formats **is decided in build 2** with real jobs.
   (parity report before rendering colombia_perm).
 - `retired` blocks/roles are kept (Blocks Bank audit trail); the console also offers
   a confirm-guarded permanent delete for content the owner considers junk.
-- The run's writes in `db.batch()` (per-batch atomicity).
+- The run's writes in `db.batch()` chunks (per-CHUNK atomicity, not per-run: every
+  queued statement is idempotent, so partial progress beats storing nothing).
 
 ## 8. Limits and scale
 
@@ -259,9 +260,13 @@ table (future evolution). Full observability (§9) consumes ~1-5k writes/day ≈
 Principle: **the console can only show what is in D1** (the worker cannot read
 its own Cloudflare metrics). Instrumentation pattern: in-memory counters during
 the run (`RunStats` + `trackedFetch` + `meta.rows_read/rows_written` from each
-D1 result — exact accounting, free) and ONE single flush inside the final
-`db.batch()`. The `runs` row is inserted at the START of the run; if the
-isolate dies, the next run marks it `crashed` (the crash is data, not silence).
+D1 result — exact accounting, free) and one flush at the end of the run, sent in
+`db.batch()` CHUNKS (`FLUSH_CHUNK`, `src/store.ts`) — one oversized batch is
+rejected by D1 and loses the whole run's bookkeeping. The `runs` row is inserted
+at the START of the run and is ALWAYS closed, including when the flush itself
+fails (status `fail`, `error_summary = 'flush_fail: …'`, then rethrow); if the
+process dies outright, the next run marks it `crashed` (the crash is data, not
+silence).
 Detail: TRD §Instrumentation and
 `docs/audits/2026-07-17-diseno-monitoreo-datos.md`.
 
