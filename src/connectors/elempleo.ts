@@ -13,7 +13,7 @@
 //         /co/ofertas-empleo/?__not_found__=1; a live one is 200 with the JobPosting block.
 
 import type { Company, Job } from '../types';
-import { canonicalUrl, decodeEntities, stripHtml } from './common';
+import { canonicalUrl, decodeEntities, findJsonLd, padIsoDate, stripHtml } from './common';
 
 const BASE = 'https://www.elempleo.com';
 
@@ -44,21 +44,6 @@ interface LdAddress {
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-/** First ld+json block matching `pick` (attribute-order-tolerant: the tag may carry id= before type=). */
-function findLd<T extends { '@type'?: string }>(html: string, type: string): T | null {
-  for (const m of html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
-    try {
-      const parsed = JSON.parse(m[1]!.trim()) as unknown;
-      for (const node of Array.isArray(parsed) ? parsed : [parsed]) {
-        if (node && typeof node === 'object' && String((node as T)['@type']).includes(type)) return node as T;
-      }
-    } catch {
-      // non-JSON or truncated block: ignore, keep scanning
-    }
-  }
-  return null;
-}
-
 /** The per-card analytics payloads, keyed by offer id (entity-encoded JSON in an attribute). */
 function ga4Offers(html: string): Map<string, Ga4Offer> {
   const map = new Map<string, Ga4Offer>();
@@ -71,12 +56,6 @@ function ga4Offers(html: string): Map<string, Ga4Offer> {
     }
   }
   return map;
-}
-
-/** datePosted arrives unpadded ("2026-7-1") -> strict zero-padded YYYY-MM-DD, or null if unparseable. */
-function isoDate(d: string | undefined): string | null {
-  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(d ?? '');
-  return m ? `${m[1]}-${m[2]!.padStart(2, '0')}-${m[3]!.padStart(2, '0')}` : null;
 }
 
 /**
@@ -97,7 +76,7 @@ export async function fetchJobs(company: Company, doFetch: Fetcher = fetch): Pro
   const res = await doFetch(`${BASE}/co/ofertas-empleo/${encodeURIComponent(company.token)}`);
   if (!res.ok) throw new Error(`elempleo feed ${company.token}: HTTP ${res.status}`);
   const html = await res.text();
-  const list = findLd<LdItemList>(html, 'ItemList');
+  const list = findJsonLd<LdItemList>(html, 'ItemList');
   // A bogus token 301s to the not-found search page (200 after the redirect, but no ItemList):
   // throwing keeps the console probe honest instead of saving the company as "0 jobs OK".
   if (!list) throw new Error(`elempleo feed ${company.token}: no ItemList structured data (bad token or page shape changed)`);
@@ -136,7 +115,7 @@ export async function fetchJobs(company: Company, doFetch: Fetcher = fetch): Pro
 export async function fetchDetail(company: Company, job: Job, doFetch: Fetcher = fetch): Promise<Partial<Job>> {
   const res = await doFetch(job.url);
   if (!res.ok) return {};
-  const jp = findLd<LdJobPosting>(await res.text(), 'JobPosting');
+  const jp = findJsonLd<LdJobPosting>(await res.text(), 'JobPosting');
   if (!jp) return {};
   const patch: Partial<Job> = {};
   const employer = jp.hiringOrganization?.name;
@@ -145,7 +124,7 @@ export async function fetchDetail(company: Company, job: Job, doFetch: Fetcher =
     patch.description = [employer ? `Empleador: ${employer}` : '', desc].filter(Boolean).join('\n\n');
   }
   if (jp.title) patch.title = jp.title;
-  const posted = isoDate(jp.datePosted);
+  const posted = padIsoDate(jp.datePosted);
   if (posted) patch.posted_at = posted;
   const location = locationLabel(jp);
   if (location) patch.location = location;
@@ -167,5 +146,5 @@ export async function isLive(company: Company, job: Job, doFetch: Fetcher = fetc
     throw new Error(`elempleo verify ${company.token}/${job.id}: HTTP ${res.status} -> ${target.slice(0, 80)}`);
   }
   if (!res.ok) throw new Error(`elempleo verify ${company.token}/${job.id}: HTTP ${res.status}`);
-  return findLd<LdJobPosting>(await res.text(), 'JobPosting') !== null;
+  return findJsonLd<LdJobPosting>(await res.text(), 'JobPosting') !== null;
 }

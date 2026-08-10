@@ -61,6 +61,31 @@ export function stripHtml(html: string): string {
 }
 
 /**
+ * First JSON-LD block whose @type includes `type`, or null. Attribute-order-tolerant (the script
+ * tag may carry id= before type=). Used by the structured-data connectors (elempleo, magneto),
+ * whose feeds are SSR pages carrying schema.org data instead of a JSON API.
+ */
+export function findJsonLd<T extends { '@type'?: string }>(html: string, type: string): T | null {
+  for (const m of html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const parsed = JSON.parse(m[1]!.trim()) as unknown;
+      for (const node of Array.isArray(parsed) ? parsed : [parsed]) {
+        if (node && typeof node === 'object' && String((node as T)['@type']).includes(type)) return node as T;
+      }
+    } catch {
+      // non-JSON or truncated block: ignore, keep scanning
+    }
+  }
+  return null;
+}
+
+/** schema.org dates may arrive unpadded ("2026-7-1") -> strict zero-padded YYYY-MM-DD, or null. */
+export function padIsoDate(d: string | undefined): string | null {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(d ?? '');
+  return m ? `${m[1]}-${m[2]!.padStart(2, '0')}-${m[3]!.padStart(2, '0')}` : null;
+}
+
+/**
  * Map a public career/board URL to its ATS + board token, or null if the host
  * is not a supported ATS board. Powers the console "add by URL" bulk flow.
  * Recognized: Greenhouse (boards/job-boards.greenhouse.io/{token} or
@@ -132,6 +157,12 @@ export function parseAtsUrl(input: string): { ats: Ats; token: string } | null {
     const trabajo = seg[2] ? decodeURIComponent(seg[2]) : '';
     if (seg[0] === 'co' && seg[1] === 'ofertas-empleo' && trabajo.startsWith('trabajo-')) {
       return { ats: 'elempleo', token: trabajo };
+    }
+  }
+  // Magneto per-company board: magneto365.com/co/empresas/{slug}[/empleos] -> token '{slug}'.
+  if (host === 'www.magneto365.com' || host === 'magneto365.com') {
+    if (seg[0] === 'co' && seg[1] === 'empresas' && seg[2]) {
+      return { ats: 'magneto', token: decodeURIComponent(seg[2]) };
     }
   }
   return null;

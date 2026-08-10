@@ -10,6 +10,7 @@ import * as workable from './workable';
 import * as smartrecruiters from './smartrecruiters';
 import * as bamboohr from './bamboohr';
 import * as elempleo from './elempleo';
+import * as magneto from './magneto';
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -25,4 +26,4 @@ export interface Connector {
   fetchDetail?(company: Company, job: Job, doFetch?: Fetcher): Promise<Partial<Job>>;
 }
 
-export const connectors: Record<Ats, Connector> = { greenhouse, lever, ashby, successfactors, workday, workable, smartrecruiters, bamboohr, elempleo };
+export const connectors: Record<Ats, Connector> = { greenhouse, lever, ashby, successfactors, workday, workable, smartrecruiters, bamboohr, elempleo, magneto };

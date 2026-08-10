@@ -50,6 +50,7 @@ and `isLive(job) -> Promise<boolean>`. Normalized Job:
 | SmartRecruiters | `api.smartrecruiters.com/v1/companies/{token}/postings` (public, paginated ≤500) | `releasedDate` | GET the individual posting -> 404 = closed |
 | BambooHR | `{token}.bamboohr.com/careers/list` (public JSON; no date field) | — (`posted_at` null) | GET `/careers/{id}/detail` -> 404 = closed |
 | elempleo | per-company SSR page `elempleo.com/co/ofertas-empleo/{token}` -> `ItemList` JSON-LD + per-card `data-ga4-offerdata`; detail page -> `JobPosting` JSON-LD (the internal search API is auth-gated — never call it) | `datePosted` (detail only; normalized to padded ISO) | GET the job page WITHOUT following redirects: 301 to `?__not_found__=1` = closed; 200 must still carry the `JobPosting` block |
+| Magneto | per-company SSR board `magneto365.com/co/empresas/{token}/empleos` -> `ItemList` JSON-LD with the 20 NEWEST postings (no server-side pagination — Workday newest-N precedent); detail page `/co/empleos/{slug}-{id}` -> `JobPosting` JSON-LD (address fields may be arrays) | `datePosted` (detail only) | GET the job page WITHOUT following redirects: only 404 = closed; 500 and redirects are indeterminate (a nonexistent id 500s); 200 must still carry the `JobPosting` block |
 
 Common rules:
 
