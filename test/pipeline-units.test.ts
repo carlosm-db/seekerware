@@ -60,6 +60,27 @@ describe('two windows: notify (alert) vs store (keep) — pipeline drop/aged rul
   });
 });
 
+describe('detail-supplied posted_at: the windows are recomputed after the detail merge', () => {
+  // Sources whose date arrives only on the DETAIL (elempleo JSON-LD, Workday CxS) look "unknown =
+  // fresh" at list time; the pipeline recomputes both windows post-merge so notify/store gate on
+  // the real date (rule 3) instead of letting the pre-detail verdict stand.
+  const NOTIFY = 3;
+  const STORE = 45;
+
+  it('list (null date) says fresh-unknown; detail date 10d old -> not notifiable, kept as `aged`', () => {
+    const pre = checkFreshness(null, '2026-07-17T12:00:00Z', NOTIFY, NOW);
+    expect(pre).toMatchObject({ fresh: true, freshness_ok: 'unknown' }); // pre-detail verdict
+    const post = checkFreshness('2026-07-07', '2026-07-17T12:00:00Z', NOTIFY, NOW);
+    expect(post.fresh).toBe(false); // recomputed: never alerted
+    expect(post.freshness_ok).toBe('true'); // and the stored row now records a reliable date
+    expect(reliablyStale(checkFreshness('2026-07-07', '2026-07-17T12:00:00Z', STORE, NOW))).toBe(false); // within store -> aged
+  });
+
+  it('detail date 60d old -> reliably stale vs the store window -> dropped post-merge', () => {
+    expect(reliablyStale(checkFreshness('2026-05-18', '2026-07-17T12:00:00Z', STORE, NOW))).toBe(true);
+  });
+});
+
 describe('Telegram messages', () => {
   const job: Job = {
     id: '1', company: 'Acme <Corp>', title: 'Data Analyst & Ops <img>', location: 'Vancouver',

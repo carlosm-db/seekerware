@@ -285,8 +285,8 @@ async function processCompany(
     // window is dropped here — before any detail fetch or scoring. Between the two windows it is KEPT and
     // stored silently as `aged` (browsable, never notified — rule 3). A missing/unreliable date is treated
     // as fresh. This still stops a board from dumping ancient (> storeMaxDays) postings every run.
-    const freshness = checkFreshness(job.posted_at, nowIso, maxDays);            // notify window
-    const storeFreshness = checkFreshness(job.posted_at, nowIso, storeMaxDays);  // store window
+    let freshness = checkFreshness(job.posted_at, nowIso, maxDays);              // notify window
+    let storeFreshness = checkFreshness(job.posted_at, nowIso, storeMaxDays);    // store window
     if (reliablyStale(storeFreshness)) continue;
     if (stats.jobsNew >= maxNewPerRun) {
       // CPU cap reached: the rest waits for the next run (they are still
@@ -311,6 +311,15 @@ async function processCompany(
           detail: err instanceof Error ? err.message : 'detail fetch failed',
         });
       }
+    }
+    // Some sources carry the posting date only on the DETAIL (elempleo JSON-LD, Workday CxS):
+    // recompute both windows on the real date so notify/store gate correctly (rule 3) — without
+    // this, the pre-detail "unknown = fresh" verdict stands and a backlog posting far older than
+    // FRESHNESS_MAX_DAYS could be notified. Reliably-stale drops here too (same as above).
+    if (job.posted_at && freshness.freshness_ok === 'unknown') {
+      freshness = checkFreshness(job.posted_at, nowIso, maxDays);
+      storeFreshness = checkFreshness(job.posted_at, nowIso, storeMaxDays);
+      if (reliablyStale(storeFreshness)) { stats.jobsNew--; continue; }
     }
     const result = scoreJob(job, config);
     stats.jobsScored++;
