@@ -47,6 +47,9 @@ and `isLive(job) -> Promise<boolean>`. Normalized Job:
 | Lever | `api.lever.co/v0/postings/{token}?mode=json` | `createdAt` (epoch ms) | GET of the individual posting in JSON mode |
 | Ashby | `api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=true` | `publishedDate` | re-fetch the board and look up the `id`. The HTML page is a SPA: it returns 200 even when the job is dead — NEVER verify against HTML |
 | Workable | `apply.workable.com/api/v1/widget/accounts/{token}?details=true` (public, no token) | `published_on` | re-fetch the widget and look up the `shortcode` (SPA HTML, never verify against it). Form not public → kit `detectable:false` |
+| SmartRecruiters | `api.smartrecruiters.com/v1/companies/{token}/postings` (public, paginated ≤500) | `releasedDate` | GET the individual posting -> 404 = closed |
+| BambooHR | `{token}.bamboohr.com/careers/list` (public JSON; no date field) | — (`posted_at` null) | GET `/careers/{id}/detail` -> 404 = closed |
+| elempleo | per-company SSR page `elempleo.com/co/ofertas-empleo/{token}` -> `ItemList` JSON-LD + per-card `data-ga4-offerdata`; detail page -> `JobPosting` JSON-LD (the internal search API is auth-gated — never call it) | `datePosted` (detail only; normalized to padded ISO) | GET the job page WITHOUT following redirects: 301 to `?__not_found__=1` = closed; 200 must still carry the `JobPosting` block |
 
 Common rules:
 

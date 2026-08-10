@@ -97,8 +97,9 @@ repo.
    overridable by the model.
 3. **Freshness and verification**: a job is notified only if its age is <=
    `FRESHNESS_MAX_DAYS` AND it is verified live via verify-on-notify against the
-   ATS API (never against the HTML page). Auto-expire only if the feed fetch
-   succeeded.
+   ATS API — or, for sources with no API (elempleo), against the page's
+   structured `JobPosting` data — never against free-form HTML. Auto-expire
+   only if the feed fetch succeeded.
 4. **Dedup** by hash of the canonical URL (without tracking query params; the
    ATS identity parameters are preserved). A company's first run seeds the store
    without notifying.

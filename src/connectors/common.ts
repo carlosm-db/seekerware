@@ -127,5 +127,12 @@ export function parseAtsUrl(input: string): { ats: Ats; token: string } | null {
     const sub = host.slice(0, -'.bamboohr.com'.length);
     if (sub && !['www', 'api'].includes(sub)) return { ats: 'bamboohr', token: sub };
   }
+  // elempleo per-company page: elempleo.com/co/ofertas-empleo/trabajo-{slug} -> token 'trabajo-{slug}'.
+  if (host === 'www.elempleo.com' || host === 'elempleo.com') {
+    const trabajo = seg[2] ? decodeURIComponent(seg[2]) : '';
+    if (seg[0] === 'co' && seg[1] === 'ofertas-empleo' && trabajo.startsWith('trabajo-')) {
+      return { ats: 'elempleo', token: trabajo };
+    }
+  }
   return null;
 }
