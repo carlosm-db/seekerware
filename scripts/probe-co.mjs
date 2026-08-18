@@ -1,9 +1,7 @@
 // Diagnostic probe (audit 2026-08-10-latam-roster-mechanism.md §8/§9.3): can a GitHub-hosted
 // runner reach the Colombian boards' SSR pages? Decides where the elempleo/Magneto connectors
 // poll from (Actions vs fallback runner). Plain Node 22 (global fetch), no deps; ONE fetch per
-// page (single-shot, polite). Writes docs/audits/2026-08-10-actions-ip-probe.md.
-
-import { writeFileSync } from 'node:fs';
+// page (single-shot, polite). Prints the report to stdout: the job log IS the report.
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
@@ -75,6 +73,4 @@ Reading: 200 + offer links + JobPosting=YES on both rows of a source ⇒ the Act
 host that connector directly. A 403/0 row ⇒ that source needs the fallback runner (owner PC /
 self-hosted) per §8. Computrabajo is reference-only (expected 403 from datacenter IPs).
 `;
-
-writeFileSync('docs/audits/2026-08-10-actions-ip-probe.md', md);
 console.log(md);

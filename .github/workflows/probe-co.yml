@@ -1,15 +1,15 @@
 name: probe-co
 
-# Throwaway diagnostic (audit 2026-08-10-latam-roster-mechanism.md §9.3): fetch the Colombian
-# boards' SSR pages from a GitHub-hosted runner to decide where the elempleo/Magneto connectors
-# poll from. Lives ONLY on the probe branch; commits its report back there ([skip ci] stops any
-# retrigger). Delete the branch once the audit records the result.
+# Reachability diagnostic for non-ATS sources (born as the throwaway probe of audit
+# 2026-08-10-actions-ip-probe.md; adopted on main 2026-08-18): fetches a board's SSR pages from a
+# GitHub-hosted runner to decide whether its connector can poll from Actions or needs a fallback
+# runner. Hand-run only. The report is PRINTED to the job log — copy it into a dated audit doc;
+# nothing is committed back. Point it at a new source by editing scripts/probe-co.mjs.
 on:
-  push:
-    branches: [probe/actions-ip]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: probe-co
@@ -28,11 +28,3 @@ jobs:
 
       - name: Probe boards
         run: node scripts/probe-co.mjs
-
-      - name: Commit report to this branch
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add docs/audits/2026-08-10-actions-ip-probe.md
-          git commit -m 'probe: Actions-IP reachability report [skip ci]'
-          git push origin HEAD:probe/actions-ip
