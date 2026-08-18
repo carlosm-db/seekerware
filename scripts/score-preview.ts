@@ -14,7 +14,8 @@
 // Run: npx tsx scripts/score-preview.ts --jobs sample.json --base live-config.json --patch cand.json
 // Not part of tsconfig (same as scripts/poll.ts) — tsx transpiles it at runtime.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { validateScoringConfig } from '../src/config-store';
 import { scoreJob, CATEGORIES, normalizeTitle } from '../src/scoring';
 import type { ScoringConfig, Category, Keyword } from '../src/scoring';
 import type { Job, Verdict } from '../src/types';
@@ -38,6 +39,12 @@ interface ConfigPatch {
   add?: Partial<Record<Category, Keyword[]>>;
   /** Force a scope on EVERY term of a category — `role_type` is title-scoped as a whole. */
   scope?: Partial<Record<Category, 'title' | 'text'>>;
+  /**
+   * Terms that HARD-fail every track when they appear in the title. Modelled as a title-scoped
+   * `reject` gate, which is the engine's only "must not appear" mechanism — a negative weight merely
+   * subtracts and can be outvoted (domain rule 2: verdicts belong to the rules, not to arithmetic).
+   */
+  reject_title?: string[];
   set?: Record<string, unknown>;
 }
 
@@ -89,6 +96,10 @@ function applyPatch(base: ScoringConfig, patch: ConfigPatch): ScoringConfig {
     const scope = patch.scope?.[cat];
     if (scope) cfg.keywords[cat] = cfg.keywords[cat].map((k) => ({ ...k, scope }));
   }
+  if (patch.reject_title?.length) {
+    const reject = patch.reject_title.map((en) => ({ en, es: en }));
+    for (const t of cfg.tracks) t.gates.push({ id: 'reject_over_band', scope: 'title', reject });
+  }
   for (const [dotted, val] of Object.entries(patch.set ?? {})) {
     const parts = dotted.split('.');
     let node = cfg as unknown as Record<string, unknown>;
@@ -117,6 +128,17 @@ const ON_TARGET_FUNCTIONS = [
   'disputes', 'reconciliation', 'asset servicing', 'custody', 'income processing',
   'risk', 'controls', 'governance',
 ];
+/**
+ * Above the owner's target band. They want analyst / senior analyst / specialist / lead / supervisor
+ * at most (stated 2026-08-18), so a managerial grade in the title is a miss no matter how well the
+ * rest of the posting scores. `normalizeTitle` already strips `senior`, so "Senior Manager" -> manager.
+ */
+const OVER_BAND = ['manager', 'director', 'vp', 'vice president', 'head of', 'chief'];
+function overBand(title: string): boolean {
+  const t = normalizeTitle(title);
+  return OVER_BAND.some((p) => t.includes(p));
+}
+
 /** Strict: the title names an ops/BA role outright. */
 function onTargetRole(title: string): boolean {
   const t = normalizeTitle(title);
@@ -178,7 +200,7 @@ function main(): void {
   const catSum = { before: {} as Record<Category, number>, after: {} as Record<Category, number> };
   for (const c of CATEGORIES) { catSum.before[c] = 0; catSum.after[c] = 0; }
   let beforeApply = 0, afterApply = 0, beforeOn = 0, afterOn = 0, scoreDrop = 0;
-  let beforeRole = 0, afterRole = 0;
+  let beforeRole = 0, afterRole = 0, beforeOver = 0, afterOver = 0;
 
   for (const s of jobs) {
     // Re-score under BOTH configs: the stored verdict came from an older config version, so scoring a
@@ -194,8 +216,9 @@ function main(): void {
     scoreDrop += b.score - a.score;
     const on = onTarget(s.title);
     const onRole = onTargetRole(s.title);
-    if (b.best.verdict === 'Apply') { beforeApply++; if (on) beforeOn++; if (onRole) beforeRole++; }
-    if (a.best.verdict === 'Apply') { afterApply++; if (on) afterOn++; if (onRole) afterRole++; }
+    const over = overBand(s.title);
+    if (b.best.verdict === 'Apply') { beforeApply++; if (on) beforeOn++; if (onRole) beforeRole++; if (over) beforeOver++; }
+    if (a.best.verdict === 'Apply') { afterApply++; if (on) afterOn++; if (onRole) afterRole++; if (over) afterOver++; }
     if (b.best.verdict !== 'Apply' && a.best.verdict === 'Apply') gained.push({ title: s.title, before: b.score, after: a.score });
     if (b.best.verdict === 'Apply' && a.best.verdict !== 'Apply') lost.push({ title: s.title, before: b.score, after: a.score });
   }
@@ -219,6 +242,7 @@ function main(): void {
   console.log(`\nApply volume: ${beforeApply} -> ${afterApply}`);
   console.log(`on-target, roles + approved functions: ${pct(beforeOn, beforeApply)} -> ${pct(afterOn, afterApply)}`);
   console.log(`on-target, strict role names only:    ${pct(beforeRole, beforeApply)} -> ${pct(afterRole, afterApply)}`);
+  console.log(`ABOVE target band (manager/dir/vp):    ${beforeOver} -> ${afterOver}  (${pct(afterOver, afterApply)} of Apply)`);
 
   const show = (label: string, rows: typeof gained) => {
     console.log(`\n${label} (${rows.length}):`);
@@ -229,6 +253,17 @@ function main(): void {
   };
   show('GAINED Apply', gained);
   show('LOST Apply', lost);
+
+  // `--emit <path>` writes the candidate as a full config, ready for config['scoring']. It emits the
+  // SAME object the numbers above describe (no hand-copying, no drift), normalized and validated by
+  // the real loader — so a config that would crash the pipeline never reaches D1.
+  const emitAt = process.argv.indexOf('--emit');
+  if (emitAt >= 0 && process.argv[emitAt + 1]) {
+    const validated = validateScoringConfig(cand);
+    writeFileSync(process.argv[emitAt + 1]!, JSON.stringify(validated));
+    const scoped = CATEGORIES.reduce((n, c) => n + validated.keywords[c].filter((k) => k.scope === 'title').length, 0);
+    console.log(`emitted validated config -> ${process.argv[emitAt + 1]} (v${validated.version ?? '?'}, ${scoped} title-scoped terms)`);
+  }
   console.log('');
 }
 

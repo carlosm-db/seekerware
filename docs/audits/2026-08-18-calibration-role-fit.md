@@ -126,3 +126,66 @@ window. If a preview is wanted, it should be built while that corpus exists.
 
 Target to calibrate against: from ~22 alerts/day at roughly 50% off-target, to **6-10/day with ≥70%
 on-target titles**.
+
+---
+
+## Applied — config v49 (2026-08-18)
+
+Owner adjudication during the session: **Apply** for AML/KYC/financial-crime, payments/settlements/
+clearing, fraud/disputes/chargebacks, back-office/reconciliation/custody, risk/controls/governance;
+**Stretch** for credit/collections, onboarding/client service, treasury/capital markets and Data
+Engineer. Then a seniority band was stated that overrides the earlier Program/Project Manager call:
+**analyst / senior analyst / specialist / lead / supervisor MAX** — manager, senior manager, director
+and VP must not appear at all.
+
+That last rule cannot be expressed with weights. A negative weight subtracts and can be outvoted:
+"Manager, Operational Risk Program, Fraud Risk & Governance" collects +2 risk, +2 fraud, +2 governance
+and absorbs a −3 `manager`. Measured, a weights-only variant still leaked 3 managerial titles into
+Apply out of 34; the hard mechanism — a title-scoped `reject` gate — leaks 0. Gates are the engine's
+only "must not appear" (domain rule 2: verdicts belong to the rules, not to arithmetic).
+
+Measured on the same 700-job sample, base v48 → candidate v49:
+
+| | v48 | v49 |
+|---|---|---|
+| Apply | 122 | **31** |
+| on-target (roles + approved functions) | 26% | **81%** |
+| on-target (strict role names) | 11% | **55%** |
+| titles above the target band | 34 | **0** |
+| mean `role_type` points | 33.4/35 | **7.0/50** |
+
+Config v49 contents: 15 generic terms removed from `role_type` and the language terms from both
+categories; 50 terms added (role grammar `analyst`/`operations`/`specialist`/`coordinator`/
+`supervisor`/`lead`, the target role names, the approved banking functions, the Stretch tier at +1,
+and title negatives `developer`/`architect`/`scientist`/`quantitative`); **all 81 `role_type` terms
+title-scoped**; `role_type` 35→50 and `domain` 30→15 (the roster is already curated for banking, so
+`domain` was itself near-constant at 22.4/30); `saturation` 5→8; thresholds 75/60 → **58/44**; and the
+`reject_over_band` gate (`manager`, `director`, `vp`, `vice president`, `head of`, `chief`, `avp`,
+`svp`, `principal`) on both tracks. `staff` was deliberately left out — in US grading "Staff
+Accountant" is a junior role. Every weight stays within ±3 so each row remains editable from the
+console. The patch is kept OUT of the repo at `seeds/calibration_2026-08-18_role-fit.patch.json` —
+`seeds/` is gitignored and nothing in it is tracked, which matches TRD §3 ("the knowledge lives in the
+`config` table, zero keywords in code"); this document is the versioned record of what changed. The
+pre-change v48 JSON was exported for rollback (a single `config` row, no deploy needed to revert).
+
+### Known residue
+
+- **Co-op alerts fell 9 → 3** on a 60-posting co-op sample: co-op titles carry no ops role name
+  ("Winter 2027 - GRM, CMM Analyst Intern"), and their postings are thin on domain and tools, so they
+  cannot reach a bar tuned for experienced ops roles. They remain visible as `new`/`aged` survivors in
+  the console and in the Monday digest — they just do not alert. The tempting shortcut (making
+  `co-op`/`intern` role-identity terms) was measured and rejected: it recovers 11 co-op alerts at 27%
+  on-target, i.e. it re-creates the disease this audit cured.
+- **A per-track threshold would NOT fix that**, contrary to the first instinct in this session: the
+  live `canada_coop` track has a single gate, `location_canada`, and routes 5,302 of 6,870 jobs — it
+  is "any job in Canada", not a co-op route. Lowering its bar would lower it for the whole Canadian
+  roster. The surgical fix is a NEW track: Canada location **+** a title gate on
+  `co-op`/`intern`/`work term`, ordered first, with its own threshold (`TrackConfig.thresholds` exists
+  in the type but the engine has ignored it since 2026-07-19). That is a separate change and does not
+  violate the 2026-07-19 simplification — that decision stopped gates from shaping the SCORE; a
+  per-track threshold moves the verdict bar, not the score.
+- **Terminology drift:** `canada_coop` is named for a filter it does not have. Rename it, or give it
+  the gate its name promises (CLAUDE.md §3).
+- Two visible blemishes left in Apply: *"Apps Dev Tech Lead Analyst"* (enters via `analyst` + `lead`)
+  and *"Senior Payments Engineer"* (via `payments`). Both would die by adding `engineer` as a title
+  negative, at the cost of the Data Engineer roles the owner wants kept as Stretch.
