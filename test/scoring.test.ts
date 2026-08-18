@@ -206,22 +206,47 @@ describe('scoreJob — EN/ES matching and title', () => {
   });
 });
 
-describe('scoreJob — one score, gates route only (decoupled)', () => {
-  it('per-track thresholds are ignored; every track uses the one global threshold', () => {
-    const cfg: ScoringConfig = {
-      ...config,
-      tracks: config.tracks.map((t) =>
-        t.id === 'canada_coop' ? { ...t, thresholds: { apply: 60, stretch: 30 } } : t,
-      ),
-    };
-    const j = job({
-      title: 'Co-op Software Developer',
-      location: 'Vancouver, Canada',
-      description: 'Compliance team. Python.',
-    });
-    // A per-track override no longer changes anything — same verdict with or without it.
-    expect(scoreJob(j, cfg).tracks.canada_coop!.verdict)
-      .toBe(scoreJob(j, config).tracks.canada_coop!.verdict);
+describe('scoreJob — one score, gates route only, but the BAR can differ per route', () => {
+  // Reinstated 2026-08-18 (docs/audits/2026-08-18-calibration-role-fit.md): routes hold different
+  // populations. A co-op posting is short and thin on domain/tools and can never reach a bar tuned for
+  // experienced roles. This moves the verdict bar per route — the score itself stays one number.
+  const withCoopBar = (apply: number, stretch: number): ScoringConfig => ({
+    ...config,
+    tracks: config.tracks.map((t) => (t.id === 'canada_coop' ? { ...t, thresholds: { apply, stretch } } : t)),
+  });
+  const j = job({
+    title: 'Co-op Software Developer',
+    location: 'Vancouver, Canada',
+    description: 'Compliance team. Python.',
+  });
+
+  it('a track with its own bar is judged by it, not by the global one', () => {
+    const base = scoreJob(j, config);
+    const score = base.score;
+    // A bar strictly under the score must turn that route's verdict into Apply, whatever the global says.
+    const lowered = scoreJob(j, withCoopBar(Math.max(1, score - 1), Math.max(0, score - 20)));
+    expect(lowered.tracks.canada_coop!.verdict).toBe('Apply');
+    expect(lowered.score).toBe(score); // the SCORE is untouched — only the bar moved
+  });
+
+  it('the routed verdict (`best`) uses the route\'s own bar', () => {
+    const score = scoreJob(j, config).score;
+    const r = scoreJob(j, withCoopBar(Math.max(1, score - 1), Math.max(0, score - 20)));
+    expect(r.best.track).toBe('canada_coop');
+    expect(r.best.verdict).toBe('Apply');
+  });
+
+  it('a route without its own bar still inherits the global one', () => {
+    const cfg = withCoopBar(1, 0); // only canada_coop overridden
+    const co = job({ title: 'Business Analyst', location: 'Bogota, Colombia', description: 'Payments. SQL.' });
+    expect(scoreJob(co, cfg).tracks.colombia_perm!.verdict)
+      .toBe(scoreJob(co, config).tracks.colombia_perm!.verdict);
+  });
+
+  it('an unreachable bar sends that route to Skip while the score stays put', () => {
+    const r = scoreJob(j, withCoopBar(101, 100));
+    expect(r.tracks.canada_coop!.verdict).toBe('Skip');
+    expect(r.tracks.canada_coop!.adjusted_score).toBe(r.score);
   });
 });
 
@@ -229,5 +254,25 @@ describe('normalizeTitle (radar de similares)', () => {
   it('strips seniority, parenthesized content, and normalizes', () => {
     expect(normalizeTitle('Senior Data Analyst II (Payments) — Remote')).toBe('data analyst remote');
     expect(normalizeTitle('Jr. Business Analyst')).toBe('business analyst');
+  });
+});
+
+describe('per-track bar validation (config-store)', () => {
+  const withTrackBar = (thresholds: unknown) => () =>
+    normalizeScoringConfig({
+      ...config,
+      tracks: config.tracks.map((t) => (t.id === 'canada_coop' ? { ...t, thresholds } : t)),
+    });
+
+  it('accepts a route bar with apply > stretch', () => {
+    expect(withTrackBar({ apply: 50, stretch: 40 })).not.toThrow();
+  });
+
+  it('rejects an inverted route bar — it would mark everything on that route Apply', () => {
+    expect(withTrackBar({ apply: 30, stretch: 40 })).toThrow(/canada_coop thresholds need apply > stretch/);
+  });
+
+  it('rejects a half-typed route bar', () => {
+    expect(withTrackBar({ apply: 50 })).toThrow(/canada_coop thresholds need apply > stretch/);
   });
 });

@@ -337,6 +337,11 @@ export function consoleApp(): App {
       );
     };
     const pg = pageNum(c);
+    // Filter options come from the LIVE config (one indexed row read) plus the labelled legacy ids, so
+    // adding a track never leaves the Jobs filter behind — it used to hardcode the two-path pair.
+    const trackFilterIds = [
+      ...new Set([...(await loadLive(c.env)).tracks.map((t) => t.id), ...Object.keys(TRACK_LABELS)]),
+    ];
     const rows = (
       await c.env.DB.prepare(
         `SELECT j.url_hash, j.title, j.location, j.track, j.verdict, j.score, j.status, j.posted_at,
@@ -371,7 +376,7 @@ export function consoleApp(): App {
         <form method="get" action="/jobs" class="card actions filterbar">
           <input type="hidden" name="view" value={view} />
           <input type="text" name="q" placeholder="search title or company" value={q.q ?? ''} />
-          {sel('track', ['canada_coop', 'colombia_perm'], q.track)}
+          {sel('track', trackFilterIds, q.track)}
           {sel('verdict', ['Apply', 'Stretch-worth-it', 'Skip'], q.verdict)}
           {sel('status', ['new', 'notified', 'aged', 'closed', 'skipped'], q.status)}
           <button type="submit" class="primary">Filter</button>
@@ -697,7 +702,10 @@ export function consoleApp(): App {
         for (const j of jobs.slice(0, 250)) {
           if (j.location) hasLoc = true;
           const cl = locationClears(j.location, cfg);
-          if (cl.has('canada_coop')) ca++;
+          // ANY Canadian route counts once: every canada_* track clears on location alone (the co-op
+          // route's extra title gate is not location-scope, so locationClears ignores it), and a
+          // per-track `.has()` would count the same posting twice.
+          if ([...cl].some((t) => t.startsWith('canada'))) ca++;
           if (cl.has('colombia_perm')) co++;
         }
         rows.push({ url, ats: parsed.ats, token: parsed.token, live: true, jobs: jobs.length, ca, co, hasLoc, already });
@@ -860,7 +868,8 @@ export function consoleApp(): App {
     tool_overlap: ['Tools', 'what I work with'],
   };
   const TRACK_LABELS: Record<string, string> = {
-    canada_coop: 'Canada',
+    canada_coop: 'Canada co-op',
+    canada_perm: 'Canada',
     colombia_perm: 'Colombia',
     contractor_usd: 'Colombia', // legacy id: contractor merged into Colombia (2-path). Kept for old stored rows.
   };
@@ -1003,6 +1012,19 @@ export function consoleApp(): App {
                 <input type="number" name={`w_${cat}`} value={String(cfg.weights[cat].weight)} class="w-xs" aria-label={`${cat} weight`} title="Weight — the four must sum to 100" />
                 {' /'}
                 <input type="number" name={`s_${cat}`} value={String(cfg.weights[cat].saturation)} class="w-xs" aria-label={`${cat} saturation`} title="Saturation — matched weight that fills the meter" />
+                {'  '}
+              </label>
+            ))}
+          </div>
+          {/* Per-track bar: BLANK means "use the global one above". A route holds its own population —
+              co-op postings are short and thin on tools, so they cannot reach a bar set for
+              experienced roles. Fill both boxes to give a route its own bar, clear both to inherit. */}
+          <div class="mt-1">
+            {cfg.tracks.map((t) => (
+              <label class="muted">{trackLabel(t.id)} bar{' '}
+                <input type="number" name={`ta_${t.id}`} value={t.thresholds ? String(t.thresholds.apply) : ''} placeholder="apply" class="w-xs" aria-label={`${t.id} apply`} />
+                {' /'}
+                <input type="number" name={`ts_${t.id}`} value={t.thresholds ? String(t.thresholds.stretch) : ''} placeholder="stretch" class="w-xs" aria-label={`${t.id} stretch`} />
                 {'  '}
               </label>
             ))}
@@ -1258,6 +1280,20 @@ export function consoleApp(): App {
         return c.redirect(`/calibration?m=${encodeURIComponent('rejected: saturation must be > 0')}`);
       }
       cfg.weights[cat] = { weight, saturation };
+    }
+    // Per-track bar: both boxes filled = that route gets its own; both blank = inherit the global one.
+    // A half-filled pair is rejected rather than guessed at.
+    for (const t of cfg.tracks) {
+      const rawA = b[`ta_${t.id}`];
+      const rawS = b[`ts_${t.id}`];
+      if (rawA === undefined || rawS === undefined) continue;
+      const a = String(rawA).trim();
+      const s = String(rawS).trim();
+      if (!a && !s) { delete t.thresholds; continue; }
+      if (!a || !s) {
+        return c.redirect(`/calibration?m=${encodeURIComponent(`rejected: ${t.id} needs BOTH apply and stretch, or neither`)}`);
+      }
+      t.thresholds = { apply: Number(a), stretch: Number(s) };
     }
     try { validateScoringConfig(cfg); } catch (e) {
       return c.redirect(`/calibration?m=${encodeURIComponent(`rejected: ${e instanceof Error ? e.message : 'invalid'}`)}`);

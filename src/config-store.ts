@@ -117,6 +117,14 @@ function validate(c: ScoringConfig): ScoringConfig {
   }
   for (const t of c.tracks) {
     if (!t.id || !Array.isArray(t.gates)) throw new Error("config 'scoring': track without id or gates");
+    // A track may carry its OWN verdict bar (co-op postings cannot reach a bar tuned for experienced
+    // roles). An inverted one would silently mark everything on that route as Apply.
+    if (t.thresholds !== undefined) {
+      const { apply, stretch } = t.thresholds;
+      if (typeof apply !== 'number' || typeof stretch !== 'number' || apply <= stretch) {
+        throw new Error(`config 'scoring': track ${t.id} thresholds need apply > stretch`);
+      }
+    }
     for (const g of t.gates) {
       if (!g.id) throw new Error(`config 'scoring': gate without id in track ${t.id}`);
     }

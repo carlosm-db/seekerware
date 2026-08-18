@@ -16,6 +16,16 @@ describe('contactPlaceholders (per-track fill)', () => {
     });
   });
 
+  it('EVERY canada_* route -> Canadian values (matched by prefix, not by id)', () => {
+    // Guards the 2026-08-18 trap: an equality test against `canada_coop` shipped Colombian phone and
+    // address on any other Canadian route, silently, inside the generated CV.
+    for (const track of ['canada_coop', 'canada_perm']) {
+      expect(contactPlaceholders(track, profile)).toEqual({
+        '{{phone}}': '+1-604-555-0001', '{{location}}': 'Vancouver, BC, Canada',
+      });
+    }
+  });
+
   it('colombia_perm -> Colombian phone + Medellín', () => {
     expect(contactPlaceholders('colombia_perm', profile)).toEqual({
       '{{phone}}': '+57-300-555-0002', '{{location}}': 'Medellín, Colombia',

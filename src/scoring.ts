@@ -272,9 +272,13 @@ export function scoreJob(job: Job, config: ScoringConfig): ScoreResult {
 
   const score = Math.round(CATEGORIES.reduce((acc, c) => acc + breakdown[c].points, 0));
 
-  // Gates are ELIGIBILITY + ROUTING only — they no longer shape the score. One score, one
-  // global threshold. The route (track) = the first track whose gates all pass; if none pass,
-  // the job isn't eligible (Skip regardless of score). Track never changes the score.
+  // Gates are ELIGIBILITY + ROUTING only — they never shape the score. ONE score; the BAR may differ
+  // per route (`TrackConfig.thresholds`, else the global one), because different routes hold different
+  // populations: a co-op posting is short, thin on domain and tools, and can never reach a bar tuned
+  // for experienced roles. That is a verdict bar, not a score adjustment — the score stays one number.
+  // The route (track) = the first track whose gates all pass; if none pass, the job isn't eligible
+  // (Skip regardless of score).
+  const barFor = (track: TrackConfig) => track.thresholds ?? config.thresholds;
   const tracks: Record<string, TrackResult> = {};
   for (const track of config.tracks) {
     const gates = track.gates.map((g) => evaluateGate(g, corpus));
@@ -283,14 +287,14 @@ export function scoreJob(job: Job, config: ScoringConfig): ScoreResult {
       gates,
       hard_failed: hardFailed,
       adjusted_score: score,
-      verdict: hardFailed ? 'Skip' : verdictFor(score, config.thresholds),
+      verdict: hardFailed ? 'Skip' : verdictFor(score, barFor(track)),
     };
   }
 
-  const route = config.tracks.find((t) => !tracks[t.id]!.hard_failed)?.id ?? null;
+  const routeTrack = config.tracks.find((t) => !tracks[t.id]!.hard_failed) ?? null;
   const best: ScoreResult['best'] = {
-    track: route,
-    verdict: route ? verdictFor(score, config.thresholds) : 'Skip',
+    track: routeTrack?.id ?? null,
+    verdict: routeTrack ? verdictFor(score, barFor(routeTrack)) : 'Skip',
     adjusted_score: score,
   };
 

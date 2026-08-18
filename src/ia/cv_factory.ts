@@ -40,9 +40,13 @@ export interface ContactProfile {
   address_co?: AddressCO;
 }
 
-/** Per-path fill map: canada_coop -> CA values; colombia_perm (and any legacy track) -> CO values. */
+/**
+ * Per-path fill map: any `canada_*` route -> CA values; colombia_perm (and any legacy track) -> CO.
+ * Matched by PREFIX, not by id: an equality test against a single id silently shipped Colombian phone
+ * and address on every Canadian route that was not spelled exactly `canada_coop` (2026-08-18).
+ */
 export function contactPlaceholders(track: string | null, p: ContactProfile): Record<string, string> {
-  const ca = track === 'canada_coop';
+  const ca = !!track && track.startsWith('canada');
   return {
     '{{phone}}': (ca ? p.phone_ca : p.phone_co) ?? '',
     '{{location}}': (ca ? p.location_ca : p.location_co) ?? '',
