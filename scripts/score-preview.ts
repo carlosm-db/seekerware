@@ -45,6 +45,13 @@ interface ConfigPatch {
    * subtracts and can be outvoted (domain rule 2: verdicts belong to the rules, not to arithmetic).
    */
   reject_title?: string[];
+  /**
+   * Full replacement of `tracks` — routes are data, and authoring all of them beats a surgical
+   * insert + rename when the ROUTING ORDER is the thing under test (`route` = first track whose gates
+   * pass, so a title-gated co-op route only wins if it sits before the generic Canada one).
+   * Each track may carry its own `thresholds`.
+   */
+  tracks?: ScoringConfig['tracks'];
   set?: Record<string, unknown>;
 }
 
@@ -96,6 +103,7 @@ function applyPatch(base: ScoringConfig, patch: ConfigPatch): ScoringConfig {
     const scope = patch.scope?.[cat];
     if (scope) cfg.keywords[cat] = cfg.keywords[cat].map((k) => ({ ...k, scope }));
   }
+  if (patch.tracks) cfg.tracks = patch.tracks;
   if (patch.reject_title?.length) {
     const reject = patch.reject_title.map((en) => ({ en, es: en }));
     for (const t of cfg.tracks) t.gates.push({ id: 'reject_over_band', scope: 'title', reject });

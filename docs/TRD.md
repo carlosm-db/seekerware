@@ -86,9 +86,13 @@ code.
 3. Per-track gates, AFTER the score: always `hard` (require/reject; a fail ->
    Skip in that track — never subtracts points). Work auth and location are
    gates; a track's own signals (e.g. "co-op") can be a requirement.
-4. Verdict by thresholds (initial): score >= 75 -> `Apply`; >= 55 ->
+4. Verdict by thresholds: score >= `apply` -> `Apply`; >= `stretch` ->
    `Stretch-worth-it`; otherwise -> `Skip`. Evaluated per track; the best track
-   that passes wins.
+   that passes wins. A track MAY carry its own bar (`TrackConfig.thresholds`,
+   else the global one), because routes hold different populations: a co-op
+   posting is short and thin on domain and tools and can never reach a bar tuned
+   for experienced roles. That moves the verdict line per route — the score
+   itself stays ONE number, and gates still never shape it.
 5. The rule-based texts (`why_it_fits`, `positioning_lead`) are assembled from
    per-category templates fired by the match; the enricher improves them only
    on survivors.
@@ -160,8 +164,10 @@ survivor Apply
        documents.get reads the copy's {{...}} tokens (the template is the
        source of truth for structure), then documents.batchUpdate
        (replaceAllText) fills EVERY present token with EXACT block text:
-         {{phone}}/{{location}} -> contact per track (canada_coop -> CA;
-           colombia_perm & contractor_usd -> CO/Medellín; empty when unset)
+         {{phone}}/{{location}} -> contact per track, matched by PREFIX: any
+           `canada_*` route -> CA; colombia_perm & legacy contractor_usd ->
+           CO/Medellín; empty when unset. (An id-equality test shipped the
+           Colombian pair on every other Canadian route — fixed 2026-08-18.)
          {{sum_N}}              -> Nth selected summary block
          {{skills_<cat>}}       -> selected skills tagged skcat:<cat>, joined
          {{<CODE>R<N>}}         -> Nth selected responsibility for role <CODE>

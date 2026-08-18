@@ -15,7 +15,7 @@ in the same commit that introduces the new term.
 |------|---------|-------|
 | job | normalized job posting `{id, company, title, location, url, description, posted_at, ats, raw}` | posting, opening, listing, vacancy |
 | connector | module that reads an ATS feed and returns normalized jobs | poller, fetcher, scraper |
-| track | search path: `canada_coop`, `colombia_perm`, `contractor_usd` | variant, channel, lane |
+| track | search path (route): `canada_coop` (co-op/internship/work-term in Canada — title-gated, own lower verdict bar), `canada_perm` (permanent in Canada), `colombia_perm`, legacy `contractor_usd`. Until 2026-08-18 `canada_coop` had only a location gate and meant "any job in Canada" | variant, channel, lane |
 | gate | per-track hard condition (require / reject); a fail eliminates the track — never subtracts points | hard filter, rule, restriction, penalty |
 | score | 0-100 score from the rules engine | rating, points, grade |
 | verdict | `Apply`, `Stretch-worth-it` or `Skip`; decided by the rules, never the AI | result, decision, classification |

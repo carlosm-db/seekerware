@@ -168,7 +168,7 @@ console. The patch is kept OUT of the repo at `seeds/calibration_2026-08-18_role
 `config` table, zero keywords in code"); this document is the versioned record of what changed. The
 pre-change v48 JSON was exported for rollback (a single `config` row, no deploy needed to revert).
 
-### Known residue
+### Known residue, recorded with v49 (every item below is closed in the next section)
 
 - **Co-op alerts fell 9 → 3** on a 60-posting co-op sample: co-op titles carry no ops role name
   ("Winter 2027 - GRM, CMM Analyst Intern"), and their postings are thin on domain and tools, so they
@@ -189,3 +189,51 @@ pre-change v48 JSON was exported for rollback (a single `config` row, no deploy 
 - Two visible blemishes left in Apply: *"Apps Dev Tech Lead Analyst"* (enters via `analyst` + `lead`)
   and *"Senior Payments Engineer"* (via `payments`). Both would die by adding `engineer` as a title
   negative, at the cost of the Data Engineer roles the owner wants kept as Stretch.
+
+### Closed — the co-op route, config v50 (2026-08-18)
+
+Live confirmation of v49 first: run 60 (22:01Z, the first cron under v49) alerted **9 times**, against
+16 and 25 in the two runs before it, and essentially all nine are on-profile — *Senior Business Risk
+Analyst, Operations & Client Support* (79), *Revenue Operations Analyst II* (76), *Senior Technical
+Business Analyst* (72), *Business Intelligence Analyst* (70), *Analyst, Commercial Risk Data (New or
+Recent Graduate)* (60), *Securities & Derivatives Analyst — Bogotá* (59). No manager, no VP, no
+developer. One of the nine was already a co-op (*2027 Winter Student Opportunities, Technology &
+Operations*, 63): the co-ops that name Operations in the title do clear the global bar.
+
+The co-op gap was then closed with a real route, not a looser global bar. `canada_coop` had a single
+gate, `location_canada`, and routed 5,302 of 6,870 jobs — it was "any job in Canada", so lowering its
+bar would have cheapened the whole Canadian roster. v50 splits Canada in two:
+
+| route | gates | bar |
+|---|---|---|
+| `canada_coop` | `location_canada` + `coop_signal` (title: co-op, coop, intern, internship, work term) + `reject_over_band` | **40 / 30** |
+| `canada_perm` | `location_canada` + `reject_over_band` | global 58 / 44 |
+| `colombia_perm` | `location_latam` + `reject_us_only` + `reject_over_band` | global 58 / 44 |
+
+Order matters: `route` is the first track whose gates all pass, so the title-gated co-op route sits
+first. Measured on the 60-posting co-op sample: bar 32 → 8 Apply at 38% on-profile; 36 → 6 at 50%;
+**40 → 5 at 60%**; 44 → 4 at 75%; the global 58 gave 3.
+
+The aggregate on-target share moving 81% → 76% is **not** a precision loss on permanent roles:
+`scoreJob` resolves the bar per route (`barFor`), so `canada_perm` and `colombia_perm` keep the global
+bar by construction — the dilution is simply the extra co-op alerts being counted in the aggregate.
+With the cost confined to that one route, the asymmetry decided it: a missed Canadian co-op is
+unrecoverable (≤3-day notify window) and it is the owner's entry path, while a false positive costs
+seconds of reading. The bar is now a slider in `/calibration`, so 36 or 44 is one save away.
+
+Diagnostic worth keeping: of the 60 co-op-ish postings sampled, only **17 route to the co-op track** —
+36 are not in Canada (the SQL sample used `%intern%`, which also catches "Internal Audit") and 8 are
+managerial grades, correctly rejected. Of those 17 the median score is 31. The engine is telling the
+truth: the co-op postings in this roster are mostly not operations roles.
+
+**Ceiling, stated deliberately:** a co-op title rarely names the role, so that route's real signal
+lives in the description — `domain` ought to outweigh the title there. That needs per-track WEIGHTS,
+which is score-shaping per route, exactly what the 2026-07-19 simplification removed. The bar is the
+honest limit until that decision is revisited on purpose.
+
+Fixed on the way: `contactPlaceholders` matched `track === 'canada_coop'` by EQUALITY, so every other
+Canadian route produced a CV carrying the **Colombian** phone and address (now a `canada` prefix, with
+a test over both ids); the Jobs filter, the verifier tally and `knowledge.ts` no longer hardcode the
+two-path pair; migration 0016 plus a one-off relabel moved all 5,362 historic Canadian rows to
+`canada_perm`, so no stored row still reads as a co-op hit.
+
