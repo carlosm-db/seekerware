@@ -237,3 +237,36 @@ a test over both ids); the Jobs filter, the verifier tally and `knowledge.ts` no
 two-path pair; migration 0016 plus a one-off relabel moved all 5,362 historic Canadian rows to
 `canada_perm`, so no stored row still reads as a co-op hit.
 
+
+### Engineering is not a negative — config v51 (2026-08-18)
+
+Owner's framing, which the earlier "blemishes" note got wrong: an engineering title is **not** a
+mismatch. It is what they studied in Canada, so it is formally aligned; it simply is not where they are
+most comfortable. In this engine that distinction is the **Stretch tier**, not a negative — a negative
+says "wrong for me", and since `6e185b0` only `Apply` notifies, a low positive means "visible in the
+console, cheap to ignore".
+
+So `engineer` was NOT added as a title negative (proposed twice by the assistant, dropped), and the
+existing engineering negatives moved to +1: `software engineer`, `backend engineer`,
+`security engineer`, `site reliability`, `devops`, `developer`, `architect`. `scientist` and
+`quantitative` stay at −3 — research and quant finance, not engineering. `engineering manager` keeps
+its −2 and is now redundant anyway: `reject_over_band` gates any title containing `manager`.
+
+Measured before writing, and worth recording because the option's own description was wrong: moving
+these terms is not "+1", it is *removing a −2/−3 AND adding a positive*, a 3-4 point swing. It does
+NOT stay out of the alert stream — Apply goes 33 → 38 on the 700-job sample (aggregate on-target
+76% → 71%), with 10 more postings entering Stretch. The five new alerts:
+
+| title | before → after |
+|---|---|
+| *Software Engineer, **Global Payments Technology*** (Backend Java) | 35 → **67** |
+| *Lead Back-End Java Developer — **Credit Risk Technology*** | 46 → **62** |
+| *Software Engineer Specialist* (Bogotá) | 43 → 59 |
+| *Lead Developer, Azure Data Factory + ETL* (Toronto) | 39 → 59 |
+| ***Co-op** C# Developer, Fall 2026* | 34 → 45 (via the co-op route's 40 bar) |
+
+Accepted on that evidence: the two highest are banking — exactly the intersection of the engineering
+credential and the owner's domain. The two generic ones (Azure/ETL, Software Engineer Specialist) are
+the real cost, and the weight is a slider in `/calibration` if a run proves them annoying. The
+alternative measured was neutral (deleting the terms), which yields only +1 alert and +5 Stretch —
+engineering would stay essentially invisible, which is not what was asked for.
