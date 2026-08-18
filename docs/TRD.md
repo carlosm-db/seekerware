@@ -73,7 +73,13 @@ Common rules:
 code.
 
 1. Case-insensitive, word-boundary matching over `title + description`. A match
-   in the title multiplies (`title_multiplier`, initially 2.0).
+   in the title multiplies (`title_multiplier`, initially 2.0). A keyword may
+   carry `scope: 'title'`, which restricts it to the TITLE — for terms that are
+   noise in a description but precise in a title (`analyst` is in half the
+   postings on earth, yet "Analyst, Asset Servicing" IS the role; a negative like
+   `recruiter` otherwise fires on "our recruiter will reach out"). Set per word
+   from the Calibration page ("Title only"); shown as `·T` next to the strength.
+   See `docs/audits/2026-08-18-calibration-role-fit.md`.
 2. Categories (initial weights, tunable): `domain` 40, `role_type` 25,
    `tool_overlap` 20, `level_fit` 15. Each category normalizes to 0-1 and is
    weighted; the sum is the score 0-100.

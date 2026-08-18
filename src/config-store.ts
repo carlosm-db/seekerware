@@ -29,12 +29,20 @@ export function validateScoringConfig(raw: unknown): ScoringConfig {
 
 // ---------- normalization ({en, es}) ----------
 
-interface RawKeyword { en?: string; es?: string; weight?: number }
+interface RawKeyword { en?: string; es?: string; weight?: number; scope?: unknown }
 
-/** One concept = one {en, es, weight}. */
+/** One concept = one {en, es, weight} (+ optional scope). */
 function normalizeKeywordList(raw: unknown): Keyword[] {
   const list = Array.isArray(raw) ? (raw as RawKeyword[]) : [];
-  return list.map((k) => ({ en: String(k.en ?? ''), es: String(k.es ?? ''), weight: Number(k.weight) }));
+  return list.map((k) => ({
+    en: String(k.en ?? ''),
+    es: String(k.es ?? ''),
+    weight: Number(k.weight),
+    // `scope` is carried through the same way gate scope is below. Rebuilding the object without it
+    // would strip every title-scoped term on load AND on each console save — silently turning the
+    // narrowing off while the config still looked right.
+    ...(k.scope === undefined ? {} : { scope: k.scope as Keyword['scope'] }),
+  }));
 }
 
 function normalizeGateTerms(raw: unknown): GateTerm[] {
@@ -86,6 +94,10 @@ function validate(c: ScoringConfig): ScoringConfig {
       // en is required; es may be '' defensively — the console enforces both languages.
       if (!k.en || typeof k.en !== 'string' || typeof k.weight !== 'number') {
         throw new Error(`config 'scoring': keywords.${cat} needs {en, es, weight} (en required)`);
+      }
+      // A typo'd scope would silently widen the term back to full text; fail loudly instead.
+      if (k.scope !== undefined && k.scope !== 'title' && k.scope !== 'text') {
+        throw new Error(`config 'scoring': keywords.${cat} "${k.en}" scope must be 'title' or 'text'`);
       }
     }
   }

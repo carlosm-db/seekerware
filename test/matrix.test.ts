@@ -228,3 +228,35 @@ describe('applyPairRemove', () => {
     expect(gate.require!.some((t) => t.en === 'latam')).toBe(true);
   });
 });
+
+describe("title-only scope round-trip (console <-> config)", () => {
+  it('add with titleOnly writes scope, and the matrix row reports it', () => {
+    const cfg = makeCfg();
+    expect(applyWordAdd(cfg, {
+      en: 'analyst', es: 'analista', category: 'role_type', favor: true, weight: 3, titleOnly: true,
+    })).toBeNull();
+    const k = cfg.keywords.role_type.find((x) => x.en === 'analyst');
+    expect(k?.scope).toBe('title');
+    const row = buildMatrix(cfg).find((g) => g.category === 'role_type')!.favor.find((r) => r.en === 'analyst');
+    expect(row?.titleOnly).toBe(true);
+  });
+
+  it('add without titleOnly leaves the term full-text (no scope key)', () => {
+    const cfg = makeCfg();
+    applyWordAdd(cfg, { en: 'analyst', es: 'analista', category: 'role_type', favor: true, weight: 3 });
+    expect(cfg.keywords.role_type.find((x) => x.en === 'analyst')?.scope).toBeUndefined();
+  });
+
+  it('edit toggles the scope both ways', () => {
+    const cfg = makeCfg();
+    const edit = (titleOnly: boolean) => applyWordEdit(cfg, {
+      kind: 'keyword', category: 'role_type', oldEn: 'business analyst',
+      en: 'business analyst', es: 'analista de negocio', weight: 3, titleOnly,
+    });
+    expect(edit(true)).toBeNull();
+    expect(cfg.keywords.role_type.find((x) => x.en === 'business analyst')?.scope).toBe('title');
+    // Unchecking must WIDEN it back — an unchecked box is absent from the POST body.
+    expect(edit(false)).toBeNull();
+    expect(cfg.keywords.role_type.find((x) => x.en === 'business analyst')?.scope).toBeUndefined();
+  });
+});

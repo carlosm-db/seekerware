@@ -14,6 +14,13 @@ export interface Keyword {
   es: string;
   /** Weight; negative = signal against (subtracts within the category, floor 0). */
   weight: number;
+  /**
+   * Where the term may match. Default `'text'` (title + location + description). `'title'` restricts
+   * it to the TITLE — for words that are noise in a description but precise in a title: `analyst`
+   * appears in half the postings on earth, yet "Analyst, Asset Servicing" IS the role. It is also
+   * what stops a negative from firing on boilerplate ("our recruiter will reach out").
+   */
+  scope?: 'title' | 'text';
 }
 
 /** A gate term as a concept with both languages (`es` equals `en` when the same). */
@@ -183,9 +190,11 @@ function scoreCategory(
 
   for (const kw of effective) {
     const inTitle = hitTerm(kw.en, corpus.title) || hitTerm(kw.es, corpus.title);
-    // Occurrences across BOTH languages in the full text, capped at 3: repetition counts
+    // `scope: 'title'` narrows the term to the title; everything else reads the full text.
+    const haystack = kw.scope === 'title' ? corpus.title : corpus.text;
+    // Occurrences across BOTH languages in that scope, capped at 3: repetition counts
     // (banking×3 → 3), but one word can't run away (banking×20 → still 3).
-    const occ = countIn(kw.en, corpus.text) + (kw.es && kw.es !== kw.en ? countIn(kw.es, corpus.text) : 0);
+    const occ = countIn(kw.en, haystack) + (kw.es && kw.es !== kw.en ? countIn(kw.es, haystack) : 0);
     if (occ === 0) continue;
     const reps = Math.min(occ, 3);
     const contribution = kw.weight * reps * (inTitle && kw.weight > 0 ? config.title_multiplier : 1);
@@ -248,9 +257,10 @@ export function scoreJob(job: Job, config: ScoringConfig): ScoreResult {
   const corpus = buildCorpus(job);
 
   const roleBreakdownProbe = scoreCategory('role_type', config.keywords.role_type, corpus, config, new Set());
-  const roleMatchedTerms = new Set(
-    roleBreakdownProbe.matches.filter((m) => m.weight > 0).map((m) => normalizeText(m.term)),
-  );
+  // EVERY matched role term, sign included. Filtering to weight > 0 made the conditional seniority
+  // penalty unreachable: its triggers are terms like 'software engineer', which carry a NEGATIVE
+  // weight — a matched engineer title is exactly what makes 'senior' disqualifying.
+  const roleMatchedTerms = new Set(roleBreakdownProbe.matches.map((m) => normalizeText(m.term)));
 
   const breakdown = {} as Record<Category, CategoryBreakdown>;
   for (const cat of CATEGORIES) {

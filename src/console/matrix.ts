@@ -26,6 +26,8 @@ export interface ConceptRow {
   weight?: number;
   /** Track whose gate contains this term — the path badge. */
   path?: string;
+  /** Keyword rows: the term only counts in the TITLE (`scope: 'title'`) — shown as a badge. */
+  titleOnly?: boolean;
   source: ConceptSource;
 }
 
@@ -79,7 +81,7 @@ export function buildMatrix(cfg: ScoringConfig): MatrixGroup[] {
       const hit = gateIdx.get(k.en);
       push({
         category: cat, favor: k.weight > 0, en: k.en, es: k.es,
-        weight: k.weight, path: hit?.track,
+        weight: k.weight, path: hit?.track, titleOnly: k.scope === 'title',
         source: { kind: 'keyword' },
       });
     }
@@ -188,6 +190,8 @@ export interface WordAddInput {
   weight: number;
   /** Track id. Optional for scoring words; REQUIRED for location. */
   path?: string;
+  /** Count the word ONLY in the title (`scope: 'title'`). Ignored for location. */
+  titleOnly?: boolean;
 }
 
 export interface ApplyError { error: string }
@@ -229,7 +233,7 @@ export function applyWordAdd(cfg: ScoringConfig, input: WordAddInput): ApplyErro
   const list = cfg.keywords[input.category];
   if (!list) return { error: 'invalid category' };
   if (list.some((k) => k.en === en)) return { error: `"${en}" is already listed` };
-  list.push({ en, es, weight: input.favor ? weight : -weight });
+  list.push({ en, es, weight: input.favor ? weight : -weight, ...(input.titleOnly ? { scope: 'title' as const } : {}) });
   if (input.path) {
     const gate = findGate(cfg, input.path, input.category, input.favor);
     if (!gate) {
@@ -272,7 +276,7 @@ export function applyPairRemove(cfg: ScoringConfig, target: RemoveTarget): { rem
 }
 
 export type EditTarget =
-  | { kind: 'keyword'; category: Category; oldEn: string; en: string; es: string; weight: number }
+  | { kind: 'keyword'; category: Category; oldEn: string; en: string; es: string; weight: number; titleOnly?: boolean }
   | { kind: 'gate'; track: string; gate: string; oldEn: string; en: string; es: string };
 
 const VALID_WEIGHTS = new Set([1, 2, 3, -2, -3]);
@@ -292,6 +296,10 @@ export function applyWordEdit(cfg: ScoringConfig, t: EditTarget): ApplyError | n
     const weight = Math.round(t.weight);
     if (!VALID_WEIGHTS.has(weight)) return { error: 'strength must be +1..+3 or −2/−3' };
     k.en = en; k.es = es; k.weight = weight;
+    // Absent checkbox = full text: the edit form always posts the current state, so clearing it must
+    // widen the term back rather than leave a stale 'title'.
+    if (t.titleOnly) k.scope = 'title';
+    else delete k.scope;
     if (en !== oldEn) {
       // keep path-linked gate copies in sync with the renamed concept
       for (const tr of cfg.tracks) {

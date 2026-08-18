@@ -907,7 +907,12 @@ export function consoleApp(): App {
         <div class={`mgrid mc-read${loc ? ' loc' : ''}`}>
           <div class="mc-en">{r.en}</div>
           <div class="mc-es">{r.es ? r.es : <span class="mc-empty" title="Spanish not filled yet">—</span>}</div>
-          {loc ? null : <div class="mc-str">{strengthText(r)}</div>}
+          {loc ? null : (
+            <div class="mc-str">
+              {strengthText(r)}
+              {r.titleOnly ? <span class="muted" title="Counts only in the title, not in the description"> ·T</span> : null}
+            </div>
+          )}
           <div class="mc-path">{pathBadge(r.path)}</div>
           <div class="mc-actions">
             <button type="button" class="chipx mc-editbtn" title="Edit">✏️</button>
@@ -930,7 +935,16 @@ export function consoleApp(): App {
               {[3, 2, 1, -2, -3].map((w) => <option value={String(w)} selected={r.weight === w}>{w > 0 ? `+${w}` : String(w)}</option>)}
             </select>
           )}
-          <div class="mc-path">{pathBadge(r.path)}</div>
+          {/* Lives inside the path cell on purpose: the grid has a fixed column count, so a sixth
+              child would spill into the actions column. */}
+          <div class="mc-path">
+            {loc || r.source.kind !== 'keyword' ? null : (
+              <label class="muted" title="Count this word only in the title">
+                <input type="checkbox" name="title_only" checked={r.titleOnly} /> T{' '}
+              </label>
+            )}
+            {pathBadge(r.path)}
+          </div>
           <div class="mc-actions">
             <button type="submit" class="chipx mc-btn" title="Save">✓</button>
             <button type="button" class="chipx mc-btn mc-cancel" title="Cancel">✗</button>
@@ -980,6 +994,19 @@ export function consoleApp(): App {
           <label>Ignore postings older than <input type="number" name="freshness" value={freshness} class="w-xs" /> days</label>
           <button type="submit" class="primary">Save</button>
           <span class="muted">Config v{cfg.version ?? 0}</span>
+          {/* Weight / saturation per category: weight = share of the 100 points (the four MUST sum to
+              100 — validateScoringConfig rejects anything else); saturation = matched weight that
+              fills the meter, so a lower number reaches full points with fewer hits. */}
+          <div class="mt-1">
+            {CATEGORIES.map((cat) => (
+              <label class="muted">{MATRIX_LABELS[cat][0]}{' '}
+                <input type="number" name={`w_${cat}`} value={String(cfg.weights[cat].weight)} class="w-xs" aria-label={`${cat} weight`} title="Weight — the four must sum to 100" />
+                {' /'}
+                <input type="number" name={`s_${cat}`} value={String(cfg.weights[cat].saturation)} class="w-xs" aria-label={`${cat} saturation`} title="Saturation — matched weight that fills the meter" />
+                {'  '}
+              </label>
+            ))}
+          </div>
         </form>
 
         <h2>Keyword matrix (ATS)</h2>
@@ -1026,6 +1053,8 @@ export function consoleApp(): App {
                   <option value="2" selected>+2 medium</option>
                   <option value="1">+1 light</option>
                 </select></label>
+              <label class="muted" title="Only count it in the title — for words that are noise in a description but precise in a title">
+                <input type="checkbox" name="title_only" /> Title only</label>
               <label class="muted">Path{' '}
                 <select name="path">
                   <option value="">— every track —</option>
@@ -1085,6 +1114,7 @@ export function consoleApp(): App {
       favor: String(b.dir ?? 'favor') !== 'against',
       weight: Number(b.weight ?? 2),
       path: String(b.path ?? '') || undefined,
+      titleOnly: b.title_only !== undefined, // unchecked boxes are simply absent from the body
     });
     if (err) return done(`rejected: ${err.error}`);
     try { validateScoringConfig(cfg); } catch (e) {
@@ -1117,7 +1147,10 @@ export function consoleApp(): App {
     const es = String(b.es ?? '');
     const target: EditTarget = String(b.kind ?? '') === 'gate'
       ? { kind: 'gate', track: String(b.track ?? ''), gate: String(b.gate ?? ''), oldEn, en, es }
-      : { kind: 'keyword', category: String(b.category ?? '') as Category, oldEn, en, es, weight: Number(b.weight ?? 0) };
+      : {
+          kind: 'keyword', category: String(b.category ?? '') as Category, oldEn, en, es,
+          weight: Number(b.weight ?? 0), titleOnly: b.title_only !== undefined,
+        };
     if (target.kind === 'keyword' && !CATEGORIES.includes(target.category)) {
       return c.redirect('/calibration?m=invalid category');
     }
@@ -1211,6 +1244,21 @@ export function consoleApp(): App {
     const b = await c.req.parseBody();
     const cfg = await loadLive(c.env);
     cfg.thresholds = { apply: Number(b.apply), stretch: Number(b.stretch) };
+    // Structural knobs. Absent fields are left alone (an older cached form must not zero a weight);
+    // the sum-to-100 invariant is enforced by validateScoringConfig below, so a bad edit is rejected
+    // with a message instead of silently skewing every score from the next run on.
+    for (const cat of CATEGORIES) {
+      const rawW = b[`w_${cat}`];
+      const rawS = b[`s_${cat}`];
+      if (rawW === undefined || rawS === undefined) continue;
+      const weight = Number(String(rawW));
+      const saturation = Number(String(rawS));
+      if (!Number.isFinite(weight) || !Number.isFinite(saturation)) continue;
+      if (saturation <= 0) {
+        return c.redirect(`/calibration?m=${encodeURIComponent('rejected: saturation must be > 0')}`);
+      }
+      cfg.weights[cat] = { weight, saturation };
+    }
     try { validateScoringConfig(cfg); } catch (e) {
       return c.redirect(`/calibration?m=${encodeURIComponent(`rejected: ${e instanceof Error ? e.message : 'invalid'}`)}`);
     }

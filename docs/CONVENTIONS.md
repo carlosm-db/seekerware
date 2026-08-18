@@ -52,6 +52,7 @@ in the same commit that introduces the new term.
 | kit | per-job view with the CV as PDF, answers and links to apply in minutes; the human ALWAYS submits | package, bundle, auto-apply |
 | matrix | the Calibration page (2026-07-18): 5 categories × in favor/against × EN/ES as collapsible rows; a projection over keywords + gates, never a softening of them; edits apply on save | word lists, chip walls |
 | pair | the EN+ES twins of one calibration concept: a single `{en, es}` object (`Keyword`/`GateTerm`), both languages required; ✕ removes the concept | twins, duo, translation |
+| title-only word | a calibration keyword with `scope: 'title'`: it counts ONLY in the job title, never in the description; `·T` badge on the row, "Title only" checkbox in the forms | title-scoped, title match |
 | path | the track a matrix word unlocks (require) or blocks (reject) via its gate membership; badge on the row | track tag, route, lane badge |
 
 Shared-vocabulary rule: the Blocks Bank's `tags` and the `config` table's
