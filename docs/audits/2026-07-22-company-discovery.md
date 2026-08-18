@@ -34,6 +34,34 @@ Remaining canada_coop volume = **Workday/SF per-company URL research** (~1 web s
 token cost). Method proven (Bombardier, ISA). Next batches: owner-named employers (cheapest — verify only)
 or a research batch of N Canadian Workday/SF employers (≈N searches), owner-approved per batch.
 
+## Batch 4 (2026-07-22): SmartRecruiters (connector shipped a4c2225)
+Found via SR domain-restricted search (`site:jobs.smartrecruiters.com` + Colombia/Canada) — guessing
+IDs was near-zero yield (SR is 66% US/DE/UK). Verified 9 on-target (board fetched, country tally),
+all ≤500 jobs (within the connector's page cap):
+- **Colombia:** Fygaro (10, all CO-remote), Blend360 (co=12 + remote LATAM; data/AI consultancy),
+  Sutherland (co=21), Lifted/Upwork `LiftedanUpworkCompany` (co=6/ca=3/remote), Trustonic (co=3/remote).
+- **Canada:** Transat `TransatAT1` (44 all CA), Torstar `torstar` (13 CA), Info-Ways (ca=13), Catalyst
+  Canada `CatalystCanada` (5 CA).
+- **Excluded (count ≠ benefit + 500-cap unreachable):** AbbVie (1672), JobsForHumanity (3106), AECOM2
+  (4871), Sia (576, ca=1), Ayming (111, mostly EU). dentsu/Vision7International = 0 on those IDs.
+Method note: SR domain-restricted web search is the way to find real SR IDs; guessing doesn't work.
+
+## Batch 5 (2026-07-22): owner-seeded list (19 names + "similar")
+Verified 2 on-target: **Arc'teryx** (lever `arcteryx.com`, 272/121 CA), **Canadian Tire** (workday
+`canadiantirecorporation.wd3.myworkdayjobs.com/Enterprise_External_Careers_Site`, 113 all-CA incl BA/data).
+Not integrable: Lululemon (own portal), Hire With Near (own board / LATAM marketplace), Synechron/Insight
+Global/Collabera (on SR but 3/6/0 jobs), Revolut/HCL/TCS (own portals; giants = count≠benefit), TekWissen/
+LanceSoft/Hays/Emapta (staffing, own boards), TransLink/Coast Mountain (govt transit, custom). Resolved via owner-supplied URLs: **Elk Valley Resources** ✅ ADD (lever `evr`, 53 all-BC — page
+embedded jobs.lever.co). **Ritchie Bros / RB Global** ❌ custom Phenom SPA (careers.rbglobal.com,
+slug-shortcode urlset, no numeric IDs/location — not SF-parseable). **Crossing Hurdles** ❌ LinkedIn.
+**RBC** ✔ already on roster (Workday RBCEARLYTALENT1); jobs.rbc.com = Phenom fronting Workday, and the
+early-talent site is the better co-op slice — don't add the full board (count≠benefit + Workday 60-newest cap).
+Lesson: Phenom/Radancy career SPAs (custom domains fronting Workday) are NOT integrable via our connectors;
+the underlying Workday site is (if you have its host/site).
+**Lesson:** real employers on a supported ATS integrate; staffing/consulting intermediaries + LATAM-remote
+marketplaces mostly don't (own boards / empty SR shells). Correct token can differ from the guess
+(Arc'teryx = `arcteryx.com` on Lever, not `arcteryx`).
+
 ## Dead / wrong tokens to fix (Phase 0)
 
 | Company | ATS | Current token | Status | Resolution |
