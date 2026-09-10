@@ -86,6 +86,10 @@ export function consoleApp(): App {
     return cot ? `${utc} UTC (${cot} COT)` : `${utc} UTC`;
   };
 
+  // posted_at arrives either as a full ISO timestamp or as a bare 'YYYY-MM-DD' (workday,
+  // elempleo, magneto): the bare form carries no clock time, so don't invent one.
+  const fmtPosted = (v: string | null) => (v && v.length === 10 ? v.slice(5) : fmt(v));
+
   // Pagination: 30/page. Query with `LIMIT PAGE+1 OFFSET pg*PAGE`, then if
   // more than PAGE rows came back there's a next page (drop the extra row).
   const PAGE = 30;
@@ -312,12 +316,22 @@ export function consoleApp(): App {
     if (q.track) { where.push('j.track = ?'); binds.push(q.track); }
     if (q.verdict) { where.push('j.verdict = ?'); binds.push(q.verdict); }
     if (q.status) { where.push('j.status = ?'); binds.push(q.status); }
+    // Date window over the SAME effective date the freshness rule uses (src/freshness.ts):
+    // posted_at when the source gives one, first_seen otherwise — so jobs from sources with no
+    // feed date (successfactors, bamboohr) are never silently hidden by a date filter. Compared
+    // at day granularity, so bare 'YYYY-MM-DD' dates and full ISO timestamps compare alike.
+    const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+    const POSTED_DAY = 'substr(COALESCE(j.posted_at, j.first_seen), 1, 10)';
+    const from = DAY_RE.test(q.from ?? '') ? q.from! : '';
+    const to = DAY_RE.test(q.to ?? '') ? q.to! : '';
+    if (from) { where.push(`${POSTED_DAY} >= ?`); binds.push(from); }
+    if (to) { where.push(`${POSTED_DAY} <= ?`); binds.push(to); }
     // One search box covers both the job title and the company name.
     if (q.q) { where.push('(j.title LIKE ? OR c.name LIKE ?)'); binds.push(`%${q.q}%`, `%${q.q}%`); }
     // Sortable columns: whitelist key -> SQL expression (raw input never reaches ORDER BY).
     const SORTS: Record<string, string> = {
       title: 'j.title', company: 'c.name', track: 'j.track', verdict: 'j.verdict',
-      status: 'j.status', score: 'j.score', seen: 'j.first_seen',
+      status: 'j.status', score: 'j.score', posted: 'j.posted_at', seen: 'j.first_seen',
     };
     const rawSort = q.sort ?? '';
     const sortKey = Object.prototype.hasOwnProperty.call(SORTS, rawSort) ? rawSort : 'seen';
@@ -326,6 +340,8 @@ export function consoleApp(): App {
       const p = new URLSearchParams();
       if (view) p.set('view', view);
       for (const f of ['q', 'track', 'verdict', 'status'] as const) if (q[f]) p.set(f, q[f]!);
+      if (from) p.set('from', from);
+      if (to) p.set('to', to);
       p.set('sort', k); p.set('dir', next);
       return `/jobs?${p.toString()}`;
     };
@@ -379,10 +395,12 @@ export function consoleApp(): App {
           {sel('track', trackFilterIds, q.track)}
           {sel('verdict', ['Apply', 'Stretch-worth-it', 'Skip'], q.verdict)}
           {sel('status', ['new', 'notified', 'aged', 'closed', 'skipped'], q.status)}
+          <label class="muted">posted from{' '}<input type="date" name="from" value={from} /></label>
+          <label class="muted">to{' '}<input type="date" name="to" value={to} /></label>
           <button type="submit" class="primary">Filter</button>
         </form>
         <div class="table-wrap"><table>
-          <tr>{sortTh('title', 'title')}{sortTh('company', 'company', 'hide-sm')}{sortTh('track', 'track', 'hide-sm')}{sortTh('verdict', 'verdict')}{sortTh('status', 'status', 'hide-sm')}{sortTh('score', 'score')}<th class="hide-sm">stage</th>{sortTh('seen', 'seen', 'hide-sm')}</tr>
+          <tr>{sortTh('title', 'title')}{sortTh('company', 'company', 'hide-sm')}{sortTh('track', 'track', 'hide-sm')}{sortTh('verdict', 'verdict')}{sortTh('status', 'status', 'hide-sm')}{sortTh('score', 'score')}<th class="hide-sm">stage</th>{sortTh('posted', 'posted', 'hide-sm')}{sortTh('seen', 'seen', 'hide-sm')}</tr>
           {rows.map((j) => (
             <tr>
               <td><a href={`/jobs/${j.url_hash}`}>{j.title}</a><div class="muted">{j.location}</div></td>
@@ -392,11 +410,12 @@ export function consoleApp(): App {
               <td class={`hide-sm s-${j.status}`}>{j.status}</td>
               <td>{j.score}</td>
               <td class="hide-sm">{j.stage ?? '—'}</td>
+              <td class="hide-sm muted">{fmtPosted(j.posted_at as string | null)}</td>
               <td class="hide-sm muted">{fmt(String(j.first_seen))}</td>
             </tr>
           ))}
         </table></div>
-        {pager('/jobs', pg, hasNext, total, { view, track: q.track, verdict: q.verdict, status: q.status, q: q.q, sort: sortKey, dir: dir.toLowerCase() })}
+        {pager('/jobs', pg, hasNext, total, { view, track: q.track, verdict: q.verdict, status: q.status, q: q.q, from, to, sort: sortKey, dir: dir.toLowerCase() })}
       </>
     ));
   });

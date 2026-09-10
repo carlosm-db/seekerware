@@ -55,7 +55,7 @@ triage; every mutation works without JS (real forms, enhanced with htmx).
 |-------|------|---------|---|
 | `/login` | Login | the only route without auth | 1 |
 | `/overview` (`/` redirects here) | **Overview** | morning page: status strip (pending triage, applied-this-week count, health) + this week's funnel + triage of survivors (Prepare / I applied ✓ / Dismiss / Snooze 3d / CV) two-up on desktop, paginated | 1 |
-| `/jobs` · `/jobs/:hash` | **Jobs** | everything seen: filters (track/verdict/status/title text) + quick views; detail: score breakdown by category, gates table per track, description, history, similar-jobs radar, **Generate CV** button (SAMPLE while the Blocks Bank is unapproved, REAL queue once approved) | 1 |
+| `/jobs` · `/jobs/:hash` | **Jobs** | everything seen: filters (track/verdict/status/title text + posted-date window, over posted_at falling back to first_seen) + quick views; detail: score breakdown by category, gates table per track, description, history, similar-jobs radar, **Generate CV** button (SAMPLE while the Blocks Bank is unapproved, REAL queue once approved) | 1 |
 | `/tracker` | **Tracker** | applications kanban: Prepared → Applied → Interview → Offer/Rejected, notes, dates, overdue follow-ups (bounded at the 300 most recent) | 1 |
 | `/contact` | **Contact** | per-track contact profile — `{{phone}}`/`{{location}}` for the CV header, owner-entered (`config['contact_profile']`), never from the repo | 1 |
 | `/companies` | **Companies** | CRUD + health (failure streak, last error) + 90d yield, token probe on create, paginated | 1 |
